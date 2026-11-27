@@ -1,15 +1,38 @@
+// spec/app/files/index.md
 lemma ToggleKeeps(s: Files, target: int, by_: Actor)
   ensures toggle(s, target, by_).picked == (if (target in s.picked) then ProofLib.Filter((id: int) => (id != target), s.picked) else (s.picked + [target]))
+{
+}
+
+lemma PickedFromFilter(items: seq<app__files__shared_Item>, picked: seq<int>)
+  ensures pickedFrom(items, picked) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in picked), items)
 {
 }
 
 lemma ChosenIsListed(s: Files)
   ensures forall i :: i in chosen(s) ==> i in s.items
 {
-  assert chosen(s) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in s.picked), s.items);
+  PickedFromFilter(s.items, s.picked);
   forall i | i in chosen(s) ensures i in s.items {
     ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in s.picked), s.items, i);
   }
+}
+
+lemma SearchSearchedHitsFilter(sh: app__files__search_Search, ticket: int, ok: bool, complete: bool, xs: seq<app__files__shared_Item>)
+  requires ok
+  ensures app__files__search_searched(sh, ticket, ok, complete, xs).hits == ProofLib.Filter((i: app__files__shared_Item) => (app__files__search_ofKind(sh.filter, i) && app__files__search_inDates(sh.filter, i.revision)), xs)
+{
+}
+
+lemma SearchedCallsSearchSearched(s: Files, ticket: int, ok: bool, complete: bool, entries: seq<app__files__shared_Item>, by_: Actor)
+  ensures searched(s, ticket, ok, complete, entries, by_).state.search == app__files__search_searched(s.search, ticket, ok, complete, ProofLib.Filter((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries))
+{
+}
+
+lemma ApproveBatchDeletingKeeps(s: Files, ticket: int, act: Action, approvedItems: seq<app__files__shared_Item>, reviewedFrom: app__files__search_Where, dest: app__files__change_Place, guarded: bool, by_: Actor)
+  requires batchFits(s, act, approvedItems, reviewedFrom, dest, guarded) && act.Deleting?
+  ensures approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state.picked == ProofLib.Filter((id: int) => !((exists i :: i in approvedItems && (i.id == id))), s.picked)
+{
 }
 
 lemma ApproveDeletingKeeps(s: Files, ticket: int, act: Action, file: app__files__shared_Item, folder: int, name: string, dest: app__files__change_Place, guarded: bool, mail: bool, by_: Actor)
@@ -45,7 +68,7 @@ lemma toggle_ensures(s: Files, target: int, by_: Actor)
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepARefreshAsksTheFilterAgain(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "toggle", toggle(s, target, by_), []))
-  ensures (inv(s) ==> canToggle(s, target, by_) ==> stepAChangedSelectionClosesTheSheets(s, toggle(s, target, by_)))
+  ensures (inv(s) ==> canToggle(s, target, by_) ==> stepAChangedSelectionClosesTheSheets(s, "toggle", toggle(s, target, by_)))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepDownloadsFolderOnlyByOwner(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepADestinationIsAFolderAsRead(s, "toggle", toggle(s, target, by_)))
@@ -56,6 +79,7 @@ lemma toggle_ensures(s: Files, target: int, by_: Actor)
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepABatchDispatchesOneReviewedAction(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepARestartKeepsTheArrangement(s, "toggle", toggle(s, target, by_)))
+
 {
   if inv(s) && canToggle(s, target, by_) {
     var after := toggle(s, target, by_);
@@ -95,7 +119,7 @@ lemma approve_ensures(s: Files, ticket: int, act: Action, file: app__files__shar
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepARefreshAsksTheFilterAgain(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
-  ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepAChangedSelectionClosesTheSheets(s, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state))
+  ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepAChangedSelectionClosesTheSheets(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepDownloadsFolderOnlyByOwner(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepADestinationIsAFolderAsRead(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state))
@@ -106,6 +130,7 @@ lemma approve_ensures(s: Files, ticket: int, act: Action, file: app__files__shar
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepABatchDispatchesOneReviewedAction(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepARestartKeepsTheArrangement(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state))
+
 {
   if inv(s) && canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) && runnable(s, act, file, folder, name, dest, guarded) && act.Deleting? {
     var after := approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state;
@@ -143,7 +168,7 @@ lemma begin_ensures(s: Files, work: app__files__change_Work, name: string, by_: 
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepARefreshAsksTheFilterAgain(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
-  ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepAChangedSelectionClosesTheSheets(s, begin(s, work, name, by_).state))
+  ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepAChangedSelectionClosesTheSheets(s, "begin", begin(s, work, name, by_).state))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepDownloadsFolderOnlyByOwner(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepADestinationIsAFolderAsRead(s, "begin", begin(s, work, name, by_).state))
@@ -154,6 +179,7 @@ lemma begin_ensures(s: Files, work: app__files__change_Work, name: string, by_: 
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepABatchDispatchesOneReviewedAction(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepARestartKeepsTheArrangement(s, "begin", begin(s, work, name, by_).state))
+
 {
   if inv(s) && canBegin(s, work, name, by_) {
     ChosenIsListed(s);
@@ -187,7 +213,7 @@ lemma keepBoth_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepARefreshAsksTheFilterAgain(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
-  ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepAChangedSelectionClosesTheSheets(s, keepBoth(s, by_).state))
+  ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepAChangedSelectionClosesTheSheets(s, "keepBoth", keepBoth(s, by_).state))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepDownloadsFolderOnlyByOwner(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepADestinationIsAFolderAsRead(s, "keepBoth", keepBoth(s, by_).state))
@@ -198,6 +224,7 @@ lemma keepBoth_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepABatchDispatchesOneReviewedAction(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepARestartKeepsTheArrangement(s, "keepBoth", keepBoth(s, by_).state))
+
 {
   if inv(s) && canKeepBoth(s, by_) {
     app__files__change_keepBoth_ensures(s.change);
@@ -231,7 +258,7 @@ lemma replaceThem_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepARefreshAsksTheFilterAgain(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
-  ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepAChangedSelectionClosesTheSheets(s, replaceThem(s, by_).state))
+  ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepAChangedSelectionClosesTheSheets(s, "replaceThem", replaceThem(s, by_).state))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepDownloadsFolderOnlyByOwner(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepADestinationIsAFolderAsRead(s, "replaceThem", replaceThem(s, by_).state))
@@ -242,6 +269,7 @@ lemma replaceThem_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepABatchDispatchesOneReviewedAction(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepARestartKeepsTheArrangement(s, "replaceThem", replaceThem(s, by_).state))
+
 {
   if inv(s) && canReplaceThem(s, by_) {
     app__files__change_replaceThem_ensures(s.change);
@@ -275,7 +303,7 @@ lemma finished_ensures(s: Files, ticket: int, done: seq<int>, failed: seq<int>, 
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepARefreshAsksTheFilterAgain(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
-  ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepAChangedSelectionClosesTheSheets(s, finished(s, ticket, done, failed, by_).state))
+  ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepAChangedSelectionClosesTheSheets(s, "finished", finished(s, ticket, done, failed, by_).state))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepDownloadsFolderOnlyByOwner(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepADestinationIsAFolderAsRead(s, "finished", finished(s, ticket, done, failed, by_).state))
@@ -286,8 +314,184 @@ lemma finished_ensures(s: Files, ticket: int, done: seq<int>, failed: seq<int>, 
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepABatchDispatchesOneReviewedAction(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "finished", finished(s, ticket, done, failed, by_).state))
+
 {
   if inv(s) && canFinished(s, ticket, by_) {
     app__files__change_finished_ensures(s.change, ticket, done, failed);
+  }
+}
+
+lemma listed_ensures(s: Files, ticket: int, ok: bool, gone: bool, complete: bool, entries: seq<app__files__shared_Item>, by_: Actor)
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysNothingIsReadOrHeldWhileClosed(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysNothingIsReadWithoutAccess(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysNothingIsShownWithoutAccess(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoVolume(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoCount(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysTheTrashShowsAtTheTop(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysDetailsAreOfAListedItem(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysBackClosesTheLayerOnTop(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAMissingFolderIsToldAtTheTop(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysOnlyAReadPlaceIsPartial(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAnUnreadPlaceListsNothing(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAnOpenPlaceIsRead(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysACategoryListsOnlyItsKind(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysResultsMatchTheFilter(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysResultsBelongToThePlaceShowing(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysTheSelectionIsListed(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysTheDeleteConfirmationIsNotAhead(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysAConfirmationShowsASelection(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysTheSheetKeepsItsRules(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysTheChangeKeepsItsRules(listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAndroidIsAskedOnlyBeforeItAnswered(s, listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepTheAgentIsAnswered(s, listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepMovingStartsAfresh(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepARefreshAsksTheFilterAgain(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAChangedSelectionClosesTheSheets(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepDownloadsFolderOnlyByOwner(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepADestinationIsAFolderAsRead(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepDestinationFolderKeepsItsSelection(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepStagingAPreviewSelectsOnlyItsFile(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepOneRequestPerChange(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAnApprovalActsOnItsItemAlone(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepABatchDispatchesOneReviewedAction(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
+  ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
+{
+  if inv(s) && canListed(s, ticket, by_) && !((!ok && gone) && !s.inCategory) {
+    var after := listed(s, ticket, ok, gone, complete, entries, by_).state;
+    if kit__review_canConfirm(s.deleting) && |after.picked| == 0 {
+      assert |s.picked| > 0;
+      var id := s.picked[0];
+      assert id in s.picked;
+      assert has(s.items, id);
+      var it :| it in s.items && it.id == id;
+      PickedFromFilter(s.items, s.picked);
+      ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in s.picked), s.items, it);
+      assert it in chosen(s);
+      assert |chosen(s)| > 0;
+      PickedFromFilter(after.items, after.picked);
+      ProofLib.FilterNone((i: app__files__shared_Item) => (i.id in after.picked), after.items);
+      assert |pickedFrom(after.items, after.picked)| == 0;
+      assert chosen(s) != pickedFrom(after.items, after.picked);
+    }
+  }
+}
+
+lemma searched_ensures(s: Files, ticket: int, ok: bool, complete: bool, entries: seq<app__files__shared_Item>, by_: Actor)
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysNothingIsReadOrHeldWhileClosed(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysNothingIsReadWithoutAccess(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysNothingIsShownWithoutAccess(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoVolume(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoCount(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysTheTrashShowsAtTheTop(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysDetailsAreOfAListedItem(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysBackClosesTheLayerOnTop(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAMissingFolderIsToldAtTheTop(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysOnlyAReadPlaceIsPartial(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAnUnreadPlaceListsNothing(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAnOpenPlaceIsRead(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysACategoryListsOnlyItsKind(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysResultsMatchTheFilter(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysResultsBelongToThePlaceShowing(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysTheSelectionIsListed(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysTheDeleteConfirmationIsNotAhead(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysAConfirmationShowsASelection(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysTheSheetKeepsItsRules(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> alwaysTheChangeKeepsItsRules(searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepAndroidIsAskedOnlyBeforeItAnswered(s, searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepTheAgentIsAnswered(s, searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepMovingStartsAfresh(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepARefreshAsksTheFilterAgain(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepAChangedSelectionClosesTheSheets(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepDownloadsFolderOnlyByOwner(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepADestinationIsAFolderAsRead(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepDestinationFolderKeepsItsSelection(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepStagingAPreviewSelectsOnlyItsFile(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepOneRequestPerChange(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepAnApprovalActsOnItsItemAlone(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepABatchDispatchesOneReviewedAction(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "searched", searched(s, ticket, ok, complete, entries, by_).state, searched(s, ticket, ok, complete, entries, by_).out))
+  ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
+{
+  if inv(s) && canSearched(s, ticket, by_) {
+    SearchedCallsSearchSearched(s, ticket, ok, complete, entries, by_);
+    var textHits := ProofLib.Filter((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries);
+    var after := searched(s, ticket, ok, complete, entries, by_).state;
+    if ok {
+      SearchSearchedHitsFilter(s.search, ticket, ok, complete, textHits);
+      forall i | i in after.search.hits
+        ensures app__files__search_ofKind(s.search.filter, i) && app__files__search_inDates(s.search.filter, i.revision) && containsText(i.name, s.search.filter.text)
+      {
+        ProofLib.FilterMember((i: app__files__shared_Item) => (app__files__search_ofKind(s.search.filter, i) && app__files__search_inDates(s.search.filter, i.revision)), textHits, i);
+        ProofLib.FilterMember((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries, i);
+      }
+    }
+  }
+}
+
+lemma lawAPositionNamesOnlyAResultShown_ensures(hits: seq<app__files__shared_Item>, positions: seq<int>)
+  ensures (lawAPositionNamesOnlyAResultShown(hits, positions) == true)
+{
+  var res := atPositions(hits, positions);
+  if |positions| > 0 && !(exists p :: p in positions && !((p >= 1) && (p <= |hits|))) {
+    forall k | 0 <= k < |res| ensures res[k] in hits {
+      var p := positions[k];
+      assert p in positions;
+      assert res[k] == hits[p - 1];
+    }
+  }
+}
+
+lemma approveBatch_ensures(s: Files, ticket: int, act: Action, approvedItems: seq<app__files__shared_Item>, reviewedFrom: app__files__search_Where, dest: app__files__change_Place, guarded: bool, by_: Actor)
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysNothingIsReadOrHeldWhileClosed(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysNothingIsReadWithoutAccess(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysNothingIsShownWithoutAccess(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoVolume(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAStorageThatCouldNotBeReadShowsNoCount(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysTheTrashShowsAtTheTop(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysDetailsAreOfAListedItem(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysBackClosesTheLayerOnTop(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAMissingFolderIsToldAtTheTop(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysOnlyAReadPlaceIsPartial(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAnUnreadPlaceListsNothing(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAnOpenPlaceIsRead(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysACategoryListsOnlyItsKind(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysResultsMatchTheFilter(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysResultsBelongToThePlaceShowing(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysTheSelectionIsListed(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysTheDeleteConfirmationIsNotAhead(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysAConfirmationShowsASelection(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysTheSheetKeepsItsRules(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> alwaysTheChangeKeepsItsRules(approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepAndroidIsAskedOnlyBeforeItAnswered(s, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepTheAgentIsAnswered(s, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepMovingStartsAfresh(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepARefreshAsksTheFilterAgain(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepReviewedOpenKeepsAFileInItsPreview(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepTheAgentLeavesTheOwnerAlone(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepAChangedSelectionClosesTheSheets(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepOnlyWhatWasConfirmedIsTrashed(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepDownloadsFolderOnlyByOwner(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepADestinationIsAFolderAsRead(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepDestinationFolderKeepsItsSelection(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepStagingAPreviewSelectsOnlyItsFile(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepOneRequestPerChange(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepAnApprovalActsOnItsItemAlone(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepABatchDispatchesOneReviewedAction(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state, approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).out))
+  ensures (inv(s) ==> canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) ==> stepARestartKeepsTheArrangement(s, "approveBatch", approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state))
+{
+  if inv(s) && canApproveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_) && batchFits(s, act, approvedItems, reviewedFrom, dest, guarded) && act.Deleting? {
+    var after := approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state;
+    ApproveBatchDeletingKeeps(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_);
+    forall id | id in after.picked ensures has(after.items, id) {
+      ProofLib.FilterMember((id: int) => !((exists i :: i in approvedItems && (i.id == id))), s.picked, id);
+    }
   }
 }

@@ -299,7 +299,7 @@ with a certificate it accepted. A page shown anywhere else, such as a
 browser frame on a computer, has no mark, as in Sunday's v119.
 
 ```quint
-pure def showsTheLock(p: Page, native: bool): bool = native and p.secure
+pure def showsTheLock(p: Page, native: bool): bool = native and p.secure and p.phase == Shown
 
 pure def lawTheLockIsOnlyForASecurePageOnThePhone(p: Page, native: bool): bool =
   showsTheLock(p, native) implies (native and p.secure and p.phase == Shown)

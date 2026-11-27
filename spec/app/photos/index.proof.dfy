@@ -73,6 +73,7 @@ lemma sendNext_ensures(s: Photos, items: seq<int>, by_: app__photos__actor_Actor
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepChangesAreTheOwners(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepAFavouriteToggles(s, "sendNext", sendNext(s, items, by_).state))
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepAlbumChangesCarryTheSelection(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
+
 {
   if inv(s) && canSendNext(s, items, by_) {
     SentBatch(s.job, items);
@@ -94,13 +95,16 @@ lemma accessIs_ensures(s: Photos, grant: kit__permission_Grant, videos: bool, by
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepChangesAreTheOwners(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out))
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepAFavouriteToggles(s, "accessIs", accessIs(s, grant, videos, by_).state))
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepAlbumChangesCarryTheSelection(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out))
+
 {
-  var d := accessIs(s, grant, videos, by_);
-  if !kit__permission_allows(kit__permission_observe(s.access, grant)) {
-    assert d.out[0].Revoke?;
-    assert d.out[0] in d.out;
-  } else {
-    assert forall e :: e in d.out ==> !e.Revoke?;
+  if inv(s) && canAccessIs(s, by_) {
+    var d := accessIs(s, grant, videos, by_);
+    if !kit__permission_allows(kit__permission_observe(s.access, grant)) {
+      assert d.out[0].Revoke?;
+      assert d.out[0] in d.out;
+    } else {
+      assert forall e :: e in d.out ==> !e.Revoke?;
+    }
   }
 }
 
@@ -119,6 +123,7 @@ lemma toggle_ensures(s: Photos, photo: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepChangesAreTheOwners(s, "toggle", toggle(s, photo, by_), []))
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepAFavouriteToggles(s, "toggle", toggle(s, photo, by_)))
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepAlbumChangesCarryTheSelection(s, "toggle", toggle(s, photo, by_), []))
+
 {
   if inv(s) && canToggle(s, photo, by_) {
     var after := toggle(s, photo, by_);
@@ -152,6 +157,7 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepChangesAreTheOwners(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAFavouriteToggles(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
+
 {
   if inv(s) && canListed(s, ticket, by_) && ok && !(s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows)))) {
     assert s.cameraAlbum == 0;
@@ -189,5 +195,52 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
       }
       assert allOlder(ProofLib.Filter((set_x: int) => !((set_x in s.rows)), after.rows), s.rows);
     }
+  }
+}
+
+lemma changed_ensures(s: Photos, attempt: int, done: seq<int>, stale: seq<int>, declined: bool, known: bool, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysVideosNeedTheirAccess(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysOnlyOwnWithoutAccess(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysTheAlbumShowingIsListed(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysNothingShownWhileHidden(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysTheLockScreenListsOnlyItsSession(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysSelectionIsListed(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysRunsAreTheOwners(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysDialogNamesItsSubject(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepNothingChangesWithoutAccess(s, changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAPageKeepsWhatWasListed(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepChangesAreTheOwners(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAFavouriteToggles(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAlbumChangesCarryTheSelection(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+
+{
+  if inv(s) && canChanged(s, attempt, done, stale, by_) {
+    var r := app__photos__changes_answered(s.job, attempt, done, stale, declined, known);
+    var res := if (known && s.job.change.Trash? && (s.cameraItem in done)) then clearCameraVisit(s) else s;
+    assert res.rows == s.rows && res.mine == s.mine && res.selected == s.selected && res.starred == s.starred;
+    assert s.secure ==> |r.left| == 0;
+  }
+}
+
+lemma cameraAlbumsLoaded_ensures(s: Photos, photo: int, ticket: int, choices: seq<int>, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysVideosNeedTheirAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysOnlyOwnWithoutAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheAlbumShowingIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysNothingShownWhileHidden(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheLockScreenListsOnlyItsSession(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysSelectionIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysRunsAreTheOwners(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysDialogNamesItsSubject(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepNothingChangesWithoutAccess(s, cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAPageKeepsWhatWasListed(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepChangesAreTheOwners(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAFavouriteToggles(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+{
+  if inv(s) && canCameraAlbumsLoaded(s, photo, ticket, by_) && s.album != 0 {
+    Joined(choices, [s.album]);
+    assert s.album in [s.album];
   }
 }

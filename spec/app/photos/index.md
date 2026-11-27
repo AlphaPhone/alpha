@@ -831,7 +831,7 @@ pure def sometimesCameraAlbum(s: Photos): bool = s.cameraAlbum > 0 and s.shelf.d
 pure def alwaysDialogNamesItsSubject(s: Photos): bool =
   ((s.shelf.dialog == AL::RenameAlbum or s.shelf.dialog == AL::DeleteAlbum) implies (s.shelf.target == s.album and s.album != 0))
     and (s.shelf.dialog == AL::ChooseAlbum implies ((s.selecting and s.selected.size() > 0) or s.cameraAlbum != 0))
-    and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and not(s.selecting) and unlocked(s)
+    and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and s.album == 0 and not(s.selecting) and unlocked(s)
       and s.library.status == R::Loaded
       and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)))
     and AL::alwaysDialogNamesItsSubject(s.shelf)

@@ -52,6 +52,16 @@ lemma EntryOfMember(xs: seq<AlertEntry>, id: int)
   EntryOfUnique(xs, e);
 }
 
+lemma EntryOfMissing(xs: seq<AlertEntry>, id: int)
+  requires !hasEntry(xs, id)
+  ensures entryOf(xs, id) == blankEntry
+{
+  var p := (e: AlertEntry) => (e.id == id);
+  ProofLib.FilterNone(p, xs);
+  assert |ProofLib.Filter(p, xs)| == 0;
+  assert entryOf(xs, id) == (if ((0 <= 0) && (0 < |ProofLib.Filter(p, xs)|)) then ProofLib.Filter(p, xs)[0] else blankEntry);
+}
+
 lemma FirstRingingValid(xs: seq<AlertEntry>)
   requires ProofLib.DistinctBy(xs, (x: AlertEntry) => x.id)
   requires forall e :: e in xs ==> validEntry(e)
@@ -116,10 +126,11 @@ lemma schedule_ensures(s: Alerts, id: int, dueAt: int, revision: int, now: int)
   ensures (inv(s) ==> canSchedule(s, id, dueAt, revision, now) ==> alwaysBannerIsRinging(schedule(s, id, dueAt, revision, now).state))
   ensures (inv(s) ==> canSchedule(s, id, dueAt, revision, now) ==> stepBannerActionClearsBanner(s, "schedule", schedule(s, id, dueAt, revision, now).state, schedule(s, id, dueAt, revision, now).out))
   ensures (inv(s) ==> canSchedule(s, id, dueAt, revision, now) ==> stepReopenRearmsScheduled(s, "schedule", schedule(s, id, dueAt, revision, now).state, schedule(s, id, dueAt, revision, now).out))
+
 {
   if inv(s) && canSchedule(s, id, dueAt, revision, now) {
     UniqueFromCounts(s.entries);
-    var entry := AlertEntry(id, dueAt, revision, AlertPhase.Scheduled, 0, 0, false, kit__attempt_plan(0));
+    var entry := AlertEntry(id, dueAt, revision, AlertPhase.Scheduled, 0, 0, 0, false, kit__attempt_plan(0));
     PutEntryPreserves(s.entries, entry);
     var ys := putEntry(s.entries, entry);
     CountsFromUnique(ys);
@@ -136,6 +147,7 @@ lemma cancelAlert_ensures(s: Alerts, id: int)
   ensures (inv(s) ==> canCancelAlert(s, id) ==> alwaysBannerIsRinging(cancelAlert(s, id).state))
   ensures (inv(s) ==> canCancelAlert(s, id) ==> stepBannerActionClearsBanner(s, "cancelAlert", cancelAlert(s, id).state, cancelAlert(s, id).out))
   ensures (inv(s) ==> canCancelAlert(s, id) ==> stepReopenRearmsScheduled(s, "cancelAlert", cancelAlert(s, id).state, cancelAlert(s, id).out))
+
 {
   if inv(s) && canCancelAlert(s, id) {
     UniqueFromCounts(s.entries);
@@ -160,6 +172,7 @@ lemma fire_ensures(s: Alerts, id: int, now: int)
   ensures (inv(s) ==> canFire(s, id, now) ==> alwaysBannerIsRinging(fire(s, id, now).state))
   ensures (inv(s) ==> canFire(s, id, now) ==> stepBannerActionClearsBanner(s, "fire", fire(s, id, now).state, fire(s, id, now).out))
   ensures (inv(s) ==> canFire(s, id, now) ==> stepReopenRearmsScheduled(s, "fire", fire(s, id, now).state, fire(s, id, now).out))
+
 {
   if inv(s) && canFire(s, id, now) {
     UniqueFromCounts(s.entries);
@@ -178,6 +191,7 @@ lemma completeFromBanner_ensures(s: Alerts, id: int, expectedRevision: int)
   ensures (inv(s) ==> canCompleteFromBanner(s, id, expectedRevision) ==> alwaysBannerIsRinging(completeFromBanner(s, id, expectedRevision).state))
   ensures (inv(s) ==> canCompleteFromBanner(s, id, expectedRevision) ==> stepBannerActionClearsBanner(s, "completeFromBanner", completeFromBanner(s, id, expectedRevision).state, completeFromBanner(s, id, expectedRevision).out))
   ensures (inv(s) ==> canCompleteFromBanner(s, id, expectedRevision) ==> stepReopenRearmsScheduled(s, "completeFromBanner", completeFromBanner(s, id, expectedRevision).state, completeFromBanner(s, id, expectedRevision).out))
+
 {
   if inv(s) && canCompleteFromBanner(s, id, expectedRevision) {
     UniqueFromCounts(s.entries);
@@ -202,6 +216,7 @@ lemma snoozeFromBanner_ensures(s: Alerts, id: int, expectedRevision: int, until:
   ensures (inv(s) ==> canSnoozeFromBanner(s, id, expectedRevision, until, now) ==> alwaysBannerIsRinging(snoozeFromBanner(s, id, expectedRevision, until, now).state))
   ensures (inv(s) ==> canSnoozeFromBanner(s, id, expectedRevision, until, now) ==> stepBannerActionClearsBanner(s, "snoozeFromBanner", snoozeFromBanner(s, id, expectedRevision, until, now).state, snoozeFromBanner(s, id, expectedRevision, until, now).out))
   ensures (inv(s) ==> canSnoozeFromBanner(s, id, expectedRevision, until, now) ==> stepReopenRearmsScheduled(s, "snoozeFromBanner", snoozeFromBanner(s, id, expectedRevision, until, now).state, snoozeFromBanner(s, id, expectedRevision, until, now).out))
+
 {
   if inv(s) && canSnoozeFromBanner(s, id, expectedRevision, until, now) {
     UniqueFromCounts(s.entries);
@@ -221,11 +236,66 @@ lemma snoozeFromBanner_ensures(s: Alerts, id: int, expectedRevision: int, until:
   }
 }
 
+lemma snoozeFromCalendar_ensures(s: Alerts, id: int, itemRevision: int, until: int, now: int)
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> alwaysAlertsWellFormed(snoozeFromCalendar(s, id, itemRevision, until, now).state))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> alwaysBannerIsRinging(snoozeFromCalendar(s, id, itemRevision, until, now).state))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> stepBannerActionClearsBanner(s, "snoozeFromCalendar", snoozeFromCalendar(s, id, itemRevision, until, now).state, snoozeFromCalendar(s, id, itemRevision, until, now).out))
+  ensures (inv(s) ==> canSnoozeFromCalendar(s, id, itemRevision, until, now) ==> stepReopenRearmsScheduled(s, "snoozeFromCalendar", snoozeFromCalendar(s, id, itemRevision, until, now).state, snoozeFromCalendar(s, id, itemRevision, until, now).out))
+
+{
+  if inv(s) && canSnoozeFromCalendar(s, id, itemRevision, until, now) {
+    UniqueFromCounts(s.entries);
+    if hasEntry(s.entries, id) {
+      EntryOfMember(s.entries, id);
+    } else {
+      EntryOfMissing(s.entries, id);
+    }
+    var cur := entryOf(s.entries, id);
+    var pending := cur.(id := id, revision := if cur.revision > 0 then cur.revision else 1, requestedSnooze := until, attempt := kit__attempt_dispatch(kit__attempt_record(kit__attempt_plan(s.nextAttempt))));
+    PutEntryPreserves(s.entries, pending);
+    var ys := putEntry(s.entries, pending);
+    CountsFromUnique(ys);
+    if s.bannerId == id {
+      EntryOfUnique(ys, pending);
+    } else if s.bannerId != 0 {
+      BannerKeptAfterPut(s.entries, pending, s.bannerId);
+    }
+  }
+}
+
+lemma calendarSnoozeSaved_ensures(s: Alerts, id: int, attemptId: int, itemRevision: int, stored: bool, confirmed: bool, known: bool)
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> alwaysAlertsWellFormed(calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> alwaysBannerIsRinging(calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> stepBannerActionClearsBanner(s, "calendarSnoozeSaved", calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state, calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).out))
+  ensures (inv(s) ==> canCalendarSnoozeSaved(s, id, attemptId) ==> stepReopenRearmsScheduled(s, "calendarSnoozeSaved", calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).state, calendarSnoozeSaved(s, id, attemptId, itemRevision, stored, confirmed, known).out))
+
+{
+  if inv(s) && canCalendarSnoozeSaved(s, id, attemptId) {
+    UniqueFromCounts(s.entries);
+    EntryOfMember(s.entries, id);
+    var cur := entryOf(s.entries, id);
+    var afterReceipt := cur.(requestedSnooze := 0, attempt := kit__attempt_conclude(cur.attempt, confirmed, known));
+    var snoozed := afterReceipt.(phase := AlertPhase.Snoozed, dueAt := cur.requestedSnooze, snoozedUntil := cur.requestedSnooze, revision := cur.revision + 1, completed := false);
+    var next := if stored then snoozed else afterReceipt;
+    PutEntryPreserves(s.entries, next);
+    var ys := putEntry(s.entries, next);
+    CountsFromUnique(ys);
+    if stored && s.bannerId == id {
+      FirstRingingValid(ys);
+    } else if s.bannerId == id {
+      EntryOfUnique(ys, next);
+    } else if s.bannerId != 0 {
+      BannerKeptAfterPut(s.entries, next, s.bannerId);
+    }
+  }
+}
+
 lemma dismissFromBanner_ensures(s: Alerts, id: int, expectedRevision: int)
   ensures (inv(s) ==> canDismissFromBanner(s, id, expectedRevision) ==> alwaysAlertsWellFormed(dismissFromBanner(s, id, expectedRevision).state))
   ensures (inv(s) ==> canDismissFromBanner(s, id, expectedRevision) ==> alwaysBannerIsRinging(dismissFromBanner(s, id, expectedRevision).state))
   ensures (inv(s) ==> canDismissFromBanner(s, id, expectedRevision) ==> stepBannerActionClearsBanner(s, "dismissFromBanner", dismissFromBanner(s, id, expectedRevision).state, dismissFromBanner(s, id, expectedRevision).out))
   ensures (inv(s) ==> canDismissFromBanner(s, id, expectedRevision) ==> stepReopenRearmsScheduled(s, "dismissFromBanner", dismissFromBanner(s, id, expectedRevision).state, dismissFromBanner(s, id, expectedRevision).out))
+
 {
   if inv(s) && canDismissFromBanner(s, id, expectedRevision) {
     UniqueFromCounts(s.entries);
@@ -250,6 +320,7 @@ lemma syncAnswered_ensures(s: Alerts, id: int, attemptId: int, confirmed: bool, 
   ensures (inv(s) ==> canSyncAnswered(s, id, attemptId) ==> alwaysBannerIsRinging(syncAnswered(s, id, attemptId, confirmed, known)))
   ensures (inv(s) ==> canSyncAnswered(s, id, attemptId) ==> stepBannerActionClearsBanner(s, "syncAnswered", syncAnswered(s, id, attemptId, confirmed, known), []))
   ensures (inv(s) ==> canSyncAnswered(s, id, attemptId) ==> stepReopenRearmsScheduled(s, "syncAnswered", syncAnswered(s, id, attemptId, confirmed, known), []))
+
 {
   if inv(s) && canSyncAnswered(s, id, attemptId) {
     UniqueFromCounts(s.entries);
@@ -272,6 +343,7 @@ lemma reopen_ensures(s: Alerts)
   ensures (inv(s) ==> alwaysBannerIsRinging(reopen(s).state))
   ensures (inv(s) ==> stepBannerActionClearsBanner(s, "reopen", reopen(s).state, reopen(s).out))
   ensures (inv(s) ==> stepReopenRearmsScheduled(s, "reopen", reopen(s).state, reopen(s).out))
+
 {
   if inv(s) {
     UniqueFromCounts(s.entries);

@@ -402,7 +402,7 @@ pure def canSaveAnswered(b: Builder, id: int): bool = Q::canAnswer(b.save, id)
 
 pure def committed(save: Q::Request, b: Builder): Builder =
   { ...b, save: save, steps: List(), name: 0, workflow: 0, version: 0, when: { ...b.when, preset: S::Manual, days: Set() },
-    draft: D::edit(b.draft), saved: b.saved + 1, open: false, review: V::dismiss(b.review) }
+    draft: D::edit(b.draft), saved: b.saved + 1, open: false, choices: { ...b.choices, status: R::Idle }, review: V::dismiss(b.review) }
 
 pure def saveAnswered(b: Builder, id: int, applied: bool): Builder =
   val answered = Q::answer(b.save, applied)
@@ -448,6 +448,39 @@ pure def canConfirmResend(b: Builder): bool = V::canConfirm(b.review) and Q::can
 pure def confirmResend(b: Builder): Moved =
   { state: { ...b, review: V::confirm(b.review), save: Q::resend(b.save) },
     out: List(SaveWorkflow({ id: b.save.attempt.id, workflow: b.workflow, version: b.version, revision: b.shown })) }
+
+pure val eval_witness_canReviewResend = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+  "reviewResend",
+)
+
+pure val eval_witness_canConfirmResend = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+  "reviewResend",
+  "confirmResend",
+)
 ```
 
 ### The draft is never edited while its save is kept, and a save is kept honestly
@@ -461,7 +494,7 @@ pure def alwaysAKeptSaveLocksTheDraft(b: Builder): bool = and {
   (b.save.attempt.outcome == A::Planned) == (b.save.attempt.id == 0),
   (b.save.attempt.outcome != A::Confirmed and b.save.attempt.id >= 1) implies b.saved < b.save.attempt.id,
   Q::kept(b.save) implies (b.steps.length() >= 1 and b.name >= 1),
-  b.review.showing implies (b.open and b.steps.length() >= 1 and b.shown == b.draft.edits and b.save.attempt.outcome != A::Sent),
+  b.review.showing implies (b.open and b.steps.length() >= 1 and b.name >= 1 and b.shown == b.draft.edits and b.save.attempt.outcome != A::Sent),
 }
 
 pure def stepAKeptSaveFreezesTheDraft(before: Builder, via: str, after: Builder): bool =
@@ -502,11 +535,42 @@ pure def sometimesALostSaveIsFound(b: Builder): bool = b.saved >= 1 and b.save.r
 
 pure def sometimesASaveIsOfferedAgain(b: Builder): bool = b.save.offered and b.steps.length() >= 1
 
+pure val eval_witness_sometimesASaveIsOfferedAgain = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+)
+
 pure def sometimesASaveIsRefused(b: Builder): bool = b.save.attempt.outcome == A::Refused and not(b.save.offered) and b.steps.length() >= 1
 
 pure def sometimesASavedWorkflowIsEdited(b: Builder): bool = b.workflow >= 1 and b.save.live and b.version >= 1
 
 pure def sometimesASaveIsLetGo(b: Builder): bool = b.save.attempt.outcome == A::Unknown and b.steps.length() >= 1
+
+pure val eval_witness_sometimesASaveIsLetGo = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, false, false, false),
+  "letGo",
+)
 ```
 
 ## Story: Keep the builder to its owner and through a restart

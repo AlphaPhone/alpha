@@ -1,7 +1,7 @@
 {
   "key": "alpha/app/inbox/sending@1",
   "spec": "spec/app/inbox/sending.md",
-  "shape": "87ac376b4be6ad2c",
+  "shape": "95a060bdf4b18452",
   "state": {
     "session": 0,
     "of": 0,

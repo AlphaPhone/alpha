@@ -24,23 +24,27 @@ after a restart creates it once. A new note is made in the folder the list
 was narrowed to. The editor also remembers whether the last save failed,
 whether the note was deleted meanwhile, whether the phone could store, or
 read back, the draft, how a deletion of the note was answered, whether
-the owner asked to share the note once the save on its way lands, and
-whether the owner asked to delete it once that save lands.
+the owner asked to share the note once the save on its way lands,
+whether the owner asked to delete it once that save lands, and whether
+the owner asked to pin or unpin it once that save lands.
 
 ```quint
 import draft as D from "../../kit/draft"
 import note.* from "./note"
 
+type Pinning = Unasked | ToPin | ToUnpin
+
 type Editor = {
   owner: int, note: int, fresh: bool, made: int, issued: int, folder: int, kind: Kind, draft: D::Draft,
   showing: bool, ticket: int, failed: bool, gone: bool, full: bool, unreadable: bool, link: Source,
   deleting: bool, told: Told, rescued: bool, dropping: bool, asked: bool, binning: bool,
+  pinning: Pinning,
 }
 
 pure val initial: Editor = {
   owner: 0, note: 0, fresh: false, made: 0, issued: 0, folder: 0, kind: Text, draft: D::blank,
   showing: false, ticket: 0, failed: false, gone: false, full: false, unreadable: false, link: unlinked,
-  deleting: false, told: NotTold, rescued: false, dropping: false, asked: false, binning: false,
+  deleting: false, told: NotTold, rescued: false, dropping: false, asked: false, binning: false, pinning: Unasked,
 }
 
 pure def held(e: Editor): bool = e.note > 0 or e.fresh
@@ -51,7 +55,7 @@ pure def unsent(d: D::Draft): D::Draft = { ...d, sync: D::Edited }
 pure def letGo(owner: int, e: Editor): Editor =
   { ...e, owner: owner, note: 0, fresh: false, made: 0, folder: 0, draft: D::blank, showing: false, failed: false,
     gone: false, full: false, unreadable: false, link: unlinked, deleting: false, told: NotTold, rescued: false,
-    dropping: false, asked: false, binning: false }
+    dropping: false, asked: false, binning: false, pinning: Unasked }
 ```
 
 ### What the editor asks of the world
@@ -201,9 +205,9 @@ pure def saved(e: Editor, ticket: int, verdict: Verdict, revision: int, id: int,
   if (verdict == Landed)
     { ...e, draft: landed, failed: false, note: if (e.fresh) id else e.note, fresh: false, made: 0, folder: 0,
       full: e.full and D::unsaved(landed) }
-  else if (verdict == Collided) { ...e, draft: D::collide(e.draft, revision), failed: false, asked: false, binning: false }
-  else if (verdict == Gone) { ...e, draft: unsent(e.draft), gone: true, failed: false, asked: false, binning: false }
-  else { ...e, draft: unsent(e.draft), failed: true, asked: false, binning: false }
+  else if (verdict == Collided) { ...e, draft: D::collide(e.draft, revision), failed: false, asked: false, binning: false, pinning: Unasked }
+  else if (verdict == Gone) { ...e, draft: unsent(e.draft), gone: true, failed: false, asked: false, binning: false, pinning: Unasked }
+  else { ...e, draft: unsent(e.draft), failed: true, asked: false, binning: false, pinning: Unasked }
 ```
 
 ### When a save found a newer revision, only the owner chooses whose to keep
@@ -250,9 +254,9 @@ pure def alwaysANewNoteHasACreationNumber(e: Editor): bool =
 
 Only the phone says so, about a revision newer than the one the draft
 builds on: an older reading changes nothing. The note's source, which only
-its own dialogs change, is taken as the store holds it. A deletion the
-owner asked for once a save lands is forgotten when a saved note follows
-a revision made elsewhere, which the owner never saw.
+its own dialogs change, is taken as the store holds it. A deletion, or a pin,
+the owner asked for once a save lands is forgotten when a saved note
+follows a revision made elsewhere, which the owner never saw.
 
 ```quint
 pure def canNoteRead(e: Editor, note: int, latest: int, present: bool, link: Source, by: Actor): bool =
@@ -260,8 +264,8 @@ pure def canNoteRead(e: Editor, note: int, latest: int, present: bool, link: Sou
     and (present implies (latest > e.draft.base and sound(link) and link.tie != AudioLink))
 
 pure def noteRead(e: Editor, note: int, latest: int, present: bool, link: Source, by: Actor): Editor =
-  if (D::unsaved(e.draft)) (if (present) { ...e, link: link } else { ...e, gone: true, asked: false, binning: false })
-  else if (present) { ...e, draft: { ...e.draft, base: latest }, link: link, binning: false }
+  if (D::unsaved(e.draft)) (if (present) { ...e, link: link } else { ...e, gone: true, asked: false, binning: false, pinning: Unasked })
+  else if (present) { ...e, draft: { ...e.draft, base: latest }, link: link, binning: false, pinning: Unasked }
   else letGo(e.owner, e)
 ```
 
@@ -284,12 +288,12 @@ items, has nothing of the owner's: it is never saved, and closing it lets it
 go as Discard does, so no note titled only New note is made and no draft of
 it waits. Pinning or sharing it from More makes it the owner's ("More over
 a new note offers Share, Pin and Delete, as v119's did"), and then it is
-saved. Closing forgets a share or a deletion the owner asked for.
+saved. Closing forgets a share, a deletion or a pin the owner asked for.
 
 ```quint
 pure def canClose(e: Editor): bool = e.showing and not(e.deleting)
 
-pure def close(e: Editor): Editor = if (D::unsaved(e.draft)) { ...e, showing: false, asked: false, binning: false } else letGo(e.owner, e)
+pure def close(e: Editor): Editor = if (D::unsaved(e.draft)) { ...e, showing: false, asked: false, binning: false, pinning: Unasked } else letGo(e.owner, e)
 ```
 
 ### Only the owner discards an unsaved draft, or a new note open in the editor, and never one being saved
@@ -488,14 +492,14 @@ pure def canDeleteWhenSaved(e: Editor, ready: bool, by: Actor): bool =
   by == Owner and e.showing and not(e.fresh) and e.note > 0 and settling(e)
     and not(e.binning) and not(e.gone) and not(e.deleting) and not(e.unreadable) and ready
 
-pure def deleteWhenSaved(e: Editor, ready: bool, by: Actor): Editor = { ...e, binning: true, asked: false }
+pure def deleteWhenSaved(e: Editor, ready: bool, by: Actor): Editor = { ...e, binning: true, asked: false, pinning: Unasked }
 
 pure def canDeleteShown(e: Editor, ready: bool, by: Actor): bool =
   by == Phone and e.binning and e.showing and not(e.fresh) and e.note > 0 and e.draft.sync == D::Kept
     and not(e.gone) and not(e.deleting)
 
 pure def deleteShown(e: Editor, ready: bool, by: Actor): Moved =
-  if (ready) deleteNote(e, ready, Owner) else { state: { ...e, binning: false, told: WasRefused }, out: List() }
+  if (ready) deleteNote(e, ready, Owner) else { state: { ...e, binning: false, pinning: Unasked, told: WasRefused }, out: List() }
 
 pure def alwaysADeletionAskedWaitsOnTheSavedNoteShown(e: Editor): bool =
   e.binning implies (e.showing and not(e.fresh) and e.note > 0 and not(e.gone) and not(e.deleting) and not(e.unreadable)
@@ -507,6 +511,53 @@ pure def stepADeletionIsAskedOnlyWhileASaveIsToLand(before: Editor, via: str, af
 pure def sometimesADeletionWaitsOnASave(e: Editor): bool = e.binning and e.draft.sync == D::Saving
 
 pure def sometimesAShareWaitsOnASavedNotesSave(e: Editor): bool = e.asked and not(e.fresh) and e.draft.sync == D::Saving
+```
+
+### Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did
+
+v119's More over a note it held offered Share, Pin and Delete, in that
+order, whatever its save was doing, and its Pin wrote the flag over the
+note at once (45f6bed30 model.js, pin through notesUpd). Here the menu over
+a saved note keeps those three rows in place while it is open, so a save
+landing under the owner's finger never turns one row into another. The
+list takes a pin only over the revision it read, and never while a draft
+waits to be saved ([Notes](./index.md), "Changes need the owner's notes
+read, storage working, no other change of the list being written, and
+nothing of Notes over the list"); so Pin or Unpin
+asked over a saved note whose draft is edited or being saved, and not one
+that met a conflict or was found deleted meanwhile, is remembered with the
+flag the owner chose, and the owner's save is sent at once when the edit
+has not gone yet. Once the editor shows the note saved, with nothing left
+unsaved, and the list has read the store at the revision saved, the phone
+hands the list that pin as the owner's own Pin would; a note already
+pinned as asked needs nothing more. A Delete asked meanwhile takes its
+place. A save that does not land, closing or leaving the note, a restart,
+another owner, or the saved note following a revision made elsewhere
+forgets the pin asked for; the failure is shown as the save's own.
+
+```quint
+pure def canPinWhenSaved(e: Editor, pinned: bool, by: Actor): bool =
+  by == Owner and e.showing and not(e.fresh) and e.note > 0 and settling(e) and e.pinning == Unasked
+    and not(e.binning) and not(e.gone) and not(e.deleting) and not(e.unreadable)
+
+pure def pinWhenSaved(e: Editor, pinned: bool, by: Actor): Editor = { ...e, pinning: if (pinned) ToPin else ToUnpin }
+
+pure def canPinShown(e: Editor, by: Actor): bool =
+  by == Phone and e.pinning != Unasked and e.showing and not(e.fresh) and e.note > 0 and e.draft.sync == D::Kept
+    and not(e.gone) and not(e.deleting)
+
+pure def pinShown(e: Editor, by: Actor): Editor = { ...e, pinning: Unasked }
+
+pure def alwaysAPinAskedWaitsOnTheSavedNoteShown(e: Editor): bool =
+  e.pinning != Unasked implies (e.showing and not(e.fresh) and e.note > 0 and not(e.gone) and not(e.deleting)
+    and not(e.unreadable) and not(e.binning) and e.draft.sync != D::Conflicted)
+
+pure def stepAPinIsAskedOnlyWhileASaveIsToLand(before: Editor, via: str, after: Editor): bool =
+  (after.pinning != Unasked and before.pinning == Unasked) implies (via == "pinWhenSaved" and settling(before))
+
+pure def sometimesAPinWaitsOnASave(e: Editor): bool = e.pinning == ToPin and e.draft.sync == D::Saving
+
+pure def sometimesAnUnpinWaitsOnASave(e: Editor): bool = e.pinning == ToUnpin and e.draft.sync == D::Edited
 ```
 
 ## Story: Delete the note I am writing
@@ -529,7 +580,7 @@ pure def canDeleteNote(e: Editor, ready: bool, by: Actor): bool =
   by == Owner and e.showing and e.note > 0 and e.draft.sync == D::Kept and not(e.gone) and not(e.deleting) and ready
 
 pure def deleteNote(e: Editor, ready: bool, by: Actor): Moved =
-  { state: { ...e, deleting: true, told: NotTold, ticket: e.ticket + 1, asked: false, binning: false },
+  { state: { ...e, deleting: true, told: NotTold, ticket: e.ticket + 1, asked: false, binning: false, pinning: Unasked },
     out: List(Deletes({ ticket: e.ticket + 1, owner: e.owner, note: e.note, revision: e.draft.base })) }
 ```
 
@@ -598,7 +649,7 @@ pure def canRestart(e: Editor, by: Actor): bool = by == Phone
 
 pure def restart(e: Editor, readable: bool, by: Actor): Editor =
   if (D::unsaved(e.draft))
-    { ...e, showing: false, full: false, unreadable: e.unreadable or not(readable) or e.full, asked: false, binning: false,
+    { ...e, showing: false, full: false, unreadable: e.unreadable or not(readable) or e.full, asked: false, binning: false, pinning: Unasked,
       draft: if (e.draft.sync == D::Saving) unsent(e.draft) else e.draft }
   else letGo(e.owner, e)
 

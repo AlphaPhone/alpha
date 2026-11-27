@@ -97,6 +97,7 @@ export service NoteEditor {
   shareNew(): void!!(Editor.Machine | NoteContent)
   shareWhenSaved(): void!!(Editor.Machine | NoteContent)
   deleteWhenSaved(ready: boolean): void!!(Editor.Machine | NoteContent)
+  pinWhenSaved(pinned: boolean): void!!(Editor.Machine | NoteContent)
   settled(initial: DraftWords, id: string, revision: number): void!!
 }
 
@@ -212,6 +213,12 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(editor.send({ type: "deleteWhenSaved", ready }, "Owner"))
       try saveDraft("Owner")
     }),
+    // spec/app/notes/editor.md, "Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did"
+    pinWhenSaved: (pinned: boolean) => turn.withPermit(effect {
+      if (!Editor.canPinWhenSaved(try editor.get(), pinned, "Owner")) return
+      try ignore(editor.send({ type: "pinWhenSaved", pinned }, "Owner"))
+      try saveDraft("Owner")
+    }),
     settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
       const current = try read.draft()
       if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return
@@ -289,19 +296,43 @@ const binning = started(effect {
   const editor = try Editor.Machine
   const bin = try Trash.Machine
   const list = try List.Machine
-  const states = Stream.zipLatest(Stream.zipLatest(editor.changes, bin.changes), list.changes)
-  try Stream.runForEach(states, effect ([[state, trash], listed]) => {
+  try Stream.runForEach(Stream.merge(Stream.merge(editor.changes, bin.changes), list.changes), effect () => {
+    const state = try editor.get()
+    const trash = try bin.get()
+    const listed = try list.get()
     if (!Editor.canDeleteShown(state, true, phone) || Trash.busy(trash) || listed.read.status !== "Loaded" || listed.version < state.draft.base) return
-    try ignore(editor.send({ type: "deleteShown", ready: Trash.ready(try bin.get()) }, phone))
+    try ignore(editor.send({ type: "deleteShown", ready: Trash.ready(trash) }, phone))
   })
 }, "delete the note the owner asked to delete once its save lands")
 
+// spec/app/notes/editor.md, "Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did"
+/**
+ * A Pin or Unpin the owner chose while the note was being saved goes to the list once the save lands and the list has
+ * read the store at the revision saved, as the owner's own Pin over the saved note would; a note already as asked needs none.
+ */
+const pinning = started(effect {
+  const editor = try Editor.Machine
+  const list = try List.Machine
+  try Stream.runForEach(Stream.merge(editor.changes, list.changes), effect () => {
+    const state = try editor.get()
+    const listed = try list.get()
+    if (!Editor.canPinShown(state, phone) || listed.read.status !== "Loaded" || listed.version < state.draft.base) return
+    const row = listed.rows.find((entry) => entry.id === state.note)
+    if (row === undefined) return
+    const pinned = state.pinning === "ToPin"
+    const c: List.Change = { ...List.nothing, note: row.id, base: row.revision, op: pinned ? "Pin" : "Unpin" }
+    if (row.pinned !== pinned && !List.canChange(listed, c, false, "Owner")) return
+    if (row.pinned !== pinned) try ignore(list.send({ type: "change", c, covered: false }, "Owner"))
+    try ignore(editor.send({ type: "pinShown" }, phone))
+  })
+}, "pin the note the owner asked to pin once its save lands")
+
 // spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
-/** An editor kept before a Share or a Delete could wait on a save is read as waiting for neither, so its draft is not set aside. */
+/** An editor kept before a Share, a Delete or a Pin could wait on a save is read as waiting for none, so its draft is not set aside. */
 function stored(key: string, start = Editor.initial) {
-  const { asked, binning } = Editor.initial
-  return Layer.provide(Editor.stored(key, start), filledStore(key, (kept) => ({ asked, binning, ...kept }), Editor.parseState))
+  const { asked, binning, pinning } = Editor.initial
+  return Layer.provide(Editor.stored(key, start), filledStore(key, (kept) => ({ asked, binning, pinning, ...kept }), Editor.parseState))
 }
 
 /** On leaving or reloading Notes, the saved words live in the phone vault, with only revision metadata in the machine. */
-export const editing = together(Layer.provideMerge(typing, reacting({ ...Editor, stored }, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry })), saving, binning)
+export const editing = together(Layer.provideMerge(typing, reacting({ ...Editor, stored }, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry })), saving, binning, pinning)

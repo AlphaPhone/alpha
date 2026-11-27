@@ -48,6 +48,28 @@ pure def pageOffered(google: bool, https: bool, credentials: bool): bool = googl
 pure def lawAPhoneEventLinksNowhere(https: bool, credentials: bool): bool = not(pageOffered(false, https, credentials))
 ```
 
+## Story: Know which calendar an event is on
+
+> As the owner, I want the agent's calendar called by the name I see for it
+> everywhere: on an event, in the Calendars sheet and on a new event.
+
+### The agent's calendar goes by the name the agent lists for it
+
+An event of the agent's calendar, the Calendars sheet and a new event name
+that calendar by the summary the agent lists for it, as the Sunday demo
+build named the event page by its source's summary and fell back to Agent
+Calendar where the source had none (v119 45f6bed30,
+apps/app/src/prototype/agent-calendar-adapter.ts:166 and 273; demo frame
+v100-077 shows Eliza Calendar, the summary eliza gives its own calendar).
+
+```quint
+pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed
+
+pure val listedValues = Set("", "Eliza Calendar", "Work")
+
+pure def lawAListedNameIsTheName(listed: str): bool = listed != "" implies calendarName(listed) == listed
+```
+
 ## Story: Read the presentation of times
 
 > As the owner, I want event times shown so that a time-zone change inside

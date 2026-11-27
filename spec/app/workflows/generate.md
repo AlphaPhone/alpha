@@ -117,7 +117,7 @@ pure def useGenerated(g: Generate, edits: int): Generate = { ...g, describing: f
 
 ```quint
 pure def alwaysWhatWasDraftedIsUsable(g: Generate): bool = and {
-  T::shaped(g.drafted), g.drafted.length() >= 1 implies (g.describing and g.ending == Drafted),
+  T::shaped(g.drafted), g.drafted.length() >= 1 implies (g.describing and g.ending == Drafted and g.generation.status == R::Loaded),
   g.generation.status == R::Loading implies g.describing,
   g.chars >= 0, g.chars <= maxDescription,
 }

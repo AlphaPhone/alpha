@@ -47,7 +47,7 @@ import { type Job, answer, applying, contained, filledStore, following, reacting
 import { Time } from "../runtime/time.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
-import { MediaReview, mediaReview, ranDirect } from "./media-review.vibe"
+import { MediaReview, mediaReview, noted, ranDirect, standing } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
 import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, Talk, talk } from "./talk.vibe"
@@ -523,7 +523,7 @@ effect function settleReplied(input: {
         && !now.context.sensitive && now.context.revision === context.revision
     }
     const report = (note: string) => {
-      if (board.draftSeat === seat) board.change({ mediaNote: { conversation: chosen, text: note } })
+      if (board.draftSeat === seat) board.change({ mediaNotes: noted(board.snapshot().mediaNotes, { conversation: chosen, text: note }) })
     }
     const eligible = replied && result.reply.failureKind === undefined
     const inFiles = !directFiles || requestedFiles === undefined || !eligible
@@ -536,7 +536,7 @@ effect function settleReplied(input: {
       ? undefined : { origin: outsideOrigin, ticket, current: continued, report,
         hold: (work: Effect.Effect<void>) => { continueFiles = work } }
     const media = try review.pending(enrolled, result.reply.userMessageId, chosen, context.revision, messageTarget,
-      { clientMessageId: result.clientMessageId, conversationId, pageTicket,
+      { messageId: result.reply.messageId, clientMessageId: result.clientMessageId, conversationId, pageTicket,
         actionResults: replied ? result.reply.actionResults : [], ...(sms === undefined ? {} : { sms }),
         ...(voicemail === undefined ? {} : { voicemail }), ...(inFiles === undefined ? {} : { directFiles: inFiles }),
         ...(outsideFiles === undefined ? {} : { outsideFiles }) })
@@ -739,7 +739,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
       // spec/app/assistant/reply.md, "The planning label shows until the first settled text, and provisional text is neither shown nor spoken": the reply the agent stored is settled text, shown at once, so Stop keeps it.
       onReady: (fullText: string) => { if (fullText !== "") preview(fullText, false) },
     }
-    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNote: undefined })
+    board.change({ media: board.snapshot().media.filter((card) => card.decision === "Deciding"), mediaNotes: standing(board.snapshot().mediaNotes) })
     const views = try Views
     const asked = try views.begin()
     // spec/app/assistant/context.md, "A turn asked while Files shows a readable document attaches it for that turn"

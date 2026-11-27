@@ -116,7 +116,8 @@ pure def canSendSettles(s: ChatCards, message: int, ok: bool): bool = s.inflight
 pure def sendSettles(s: ChatCards, message: int, ok: bool): ChatCards =
   if (ok) { ...s, inflight: s.inflight.select(m => m != message), delivered: s.delivered.append(message) }
   else { ...s, inflight: s.inflight.select(m => m != message), answered: s.answered.select(m => m != message), notice: SendFailed }
-pure def alwaysInFlightIsAnswered(s: ChatCards): bool = s.inflight.every(m => s.answered.includes(m))
+pure def alwaysInFlightIsAnswered(s: ChatCards): bool =
+  s.inflight.every(m => s.answered.includes(m)) and s.inflight.every(m => not(s.delivered.includes(m)))
 pure def alwaysDeliveredAtMostOnce(s: ChatCards): bool = s.delivered.every(m => s.delivered.select(n => n == m).length() == 1)
 pure def alwaysDeliveredStaysAnswered(s: ChatCards): bool = s.delivered.every(m => s.answered.includes(m))
 pure def sometimesAnsweredOnce(s: ChatCards): bool = s.delivered.length() >= 1

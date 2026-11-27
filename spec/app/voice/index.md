@@ -222,7 +222,7 @@ pure def begin(network: bool, v: Voice): Change =
   else if (P::canAsk(v.permission))
     { state: { ...v, network: network, mic: Asking, prompting: true, permission: P::ask(v.permission) }, out: List(AskMicrophone) }
   else
-    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
+    { state: { ...v, phase: Failed, failure: D::Denied, network: false, mic: Off, speaker: SpeakerUnknown, engineHeld: false, reviewPending: false, claim: 0, claimRoute: 0 },
       out: releaseOut(v) }
 
 pure def canStartTalking(v: Voice, now: int): bool =
@@ -291,7 +291,7 @@ pure def answerPrompt(v: Voice, granted: bool): Change =
       { state: { ...base, mic: Opening, engineHeld: true },
         out: holdOut(v).concat(List(Listen({ session: v.session, network: v.network }))) }
      else
-      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, engineHeld: false, reviewPending: false },
+      { state: { ...base, phase: Failed, failure: D::Denied, network: false, mic: Off, speaker: SpeakerUnknown, engineHeld: false, reviewPending: false },
         out: releaseOut(v) })
   else if (v.recorder.stage == D::Starting)
     (if (granted) { state: base, out: List(Record({ ticket: v.recorder.ticket })) }
@@ -340,7 +340,7 @@ pure def canMicFailed(v: Voice, session: int): bool = v.mic == Opening and sessi
 
 pure def micFailed(v: Voice, session: int): Change =
   if (v.phase == Starting)
-    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, engineHeld: false, reviewPending: false },
+    { state: { ...v, phase: Failed, failure: D::NoMicrophone, network: false, mic: Off, speaker: SpeakerUnknown, engineHeld: false, reviewPending: false },
       out: releaseOut(v) }
   else shutDown(D::NoMicrophone, false, v)
 ```
@@ -371,12 +371,25 @@ and its voice session's long gap). Speech that starts again within them
 continues the same turn: its words join the ones before, so a pause inside
 a sentence never sends half of it. Speech on the phone keeps its own timing.
 
+Mute pressed within that gap shuts the microphone at once, and the words
+already heard are still sent when the gap ends, as the Sunday demo build's
+voice session closed the capture on Mute and then still sent the utterance
+waiting on its long gap (v119, .eliza/client-features/packages/voice/src/
+voice-assistant-session.ts:596-611). Stop, or the relay's capture ending,
+within the gap sends nothing, as that session dropped an utterance not yet
+sent (voice-assistant-session.ts:574-575 and 786-797).
+
 ```quint
 pure def canTurnEnded(v: Voice, session: int): bool =
-  v.phase == Listening and v.mic == On and v.heard and session == v.session
+  v.phase == Listening and v.heard and session == v.session and (v.mic == On or (v.muted and v.network))
 
 pure def turnEnded(v: Voice, session: int): Change =
-  { state: { ...v, phase: Transcribing, mic: Closing }, out: List(CloseMicrophone({ session: v.session })) }
+  if (v.mic == On)
+    { state: { ...v, phase: Transcribing, mic: Closing }, out: List(CloseMicrophone({ session: v.session })) }
+  else if (v.mic == Closing) { state: { ...v, phase: Transcribing }, out: List() }
+  else
+    { state: { ...v, phase: Thinking, sent: v.turn, heard: false },
+      out: List(Send({ session: v.session, turn: v.turn, network: v.network })) }
 
 pure def canMicClosed(v: Voice, session: int): bool = v.mic == Closing and session == v.session and talking(v)
 
@@ -390,7 +403,9 @@ pure def micClosed(v: Voice, session: int): Change =
 
 pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   out.every(e => match e {
-    | Send(x) => via == "micClosed" and before.phase == Transcribing and after.mic == Off and out.length() == 1
+    | Send(x) => ((via == "micClosed" and before.phase == Transcribing)
+        or (via == "turnEnded" and before.phase == Listening and before.muted and before.network and before.mic == Off))
+        and after.mic == Off and out.length() == 1
         and x.session == before.session and x.turn == before.turn and after.sent == before.turn
     | _ => true
   })
@@ -402,11 +417,13 @@ When the owner finishes speaking, the words heard for that turn stay in the
 open conversation as the owner's own message, and three dots under it show
 Alpha at work, as the Sunday demo build did (v119,
 apps/app/src/prototype/template.html:4721-4726). They show while that turn
-is transcribed and thought about. What Alpha speaks takes the dots' place
-in the same moment it is queued to be spoken, as the Sunday demo build set
-the spoken text and the chat text together (v119,
-apps/app/src/prototype/agent-adapter.ts:2253-2254): an acknowledgment as
-the turn's label, as a typed turn shows one, then the reply's text. Words and reply go the
+is transcribed and thought about, and while an acknowledgment is said:
+the acknowledgment is only spoken, never written there, as the Sunday demo
+build only spoke it in Talk (v119, apps/app/src/prototype/voice-adapter.ts:778,
+and model.js:6443 drew the dots until reply text came). The reply's text
+takes the dots' place in the same moment it is queued to be spoken, as the
+Sunday demo build set the spoken text and the chat text together (v119,
+apps/app/src/prototype/agent-adapter.ts:2253-2254). Words and reply go the
 moment the recorded message and reply take their place, the turn ends
 unsent, or Talk leaves it. They are not a draft and not history: only the
 recorded rows are kept.
@@ -561,17 +578,20 @@ turn from another screen such as Messages keeps the session's capabilities
 and non-Files review cards even when direct Files actions are allowed, and
 a direct Files result from Messages is still spoken aloud.
 
-What Talk says of a reply that proposed a phone step follows what that
-step did, never what the reply claims. A reply that proposed none is said
-as written. A step that ran here, a direct Files filter or open or a page
-the owner asked for, lets the reply be said, and a direct Files step says
-its own result. A review shown as a card is decided there, so the reply
-beside it is not said. A step Talk neither showed as a card nor ran, such
-as a review Talk cannot show from a Messages chat, a text proposed off
+What Talk says of a reply that claims a phone step follows what that step
+did, never what the reply says of it. A reply claims a step when it
+proposed a text to send for review or a step to run at once; any other
+reply, one with a review card Talk did not show included, is said as
+before. A step that ran here, a direct Files filter or open or a page the
+owner asked for, lets the reply be said, and a direct Files step says its
+own result. A review shown as a card is decided there, so the reply beside
+it is not said. A claimed step Talk neither showed as a card nor ran, such
+as a text whose review Talk cannot show, from a Messages chat or off
 Messages, or a step the agent marked to run at once that nothing here
 runs, means the reply speaks of something that did not happen: the turn
 ends quietly without setting the review notice, any queued speech is
-hushed, and Talk says nothing of its own about it.
+hushed, and Talk says nothing of its own about it. The chat still shows
+the reply as written.
 
 ```quint
 pure def canReplyEnds(v: Voice, session: int, turn: int, asks: bool, says: bool): bool =
@@ -593,17 +613,17 @@ pure def lawAQuietEndingHushesWithoutAReviewNotice(session: int, played: int): b
   val ended = replyEnds({ ...initial, phase: Speaking, mic: Off, session: session, turn: 1, queued: 2, played: played }, session, 1, false, false)
   ended.out.includes(Hush({ turn: 1 })) and not(ended.state.reviewPending) and ended.state.phase == Listening
 
-pure def replySaid(proposed: bool, shown: bool, ran: bool, reported: bool): bool =
-  reported or (not(shown) and (not(proposed) or ran))
+pure def replySaid(claimed: bool, shown: bool, ran: bool, reported: bool): bool =
+  reported or (not(shown) and (not(claimed) or ran))
 
 pure def lawAStepThatNeitherShowedNorRanIsNeverClaimed(reported: bool): bool =
   replySaid(true, false, false, reported) == reported
 
-pure def lawAReplyWithNoStepOrAStepThatRanIsSaid(proposed: bool, ran: bool): bool =
-  (not(proposed) or ran) implies replySaid(proposed, false, ran, false)
+pure def lawAReplyWithNoClaimOrAStepThatRanIsSaid(claimed: bool, ran: bool): bool =
+  (not(claimed) or ran) implies replySaid(claimed, false, ran, false)
 
-pure def lawAShownReviewSaysOnlyAStepResult(proposed: bool, ran: bool, reported: bool): bool =
-  replySaid(proposed, true, ran, reported) == reported
+pure def lawAShownReviewSaysOnlyAStepResult(claimed: bool, ran: bool, reported: bool): bool =
+  replySaid(claimed, true, ran, reported) == reported
 
 pure def canReviewSettled(v: Voice): bool = talking(v) and v.reviewPending
 
