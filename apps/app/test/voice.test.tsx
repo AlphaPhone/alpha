@@ -29,7 +29,7 @@ import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, later, only, open, press, seen, shownWords, underAct, until as drawnUntil } from "./alpha.tsx";
 import { untoldStep } from "./fakes/ask.ts";
 import { publish } from "./fakes/platform.ts";
 import { rejection } from "./fakes/phone.ts";
@@ -774,6 +774,35 @@ async function onComposer(world: Scene, ...otherMounts: Mount[]) {
   return { alpha, area: assistant.runtime(alpha) };
 }
 
+const listening = (state: Voice.Voice) => state.phase === "Listening" && state.mic === "On";
+
+/** Ask Alpha alone on `world`, with Talk tapped from its composer and listening. */
+async function talkingOnComposer(world: Scene) {
+  const { alpha, area } = await onComposer(world);
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+  await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, listening);
+  return { alpha, area };
+}
+
+/** Talk on `world`, stopped from its conversation once `meanwhile` has changed the phone, and quiet again. */
+async function stoppedOnComposer(world: Scene, meanwhile: () => void) {
+  const { alpha, area } = await talkingOnComposer(world);
+  meanwhile();
+  await press("Open conversation");
+  await press("Stop voice conversation");
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+  return { alpha, area };
+}
+
+/** With the microphone off, Talk is offered and enabled, and a tap on it listens again. */
+async function talksAgain(world: Scene, alpha: Alpha, area: ReturnType<typeof assistant.runtime>) {
+  expect([world.voice.activeMicSession, button("Talk")?.disabled]).toEqual([undefined, false]);
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, listening);
+}
+
 /** Raise Ask Alpha to its sheet. */
 const raiseSheet = (alpha: Alpha) => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
 
@@ -926,7 +955,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => vi.waitFor(() => expect(world.calendar.writes).toEqual(["approve approval-1", "create ev-camera-setup"]), { timeout: 10_000 }));
   });
 
-  it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
+  it("ends Talk for a call behind the call screen, quietly, and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk quietly, and only the owner starts it again\")", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const { alpha, area } = await onComposer(world, ...only("notice"));
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
@@ -934,6 +963,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
 
+    const issued = async () => (await alpha.runtime.runPromise(Effect.flatMap(Toasts, (toasts) => toasts.get()))).issued;
+    const before = await issued();
     await seen(false);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off" && state.callNotice === "AwaitingCallCause");
     world.telephony.live = [{ id: "talk-interrupted", state: "active", connectedAt: world.now }];
@@ -944,15 +975,28 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => world.telephony.report());
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
     await seen(true);
-    await vi.waitFor(async () => {
-      await drawn(() => undefined);
-      expect(document.body.textContent).toContain("Voice paused for a phone call.");
-    });
-    expect([world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([1, undefined]);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.callNotice === "NoCallNotice");
+    await drawn(() => undefined);
+    expect([await issued() - before, document.body.textContent?.includes("phone call"), world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([0, false, 1, undefined]);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
     expect(world.voice.startLiveCaptureCalls).toBe(2);
+
+    const again = await issued();
+    await seen(false);
+    world.telephony.live = [{ id: "talk-shown-in-call", state: "active", connectedAt: world.now }];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "OrdinaryCall");
+    await seen(true);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off" && state.callNotice === "NoCallNotice");
+    await drawn(() => undefined);
+    expect([await issued() - again, world.voice.activeMicSession]).toEqual([0, undefined]);
+    world.telephony.live = [];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
   });
@@ -1001,11 +1045,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("offers Stop and no keyboard control in Talk, as the Sunday demo build did, and Stop releases the microphone and speaker", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha, area } = await onComposer(world);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
-    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.speaker === "SpeakerOn");
+    const { alpha, area } = await talkingOnComposer(world);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
     await press("Open conversation");
     const row = document.querySelector<HTMLElement>('section[aria-label="Voice conversation"]');
     expect(row).not.toBeNull();
@@ -1019,6 +1060,44 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
     expect(world.voice.activeMicSession).toBeUndefined();
     expect(document.querySelector('section[aria-label="Voice conversation"]')).toBeNull();
+  });
+
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
+  it("offers Talk again after a stop whose speech session the agent could not close, once the microphone and speech are off", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.agentClosesLiveCapture = false; });
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("keeps Talk and the microphone closed while the microphone is still held, and offers Talk again once a later ask confirms it off", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    expect(Voice.canStartTalking(await area.runPromise(Effect.flatMap(Voice.Machine, (voice) => voice.get())), 0)).toBe(false);
+    const starts = world.voice.startLiveCaptureCalls;
+    expect(button("Talk")).toBeUndefined();
+
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    expect([button("Talk"), world.voice.startLiveCaptureCalls]).toEqual([undefined, starts]);
+
+    world.voice.liveCaptureReleaseFails = false;
+    await seen(false);
+    await seen(true);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("offers Talk again a moment after a stop whose microphone let go late", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    world.voice.liveCaptureReleaseFails = false;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    await talksAgain(world, alpha, area);
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
@@ -2271,6 +2350,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       const { recorder } = await getVoice(area);
       await expect(sendVoice(area, { type: "recognitionChecked", ticket: recorder.ticket - 1, ready: true })).rejects.toBeDefined();
       expect(button("Preparing on-device speech")?.disabled).toBe(true);
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": the button shows no words while preparing
+      expect(shownWords(button("Preparing on-device speech"))).toBe("");
       await press("Preparing on-device speech");
       expect(recordings).toBe(0);
     } finally {
@@ -2280,12 +2361,19 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     if (ready) {
       expect(button("Start recording")?.disabled).toBe(false);
       expect(recordings).toBe(0);
+      const opening = Promise.withResolvers<void>();
+      world.voice.recordingStartGate = () => { recordings += 1; return opening.promise; };
       await press("Start recording");
+      await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Starting");
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": nor while the microphone starts
+      expect([button("Starting microphone")?.disabled, shownWords(button("Starting microphone"))]).toEqual([true, ""]);
+      opening.resolve();
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.recorder.stage === "Recording");
       expect(recordings).toBe(1);
       await press("Discard transcription");
     } else {
-      expect(button("On-device speech unavailable")?.disabled).toBe(true);
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": nor once on-device speech is unavailable
+      expect([button("On-device speech unavailable")?.disabled, shownWords(button("On-device speech unavailable"))]).toEqual([true, ""]);
       await press("On-device speech unavailable");
       expect(recordings).toBe(0);
       await switchToKeyboard();

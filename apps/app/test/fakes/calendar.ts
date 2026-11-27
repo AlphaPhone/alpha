@@ -48,6 +48,9 @@ export interface CalendarScene {
   feedState?: "complete" | "partial" | "unavailable";
   /** How many times `/api/lifeops/calendar/feed` was read. */
   feedReads?: number;
+  /** While set, each read of `/api/lifeops/calendar/feed` answers the events as they were when read, once released; the releases are kept here in the order the reads came. */
+  holdFeed?: boolean;
+  readonly heldFeed: Array<() => void>;
   /** The summary `/api/lifeops/calendar/calendars` lists for the agent's calendar (defaults to eliza's own, "Eliza Calendar"). */
   summary?: string;
   /** What `/api/lifeops/calendar/calendars` lists in place of that one calendar: eliza's own resident "primary" first, then each Google calendar, as eliza lists them. */
@@ -99,7 +102,7 @@ export function calendarScene(): CalendarScene {
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     reviewed: [], review: "applied",
-    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [], heldApprovals: [],
+    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [], heldApprovals: [], heldFeed: [],
   };
 }
 
@@ -169,6 +172,9 @@ export function agentEvent(title: string, begin: number, end: number, more: Part
 const etag = (event: FakeEvent) => typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : "";
 const bump = (event: FakeEvent) => { event.metadata = { ...event.metadata, etag: String(Number(etag(event)) + 1) }; };
 const never = () => new Promise<Response>(() => {});
+/** `answer` at once, or, while `holding`, once the release it keeps in `releases` is called. */
+const heldWhile = (holding: boolean | undefined, releases: Array<() => void>, answer: () => Response) =>
+  holding ? new Promise<void>((release) => releases.push(release)).then(answer) : answer();
 const base = "/api/lifeops/calendar";
 
 function changed(scene: CalendarScene, key: string, event: FakeEvent, reply: unknown): Response | Promise<Response> {
@@ -187,7 +193,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
         scene.approvalsAnswered = (scene.approvalsAnswered ?? 0) + 1;
         return Response.json(listed);
       };
-      return scene.holdApprovals ? new Promise<void>((release) => scene.heldApprovals.push(release)).then(answer) : answer();
+      return heldWhile(scene.holdApprovals, scene.heldApprovals, answer);
     },
     (request, url) => {
       const found = /^\/api\/approvals\/([^/]+)\/resolve$/.exec(url.pathname);
@@ -232,7 +238,8 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
       const [timeMin, timeMax] = [url.searchParams.get("timeMin") ?? "", url.searchParams.get("timeMax") ?? ""];
       const [from, to] = [Date.parse(timeMin), Date.parse(timeMax)];
       const events = scene.events.filter((event) => Date.parse(event.startAt) < to && Date.parse(event.endAt) > from);
-      return Response.json({ calendarId: "all", events, source: "synced", state: scene.feedState ?? "complete", sources: [], timeMin, timeMax, syncedAt: timeMax });
+      const answer = { calendarId: "all", events, source: "synced", state: scene.feedState ?? "complete", sources: [], timeMin, timeMax, syncedAt: timeMax };
+      return heldWhile(scene.holdFeed, scene.heldFeed, () => Response.json(answer));
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/calendars`) return;
@@ -241,7 +248,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
         if (scene.down || scene.calendarsDown) return Response.json({ error: "starting" }, { status: 503 });
         return Response.json({ calendars: scene.listed ?? [{ provider: "eliza", side: "owner", calendarId: "eliza-calendar/primary", summary: scene.summary ?? "Eliza Calendar", primary: true }] });
       };
-      return scene.holdCalendars ? new Promise<void>((release) => scene.heldCalendars.push(release)).then(answer) : answer();
+      return heldWhile(scene.holdCalendars, scene.heldCalendars, answer);
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== `${base}/events`) return;

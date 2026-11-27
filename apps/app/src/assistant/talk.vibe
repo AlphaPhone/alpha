@@ -121,6 +121,9 @@ export interface Known {
   readonly title: string
 }
 
+/** What Alpha could not settle about the draft by itself: a save, a slot to open, a message that may already have been sent. */
+export type Mending = "Unkept" | "Unread" | "Unchecked"
+
 /** What the screen shows beside the machines' states: words, which the specs count but never hold. */
 export interface Seen {
   /** The page showing, and any page still receiving the exact words of an in-flight typed turn. */
@@ -152,6 +155,8 @@ export interface Seen {
   readonly hits: ReadonlyArray<Hit>
   /** The title of each conversation, by its number. */
   readonly titles: ReadonlyMap<number, string>
+  /** What Alpha gave up settling about the draft by itself, for the conversation to tell the owner. */
+  readonly mending: Mending | undefined
 }
 
 /**
@@ -278,7 +283,7 @@ export const talk = Layer.effect(Talk, effect {
   let restoredSentId = ""
   let seen: Seen = {
     pages: new Map(), reply: "", replyUntold: [], label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNotes: [], saved: "", hits: [],
-    titles: new Map(),
+    titles: new Map(), mending: undefined,
   }
   const keep = () => {
     const key = catalogue
