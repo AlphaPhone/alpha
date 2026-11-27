@@ -12,7 +12,7 @@ import { generateAndroidHost, stageRuntimePayload } from "@elizaos/os";
 import { packPrepared, prepared } from "@repo/eliza-harness";
 import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { androidPaths, identity, production, signInCallbackPath } from "../capacitor.config.ts";
+import { androidPaths, identity, production, signInCallbackPath, updateManifestUrl } from "../capacitor.config.ts";
 import { releaseBlockedByLicences } from "../gen/app__image__licences.ts";
 import { inventory as licenceInventory } from "./licences.ts";
 import { localOcrAssets } from "./ocr-assets.ts";
@@ -360,10 +360,15 @@ export function hostProfile() {
   const profile = record(readJson(join(android, "host.json")));
   const placeholders = record(profile.manifestPlaceholders);
   const fields: readonly unknown[] = Array.isArray(profile.buildConfigFields) ? (profile.buildConfigFields as readonly unknown[]) : [];
+  const computed = [
+    { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud },
+    { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost },
+    { name: "ALPHA_UPDATE_MANIFEST_URL", type: "String", value: updateManifestUrl },
+  ];
   return {
     ...profile,
-    manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath },
-    buildConfigFields: [...fields, { name: "CLOUD_API_ORIGIN", type: "String", value: production.cloud }, { name: "CLOUD_APP_LINK_HOST", type: "String", value: production.appLinkHost }],
+    manifestPlaceholders: { ...placeholders, appLinkHost: production.appLinkHost, signInCallbackPath, alphaUpdateChannel: "public", alphaUpdateManifestSha256: `sha256:${sha256(updateManifestUrl)}` },
+    buildConfigFields: [...fields.filter((field) => !computed.some((own) => own.name === record(field).name)), ...computed],
   };
 }
 

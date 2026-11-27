@@ -367,7 +367,7 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     pendingCreations: () => Promise.resolve({ status: "ready", creations: [...scene.creations].map(([creationId, status]) => ({ creationId, status })) }),
     inspectDeletion({ id, expected }) {
       const series = scene.phoneEvents.filter((event) => event.id === id);
-      const event = series.find((one) => one.begin === expected.begin) ?? series[0];
+      const event = series.find((one) => one.begin === expected.begin);
       if (!event) return Promise.resolve({ status: "conflict" });
       return Promise.resolve({
         status: "ready", recurrence: event.recurring ? "rule" : "one-off", writable: true, revision: revisionOf(event), sourceRevision: revisionOf(event),

@@ -511,7 +511,12 @@ The calendar reads the event's day and finds it at a revision, or finds it
 gone. Only a whole read of the window around the event's own day releases
 its doubt: a read of another range, or one the phone cut short, does not. A form whose save was in doubt keeps its edits: if the event moved on,
 the owner chooses between theirs and the saved one; if not, they are still
-to save. A form with no edits simply follows the event.
+to save. A form with no edits simply follows the event. Alpha keeps with
+each event's number where the event was last seen, so a doubt whose event
+went while Alpha was closed is let go by the first whole read of that day
+that no longer has it. A doubt held under a number that names no event
+Alpha kept a number for, as one kept before Alpha kept its numbers, can
+never be read back, and is let go as an event gone lets it go.
 
 ```quint
 pure def canEventRead(s: Editor, id: int, revision: int, whole: bool): bool =

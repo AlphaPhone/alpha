@@ -132,6 +132,10 @@ export interface ShownStore {
   readonly number: (source: Source, key: string) => number;
   /** Whether `id` is a number this store gave an event, or took back from before a restart, and still holds. @throws {never} */
   readonly known: (id: number) => boolean;
+  /** Whether `id` names no event: this store read the numbers kept before it, or found none, and holds no `id` among them. @throws {never} */
+  readonly forgets: (id: number) => boolean;
+  /** Where the event numbered `id` was last seen, kept with its number across a restart, though no read since has shown it. @throws {never} */
+  readonly seenAt: (id: number) => { readonly source: Source; readonly begin: number } | undefined;
   /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
   readonly lastSeen: (id: number) => Row | undefined;
   /** The event numbered `id`, wherever it was last read. @throws {never} */
@@ -148,21 +152,50 @@ export interface ShownStore {
 
 /**
  * The numbers events were given, kept on the phone so that an event keeps its number across a restart and no other
- * event is given it: the last number given, and each event's `source:key` with its number.
+ * event is given it: the last number given, and each event's `source:key` with its number and the start it was last
+ * seen at.
  */
 export interface KeptNumbers {
   readonly last: number;
-  readonly numbers: ReadonlyArray<readonly [string, number]>;
+  readonly numbers: ReadonlyArray<readonly [name: string, id: number, begin?: number]>;
 }
-
-/** Where numbering starts on a phone that kept no numbers: past any number a build that kept none gave in one run. */
-const unkeptFloor = 2 ** 32;
-
-/** What numbering goes on from where the kept numbers can no longer be read: past any number given before, and holding none. */
-export const unreadableNumbers: KeptNumbers = { last: 2 ** 52, numbers: [] };
 
 /** How far numbering moves on at each start past the last number kept, so a number given after the last one kept is never given again. */
 const startGap = 2 ** 20;
+
+/** The highest number a start may begin from, leaving room for every number one run can give below the largest whole number a JavaScript number holds exactly. */
+const ceiling = Number.MAX_SAFE_INTEGER - 2 ** 40;
+
+/** Where numbering starts once the numbers have reached the `ceiling`: past any number a build that kept none gave in one run. */
+const restartFloor = 2 ** 32;
+
+/**
+ * The least number a start at `now`, Alpha's time, begins from: past any number an earlier build gave, and a thousand and
+ * twenty-four numbers past an earlier start for each millisecond between them, so two starts collide only where the
+ * first gave more numbers than that before the second; past 2109, when that would pass the `ceiling`, only the floor.
+ * @throws {never}
+ */
+function timeFloor(now: number): number {
+  const at = 2 ** 52 + Math.floor(now) * 2 ** 10;
+  return Number.isSafeInteger(at) && at <= ceiling ? at : restartFloor;
+}
+
+/** Whether `read` holds only whole numbers a JavaScript number holds exactly, none past its `last`, so that numbering on from it gives no number twice. @throws {never} */
+export function exactNumbers(read: KeptNumbers): KeptNumbers | undefined {
+  const exact = Number.isSafeInteger(read.last) && read.last > 0
+    && read.numbers.every(([, id, begin]) => Number.isSafeInteger(id) && id > 0 && id <= read.last && (begin === undefined || Number.isFinite(begin)));
+  return exact ? read : undefined;
+}
+
+/**
+ * What numbering starts from at `now`, given the numbers `read` kept before, if any: on from them and from `timeFloor`;
+ * where that would pass the `ceiling`, afresh from the floor, holding none of them, whose numbers then name no event.
+ * @throws {never}
+ */
+export function startAt(read: KeptNumbers | undefined, now: number): KeptNumbers {
+  const from = Math.max(read?.last ?? 0, timeFloor(now));
+  return from + startGap <= ceiling ? { last: from, numbers: read?.numbers ?? [] } : { last: restartFloor, numbers: [] };
+}
 
 /** How many events' numbers are kept: those seen least lately go first, and a deletion or form that named one then names no event. */
 const keptNumbers = 10_000;
@@ -182,8 +215,11 @@ let activeStore: ShownStore | undefined;
 let fallbackStore: ShownStore | undefined;
 
 function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
-  const numbers = new Map<string, number>(kept?.numbers ?? []);
+  const numbers = new Map<string, number>((kept?.numbers ?? []).map(([name, id]) => [name, id] as const));
+  const begins = new Map<string, number>((kept?.numbers ?? []).flatMap(([name, , begin]) => (begin === undefined ? [] : [[name, begin] as const])));
+  const named = new Map<number, string>([...numbers].map(([name, id]) => [id, name] as const));
   const given = new Set(numbers.values());
+  const trusted = keepNumbers !== undefined;
   const calendars = new Map<string, number>();
   const seen = new Map<string, { readonly content: string; readonly revision: number }>();
   const windows = new Map<Source, ReadonlyArray<Row>>();
@@ -192,7 +228,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
   const names = new Map<string, string>();
   let ownName = "";
   const version = createShelf(0);
-  let nextNumber = keepNumbers === undefined ? 0 : kept === undefined ? unkeptFloor : kept.last + startGap;
+  let nextNumber = kept === undefined ? 0 : kept.last + startGap;
   let present = false;
   let unkept = keepNumbers !== undefined;
   let open = true;
@@ -204,24 +240,34 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
     for (const [name, id] of numbers) {
       if (numbers.size <= keptNumbers) break;
       numbers.delete(name);
+      begins.delete(name);
+      named.delete(id);
       given.delete(id);
     }
-    keepNumbers?.({ last: nextNumber, numbers: [...numbers] });
+    keepNumbers?.({ last: nextNumber, numbers: [...numbers].map(([name, id]) => {
+      const begin = begins.get(name);
+      return begin === undefined ? [name, id] as const : [name, id, begin] as const;
+    }) });
   }
 
   /** @throws {never} */
-  function numbered(source: Source, key: string): number {
+  function numbered(source: Source, key: string, begin?: number): number {
     const name = `${source}:${key}`;
     const known = numbers.get(name);
     numbers.delete(name);
+    if (begin !== undefined && begins.get(name) !== begin) {
+      begins.set(name, begin);
+      unkept = trusted;
+    }
     if (known !== undefined) {
       numbers.set(name, known);
       return known;
     }
     const made = ++nextNumber;
     numbers.set(name, made);
+    named.set(made, name);
     given.add(made);
-    unkept = keepNumbers !== undefined;
+    unkept = trusted;
     return made;
   }
 
@@ -255,7 +301,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
     return {
       ...rest,
       source,
-      id: numbered(source, occurrenceOf(source, read)),
+      id: numbered(source, occurrenceOf(source, read), read.begin),
       calendar: calendarNumber(source, read.calendarId),
       revision: revised(source, { ...rest, changedAt }),
     };
@@ -334,6 +380,12 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
       return id;
     },
     known: (id) => given.has(id),
+    forgets: (id) => trusted && !given.has(id),
+    seenAt(id) {
+      const name = named.get(id);
+      const begin = name === undefined ? undefined : begins.get(name);
+      return name === undefined || begin === undefined ? undefined : { source: name.startsWith("Phone:") ? "Phone" : "Google", begin };
+    },
     lastSeen: (id) => last.get(id),
     find(id) {
       for (const rows of windows.values()) {
@@ -357,6 +409,8 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
       names.clear();
       ownName = "";
       numbers.clear();
+      begins.clear();
+      named.clear();
       given.clear();
       calendars.clear();
       seen.clear();
@@ -380,8 +434,8 @@ function currentStore(): ShownStore {
 }
 
 /**
- * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. Given
- * `keepNumbers`, it numbers events on from `kept`, what an earlier run kept, and hands it each change to keep. @throws {never}
+ * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. It numbers
+ * events on from `kept`, what an earlier run kept, and, given `keepNumbers`, hands it each change to keep. @throws {never}
  */
 export function createShownStore(kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
   const store = makeShownStore(() => {
@@ -409,6 +463,8 @@ export const shown: ShownStore = {
   restore: (kept) => currentStore().restore(kept),
   number: (source, key) => currentStore().number(source, key),
   known: (id) => currentStore().known(id),
+  forgets: (id) => currentStore().forgets(id),
+  seenAt: (id) => currentStore().seenAt(id),
   lastSeen: (id) => currentStore().lastSeen(id),
   find: (id) => currentStore().find(id),
   listed: (calendars) => currentStore().listed(calendars),

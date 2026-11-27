@@ -759,7 +759,7 @@ of that conversation. Opening older history keeps its place.
 
 ```quint
 pure def alwaysSentTurnsBelongToASession(v: Voice): bool =
-  v.sent > 0 implies v.session > 0
+  (v.sent > 0 or v.turn > 0 or talking(v)) implies v.session > 0
 
 pure def talkCreatesBlankConversation(
   hasSelectedChat: bool, editorEmpty: bool, sendInFlight: bool
