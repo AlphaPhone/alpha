@@ -424,12 +424,13 @@ pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
 
 ### A conflict keeps the saved copy and the current text together, and saves them
 
-Alpha settles a conflict by itself. Where the current text already holds
-the saved copy, it is saved over the copy (replace saved). Otherwise the
-editor takes the saved copy, followed on a new line by the current text
-unless the copy already holds it, and that text is written to the slot as
-a new revision (restore saved). Restoring a message the slot marked as
-sending makes it an ordinary draft again, and the mark is written away.
+Alpha settles a conflict by itself. The editor takes the saved copy and
+the current text together — keeping whichever already holds the other, or
+the saved copy followed on a new line by the current text — and writes
+that text to the slot as a new revision (restore saved; replace saved
+keeps the current text over the saved copy directly). Restoring a message
+the slot marked as sending makes it an ordinary draft again, and the mark
+is written away.
 
 ```quint
 pure def restored(saved: D::Draft, c: Composer): Moved =

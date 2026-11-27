@@ -126,7 +126,7 @@ function salvaged(raw: string): { text: string; sending: boolean } | undefined {
   const cut = /"text"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(raw)?.[1]
   const text = Option.isSome(whole) ? whole.value.text
     : cut === undefined ? undefined
-    : Option.getOrUndefined(Schema.decodeUnknownOption(jsonText)(`"${cut.replace(/\\(u[0-9a-fA-F]{0,3})?$/, "")}"`))
+    : Option.getOrUndefined(Schema.decodeUnknownOption(jsonText)(`"${cut.replace(/((?:^|[^\\])(?:\\\\)*)\\(?:u[0-9a-fA-F]{0,3})?$/, "$1")}"`))
   if (text === undefined || text.trim() === "") return undefined
   return { text, sending: Option.isSome(whole) ? whole.value.sending !== false : !/"sending"\s*:\s*false/.test(raw) }
 }
@@ -1793,6 +1793,7 @@ const mending = started(effect {
   const { board } = try Talk
   const tries: Record<Mending, number> = { Unkept: 0, Unread: 0, Unchecked: 0 }
   let typedAt: number | undefined
+  let binding: Composer.Binding | undefined
   const mend = effect (kind: Mending | undefined) => {
     const next = kind === undefined ? undefined : mendingTry(kind, try composer.get(), try conversation.get())
     if (next === undefined) return false
@@ -1800,6 +1801,12 @@ const mending = started(effect {
     return try contained(conversation.send(next.event), "checking whether the message arrived")
   }
   const due = Stream.zipLatest(composer.changes, conversation.changes) |> Stream.mapEffect(%, effect ([writing, talking]) => {
+    const sameBinding = binding !== undefined && binding.owner === writing.binding.owner && binding.conversation === writing.binding.conversation
+    if (!sameBinding) {
+      for (const kind of mendings) tries[kind] = 0
+      typedAt = undefined
+      binding = writing.binding
+    }
     for (const kind of mendings) if (mended(kind, writing)) tries[kind] = 0
     const kind = mendingOf(writing)
     if (kind === "Unkept" && typedAt !== undefined && writing.draft.edits !== typedAt) try mend(kind)
@@ -1808,7 +1815,7 @@ const mending = started(effect {
     const stuck = kind !== undefined && tries[kind] >= mendingMs[kind].length ? kind : undefined
     if (board.snapshot().mending !== stuck) board.change({ mending: stuck })
     return kind === undefined || stuck !== undefined || mendingTry(kind, writing, talking) === undefined
-      ? undefined : `${kind} ${writing.writing} ${writing.read.ticket} ${talking.recheck.ticket}`
+      ? undefined : `${kind} ${writing.binding.owner} ${writing.binding.conversation} ${writing.writing} ${writing.read.ticket} ${talking.recheck.ticket}`
   }) |> Stream.changes(%)
   const timed = Stream.switchMap(due, (at) => at === undefined ? Stream.empty : Stream.fromEffect(effect {
     const kind = mendingOf(try composer.get())
