@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.os.UserManager;
 import android.util.Base64;
+import android.util.Log;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -132,6 +133,8 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         }
     }
 
+    private static final String TAG_SERVICE = "AlphaAccessibilityService";
+    private static final String TAG_POLICY = "AlphaControlPolicy";
     private static final AtomicReference<AlphaAccessibilityService> LIVE = new AtomicReference<>();
     private static final AtomicReference<ControlListener> LISTENER = new AtomicReference<>();
     private static final Map<String, String> ASSIST_WEB_URIS = new ConcurrentHashMap<>();
@@ -175,6 +178,7 @@ public final class AlphaAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         LIVE.set(this);
+        Log.i(TAG_SERVICE, "event=connected tier=TierAccessibility");
         ControlListener listener = LISTENER.get();
         if (listener != null) listener.onServiceStateChanged(true);
     }
@@ -189,6 +193,7 @@ public final class AlphaAccessibilityService extends AccessibilityService {
             return;
         }
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            String previousPackage = activePackage;
             CharSequence pkg = event.getPackageName();
             CharSequence cls = event.getClassName();
             if (pkg != null && pkg.length() > 0) {
@@ -198,7 +203,16 @@ public final class AlphaAccessibilityService extends AccessibilityService {
                 activeActivity = cls.toString();
             }
             ControlListener listener = LISTENER.get();
-            if (listener != null) listener.onForegroundChanged(activePackage, activeActivity);
+            if (listener != null) {
+                if (AlphaControlPolicy.isBlockedTarget(activePackage, activeActivity)) {
+                    Log.i(TAG_POLICY, "event=refuse pkg=" + activePackage + " targetKind=BlockedApp protection=ScreenClear");
+                }
+                listener.onForegroundChanged(activePackage, activeActivity);
+            } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                && !activePackage.isEmpty()
+                && !activePackage.equals(previousPackage)) {
+                captureObservation(false, 80);
+            }
         }
     }
 
@@ -250,9 +264,12 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         );
 
         int revision = localRevision.incrementAndGet();
-        if (protection != AlphaControlPolicy.ScreenProtection.ScreenClear
-            || AlphaControlPolicy.isBlockedTarget(pkg, activeActivity)) {
+        boolean blocked = !pkg.isEmpty() && AlphaControlPolicy.isBlockedTarget(pkg, activeActivity);
+        String targetKind = pkg.isEmpty() ? "NoTarget" : (blocked ? "BlockedApp" : "AllowedApp");
+        if (protection != AlphaControlPolicy.ScreenProtection.ScreenClear || blocked) {
             clearNodeCache();
+            Log.i(TAG_POLICY, "event=refuse pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name());
+            Log.i(TAG_SERVICE, "event=observe pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name() + " nodes=0 snapId=" + revision);
             return new CapturedObservation(revision, pkg, activeActivity, null, protection, windowCount, Collections.emptyList());
         }
 
@@ -288,6 +305,7 @@ public final class AlphaAccessibilityService extends AccessibilityService {
             liveNodes.clear();
             liveNodes.putAll(nextCache);
         }
+        Log.i(TAG_SERVICE, "event=observe pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name() + " nodes=" + serialized.size() + " snapId=" + revision);
         return new CapturedObservation(
             revision,
             pkg,
