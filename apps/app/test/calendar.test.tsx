@@ -1490,6 +1490,18 @@ describe("on a phone", () => {
     expect([b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes]).toEqual([true, "Refused", false, []]);
   });
 
+  it("Approve tapped for one owner sends nothing once another owner signed in while the tap read the day of an event outside Calendar's window (spec/app/calendar/agent.md, \"The request is read again at the tap; a newer revision is shown as updated, and nothing is sent\"; spec/app/calendar/agent.md, \"A card is complete only with known fields, a valid time and, for a change, a verified target\")", async () => {
+    const { world, a, b, card } = await approvedAcrossOwnerChange("feed", (at) => {
+      const begin = at.at(200, 12);
+      at.calendar.events.push(agentEvent("Offsite", begin, begin + hour, {
+        attendees: [{ email: "owner@alpha.test", displayName: "You", responseStatus: "needsAction", self: true, organizer: false, optional: false }],
+      }));
+      return maybeTo("Offsite", begin);
+    });
+    // spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent": the tap reads the event's own day after it read the list, and an owner who signed in meanwhile gets nothing of A's sent
+    expect([b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes]).toEqual([true, "Refused", false, []]);
+  });
+
   it("Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
     const { named, listed, writes } = await namesAfterOwnerChange("approval-signed-out-unlisted", async (world, alpha, agent) => {
       world.calendar.calendarsDown = true;
