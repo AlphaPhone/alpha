@@ -2,6 +2,10 @@
   "key": "alpha/app/browser/index@1",
   "spec": "spec/app/browser/index.md",
   "shape": "99a42a88347ad5e6",
+  "sealed": {
+    "shape": "99a42a88347ad5e6",
+    "state": "ddfe19f26e560cab"
+  },
   "state": {
     "open": [
       1,

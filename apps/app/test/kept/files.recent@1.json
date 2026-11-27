@@ -2,6 +2,10 @@
   "key": "alpha/app/files/recent@1",
   "spec": "spec/app/files/recent.md",
   "shape": "54a47ab3b7653661",
+  "sealed": {
+    "shape": "54a47ab3b7653661",
+    "state": "8c99a2c540c5b9ae"
+  },
   "state": {
     "rows": [
       {

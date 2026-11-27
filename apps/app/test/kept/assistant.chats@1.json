@@ -2,6 +2,10 @@
   "key": "alpha/app/assistant/chats@1",
   "spec": "spec/app/assistant/chats.md",
   "shape": "c3e7a40cb66ebec6",
+  "sealed": {
+    "shape": "c3e7a40cb66ebec6",
+    "state": "d3e28a8fc014a48e"
+  },
   "state": {
     "list": {
       "status": "Loaded",

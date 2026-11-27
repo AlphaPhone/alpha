@@ -2,6 +2,10 @@
   "key": "alpha/app/reminders/alerts@2",
   "spec": "spec/app/reminders/alerts.md",
   "shape": "a670e992f21c6668",
+  "sealed": {
+    "shape": "a670e992f21c6668",
+    "state": "3cdbde914a25b706"
+  },
   "state": {
     "entries": [
       {

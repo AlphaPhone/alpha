@@ -2,6 +2,10 @@
   "key": "alpha/app/notes/recording@1",
   "spec": "spec/app/notes/recording.md",
   "shape": "ec01807347521a70",
+  "sealed": {
+    "shape": "ec01807347521a70",
+    "state": "952b32e7d9fe9b46"
+  },
   "state": {
     "owner": 0,
     "phase": "Idle",

@@ -2,6 +2,10 @@
   "key": "alpha/app/inbox/marking@1",
   "spec": "spec/app/inbox/marking.md",
   "shape": "7365ede35b8baaba",
+  "sealed": {
+    "shape": "7365ede35b8baaba",
+    "state": "2685479df6d75231"
+  },
   "state": {
     "account": 0,
     "message": 0,

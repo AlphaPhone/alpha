@@ -2,6 +2,10 @@
   "key": "alpha/app/assistant/index@1",
   "spec": "spec/app/assistant/index.md",
   "shape": "c5c1f6406c2ff2eb",
+  "sealed": {
+    "shape": "c5c1f6406c2ff2eb",
+    "state": "752ba6bc9b1020a1"
+  },
   "state": {
     "ready": false,
     "support": {

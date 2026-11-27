@@ -2,6 +2,10 @@
   "key": "alpha/app/assistant/composer@1",
   "spec": "spec/app/assistant/composer.md",
   "shape": "90778b7431182cb5",
+  "sealed": {
+    "shape": "90778b7431182cb5",
+    "state": "947eafa567f4f4c5"
+  },
   "state": {
     "binding": {
       "owner": 1,
