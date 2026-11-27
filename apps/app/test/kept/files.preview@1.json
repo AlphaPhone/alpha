@@ -9,7 +9,11 @@
     "kind": "Photo",
     "revision": 0,
     "reachable": false,
-    "siblings": [],
+    "siblings": [
+      "IMG_0411.jpg",
+      "IMG_0412.jpg",
+      "IMG_0413.jpg"
+    ],
     "content": {
       "status": "Idle",
       "ticket": 0
@@ -45,7 +49,11 @@
         "kind": "Photo",
         "revision": 0,
         "reachable": false,
-        "siblings": [],
+        "siblings": [
+          "IMG_0411.jpg",
+          "IMG_0412.jpg",
+          "IMG_0413.jpg"
+        ],
         "content": {
           "status": "Idle",
           "ticket": 0
@@ -87,7 +95,11 @@
         "kind": "Photo",
         "revision": 0,
         "reachable": false,
-        "siblings": [],
+        "siblings": [
+          "IMG_0411.jpg",
+          "IMG_0412.jpg",
+          "IMG_0413.jpg"
+        ],
         "content": {
           "status": "Idle",
           "ticket": 0

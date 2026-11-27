@@ -13,7 +13,11 @@
     },
     "attempts": 0,
     "told": "Quiet",
-    "opened": [],
-    "doubtful": []
+    "opened": [
+      71
+    ],
+    "doubtful": [
+      72
+    ]
   }
 }

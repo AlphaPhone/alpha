@@ -3,37 +3,80 @@
   "spec": "spec/app/files/trash.md",
   "shape": "454dca90b51fae79",
   "state": {
-    "open": false,
-    "allowed": false,
+    "open": true,
+    "allowed": true,
     "listing": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 2
     },
-    "entries": [],
+    "entries": [
+      {
+        "mark": 1,
+        "item": 31,
+        "name": "old-notes.txt",
+        "volume": 1,
+        "until": 1797592000000
+      },
+      {
+        "mark": 2,
+        "item": 32,
+        "name": "draft-v1.docx",
+        "volume": 1,
+        "until": 1797592000000
+      }
+    ],
     "attempt": {
-      "id": 0,
-      "outcome": "Planned"
+      "id": 2,
+      "outcome": "Confirmed"
     },
     "job": {
-      "kind": "Binning",
-      "items": [],
+      "kind": "Restoring",
+      "items": [
+        33
+      ],
       "entries": [],
       "approval": 0
     },
-    "done": [],
+    "done": [
+      {
+        "mark": 3,
+        "item": 33,
+        "name": "scan-0001.jpg",
+        "volume": 1,
+        "until": 1797592000000
+      }
+    ],
     "waiting": [],
     "erasing": {
       "showing": false,
       "revision": 0,
       "shown": 0
     },
-    "doomed": [],
-    "binned": [],
+    "doomed": [
+      {
+        "mark": 2,
+        "item": 32,
+        "name": "draft-v1.docx",
+        "volume": 1,
+        "until": 1797592000000
+      }
+    ],
+    "binned": [
+      {
+        "mark": 2,
+        "item": 32,
+        "name": "draft-v1.docx",
+        "volume": 1,
+        "until": 1797592000000
+      }
+    ],
     "undo": {
       "holding": "Free",
       "until": 0
     },
-    "marked": [],
+    "marked": [
+      2
+    ],
     "details": 0
   },
   "earlier": [
@@ -41,32 +84,73 @@
       "from": "8e28feb686",
       "until": "b7b4c1cd94",
       "state": {
-        "open": false,
-        "allowed": false,
+        "open": true,
+        "allowed": true,
         "listing": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 2
         },
-        "entries": [],
+        "entries": [
+          {
+            "mark": 1,
+            "item": 31,
+            "name": "old-notes.txt",
+            "volume": 1,
+            "until": 1797592000000
+          },
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "attempt": {
-          "id": 0,
-          "outcome": "Planned"
+          "id": 2,
+          "outcome": "Confirmed"
         },
         "job": {
-          "kind": "Binning",
-          "items": [],
+          "kind": "Restoring",
+          "items": [
+            33
+          ],
           "entries": [],
           "approval": 0
         },
-        "done": [],
+        "done": [
+          {
+            "mark": 3,
+            "item": 33,
+            "name": "scan-0001.jpg",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "waiting": [],
         "erasing": {
           "showing": false,
           "revision": 0,
           "shown": 0
         },
-        "doomed": [],
-        "binned": [],
+        "doomed": [
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
+        "binned": [
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "undo": {
           "holding": "Free",
           "until": 0
@@ -77,37 +161,80 @@
       "from": "b7b4c1cd94",
       "until": "173bd6f26b",
       "state": {
-        "open": false,
-        "allowed": false,
+        "open": true,
+        "allowed": true,
         "listing": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 2
         },
-        "entries": [],
+        "entries": [
+          {
+            "mark": 1,
+            "item": 31,
+            "name": "old-notes.txt",
+            "volume": 1,
+            "until": 1797592000000
+          },
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "attempt": {
-          "id": 0,
-          "outcome": "Planned"
+          "id": 2,
+          "outcome": "Confirmed"
         },
         "job": {
-          "kind": "Binning",
-          "items": [],
+          "kind": "Restoring",
+          "items": [
+            33
+          ],
           "entries": [],
           "approval": 0
         },
-        "done": [],
+        "done": [
+          {
+            "mark": 3,
+            "item": 33,
+            "name": "scan-0001.jpg",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "waiting": [],
         "erasing": {
           "showing": false,
           "revision": 0,
           "shown": 0
         },
-        "doomed": [],
-        "binned": [],
+        "doomed": [
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
+        "binned": [
+          {
+            "mark": 2,
+            "item": 32,
+            "name": "draft-v1.docx",
+            "volume": 1,
+            "until": 1797592000000
+          }
+        ],
         "undo": {
           "holding": "Free",
           "until": 0
         },
-        "marked": []
+        "marked": [
+          2
+        ]
       }
     }
   ]

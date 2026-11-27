@@ -3,32 +3,46 @@
   "spec": "spec/app/inbox/index.md",
   "shape": "daaff64c78c48bbd",
   "state": {
-    "signedIn": false,
+    "signedIn": true,
     "accounts": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 1
     },
-    "connected": [],
-    "checked": 0,
+    "connected": [
+      {
+        "account": 1,
+        "credential": 1,
+        "grant": {
+          "read": true,
+          "send": true,
+          "modify": true
+        }
+      }
+    ],
+    "checked": 1,
     "selected": {
-      "account": 0,
+      "account": 1,
       "folder": "Incoming",
       "query": ""
     },
     "list": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 1
     },
     "further": false,
     "failure": "Fine",
     "searchable": false,
-    "pages": 0,
-    "total": 0,
+    "pages": 1,
+    "total": 23,
     "cursor": 0,
-    "spent": [],
+    "spent": [
+      2
+    ],
     "saved": false,
     "moved": false,
-    "chosen": [],
+    "chosen": [
+      71
+    ],
     "revision": 0,
     "doubtful": false,
     "searching": false,
@@ -53,32 +67,46 @@
       "from": "8e28feb686, d263ff7f70",
       "until": "729a506fc0 (#1788)",
       "state": {
-        "signedIn": false,
+        "signedIn": true,
         "accounts": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 1
         },
-        "connected": [],
-        "checked": 0,
+        "connected": [
+          {
+            "account": 1,
+            "credential": 1,
+            "grant": {
+              "read": true,
+              "send": true,
+              "modify": true
+            }
+          }
+        ],
+        "checked": 1,
         "selected": {
-          "account": 0,
+          "account": 1,
           "folder": "Incoming",
           "query": ""
         },
         "list": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 1
         },
         "further": false,
         "failure": "Fine",
         "searchable": false,
-        "pages": 0,
-        "total": 0,
+        "pages": 1,
+        "total": 23,
         "cursor": 0,
-        "spent": [],
+        "spent": [
+          2
+        ],
         "saved": false,
         "moved": false,
-        "chosen": [],
+        "chosen": [
+          71
+        ],
         "revision": 0,
         "doubtful": false,
         "kept": {

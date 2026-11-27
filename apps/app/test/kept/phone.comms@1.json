@@ -6,19 +6,35 @@
     "app": "MessagesApp",
     "subject": "ListSubject",
     "key": "messages:list:",
-    "target": "PersonTarget",
-    "height": "SheetClosed",
+    "target": "AlphaTarget",
+    "height": "SheetOpen",
     "voice": false,
-    "stage": [],
+    "stage": [
+      {
+        "app": "MessagesApp",
+        "subject": "ThreadSubject",
+        "key": "messages:thread:9"
+      }
+    ],
     "callLive": false,
     "emergency": false,
     "ring": "",
     "proposal": {
       "tag": "NoProposal"
     },
-    "past": [],
+    "past": [
+      {
+        "pastId": "proposal-4",
+        "fate": "Done"
+      }
+    ],
     "briefed": "",
     "approved": 0,
-    "requests": []
+    "requests": [
+      {
+        "about": "messages:thread:9",
+        "request": "Reply that I am running late"
+      }
+    ]
   }
 }

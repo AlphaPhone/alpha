@@ -3,21 +3,41 @@
   "spec": "spec/app/home/index.md",
   "shape": "dc7b8da236d38695",
   "state": {
-    "host": "InBrowser",
+    "host": "AsLauncher",
     "installed": {
       "read": {
-        "status": "Idle",
-        "ticket": 0
+        "status": "Loaded",
+        "ticket": 1
       },
-      "apps": [],
+      "apps": [
+        "org.mozilla.firefox"
+      ],
       "pending": false,
       "quiet": false
     },
     "tiles": {
-      "favourites": [],
-      "saved": [],
+      "favourites": [
+        {
+          "tag": "Own",
+          "view": "Notes"
+        },
+        {
+          "tag": "Installed",
+          "app": "org.mozilla.firefox"
+        }
+      ],
+      "saved": [
+        {
+          "tag": "Own",
+          "view": "Notes"
+        },
+        {
+          "tag": "Installed",
+          "app": "org.mozilla.firefox"
+        }
+      ],
       "load": {
-        "status": "Idle",
+        "status": "Loaded",
         "ticket": 4
       },
       "save": {
@@ -46,21 +66,41 @@
       "from": "8e28feb686",
       "until": "299b554681",
       "state": {
-        "host": "InBrowser",
+        "host": "AsLauncher",
         "installed": {
           "read": {
-            "status": "Idle",
-            "ticket": 0
+            "status": "Loaded",
+            "ticket": 1
           },
-          "apps": [],
+          "apps": [
+            "org.mozilla.firefox"
+          ],
           "pending": false,
           "quiet": false
         },
         "tiles": {
-          "favourites": [],
-          "saved": [],
+          "favourites": [
+            {
+              "tag": "Own",
+              "view": "Notes"
+            },
+            {
+              "tag": "Installed",
+              "app": "org.mozilla.firefox"
+            }
+          ],
+          "saved": [
+            {
+              "tag": "Own",
+              "view": "Notes"
+            },
+            {
+              "tag": "Installed",
+              "app": "org.mozilla.firefox"
+            }
+          ],
           "load": {
-            "status": "Idle",
+            "status": "Loaded",
             "ticket": 4
           },
           "save": {

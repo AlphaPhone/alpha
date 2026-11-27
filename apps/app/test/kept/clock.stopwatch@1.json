@@ -3,9 +3,23 @@
   "spec": "spec/app/clock/stopwatch.md",
   "shape": "707035cf2bd189fb",
   "state": {
-    "status": "Reset",
+    "status": "Paused",
     "startedAt": 0,
-    "accumulatedMs": 0,
-    "laps": []
-  }
+    "accumulatedMs": 95000,
+    "laps": [
+      {
+        "number": 1,
+        "totalMs": 41000,
+        "splitMs": 41000
+      },
+      {
+        "number": 2,
+        "totalMs": 83000,
+        "splitMs": 42000
+      }
+    ]
+  },
+  "kept": [
+    "laps"
+  ]
 }
