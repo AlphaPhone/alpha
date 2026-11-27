@@ -556,6 +556,27 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect([world.ask.pageReads > reads, bubbles()]).toEqual([true, [...held, "Say nothing"]]));
     expect(["booked", "Hmm", "did not finish", "Reply failed", "Agent error"].filter((words) => document.body.textContent?.includes(words))).toEqual([]);
 
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a streamed reply that marks nothing makes no read of its history row.
+    const plainReads = world.ask.pageReads;
+    world.ask.nextReplyChunks = ["Nopa opens ", "at five."];
+    await ask("When does Nopa open");
+    const opens = [...held, "Say nothing", "When does Nopa open", "Nopa opens at five."];
+    await vi.waitFor(() => expect(bubbles()).toEqual(opens));
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    expect(world.ask.pageReads).toBe(plainReads);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped turn whose stored reply has words answers those words alone, so the chat shows them and takes the untold step from the reply's history row, read once more when the first read fails.
+    world.ask.nextDropsWith = { text: "Here are two cafes near Nopa.", untold: ["BOOK_TABLE"] };
+    await ask("Book Nopa and find cafes");
+    const cafes = [...opens, "Book Nopa and find cafes", "Here are two cafes near Nopa.Book table did not complete"];
+    await vi.waitFor(() => expect(bubbles()).toEqual(cafes));
+    const retryReads = world.ask.pageReads;
+    world.ask.aroundDown = 1;
+    world.ask.nextDropsWith = { text: "I found one cafe.", untold: ["BOOK_TABLE"] };
+    await ask("Book it and find one more");
+    await vi.waitFor(() => expect(bubbles()).toEqual([...cafes, "Book it and find one more", "I found one cafe.Book table did not complete"]));
+    expect([world.ask.aroundDown, world.ask.pageReads - retryReads]).toEqual([0, 2]);
+
     const asked = "I asked for a table.Book table did not complete";
     const stopAfterNotice = async (text: string) => {
       const held = Promise.withResolvers<void>();

@@ -17,6 +17,8 @@ export interface AskScene {
   pagesDown: boolean;
   /** The agent lists its conversations but answers every read of their messages 404, as a mismatched store or a proxy does. */
   pagesMissing: boolean;
+  /** How many of the next reads of the messages around one message the agent fails with a 503, as a read that drops does. */
+  aroundDown?: number;
   /** How many reads of a conversation's messages, and of the list of conversations, the agent was asked. */
   pageReads: number;
   listReads: number;
@@ -247,6 +249,10 @@ export function askRoutes(scene: AskScene): Route[] {
         if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
         const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
         const around = url.searchParams.get("around");
+        if (around !== null && (scene.aroundDown ?? 0) > 0) {
+          scene.aroundDown = (scene.aroundDown ?? 0) - 1;
+          return Response.json({ error: "starting" }, { status: 503 });
+        }
         if (around !== null) {
           const pivot = messages.findIndex((message) => message.id === around);
           return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })

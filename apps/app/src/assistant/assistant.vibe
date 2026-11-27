@@ -184,12 +184,14 @@ function untoldOf(untold: readonly string[] | undefined): Pick<Line, "untold"> {
 }
 
 // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
-/** The steps a reply marks untold: those its action results mark, or, for a reply with no words, failure or marked step, as eliza answers the resend of a reply it already stored, those its history row names. */
-effect function untoldReplied(conversationId: string, reply: TurnReply): readonly string[]!!Agent {
+/** The steps a reply marks untold: those its action results mark, or, for a reply with no failure and no marked step that was resent or has no words, as eliza answers the resend of a reply it already stored with its words alone, those its history row names, read once more if the first read fails. */
+effect function untoldReplied(conversationId: string, reply: TurnReply, resent: boolean): readonly string[]!!Agent {
   const marked = untoldSteps(reply.actionResults)
-  if (marked.length > 0 || reply.text !== "" || reply.failureKind !== undefined || reply.messageId === "") return marked
+  if (marked.length > 0 || (reply.text !== "" && !resent) || reply.failureKind !== undefined || reply.messageId === "") return marked
   const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
-  const read = ask(Agent, HttpClientRequest.get(path, { urlParams: { around: reply.messageId } }), page()) catch () => undefined
+  const around = HttpClientRequest.get(path, { urlParams: { around: reply.messageId } })
+  let read = ask(Agent, around, page()) catch () => undefined
+  if (read === undefined) read = ask(Agent, around, page()) catch () => undefined
   return read?.messages.find((one) => one.id === reply.messageId && one.role === "assistant")?.untold ?? []
 }
 
@@ -423,16 +425,16 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
   }, Agent, agent)
   return {
     session, turn, record, authority: seat.authority, conversation: chosen, current: selected, verified, retired,
-    settle: effect (result, spoken) => {
+    settle: effect (result, spoken, resent) => {
       try Effect.provideService(Effect.provideService(
-        settleSpoken(board, seat, chosen, record, result, spoken, current), Chats.Machine, chats), Agent, agent)
+        settleSpoken(board, seat, chosen, record, result, spoken, resent, current), Chats.Machine, chats), Agent, agent)
       fork.detached Effect.provideContext(syncAlphaApps(result.reply.actionResults, { conversation: chosen, message: result.reply.messageId }), apps)
     },
   }
 }
 
-effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, record: ConversationRecord, result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, current: boolean!!): void!!(Agent | Chats.Machine) {
-  const untold = try untoldReplied(record.id, result.reply)
+effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, record: ConversationRecord, result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, resent: boolean, current: boolean!!): void!!(Agent | Chats.Machine) {
+  const untold = try untoldReplied(record.id, result.reply, resent)
   if (!(try ownsSeat(board, seat)) || !(try current)) return
   const chats = try Chats.Machine
   const live = try chats.get()
@@ -793,7 +795,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const first = try sent(asksDirect)
     const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
     const result = directFiles || !asksDirect ? first : try sent(false)
-    const untold = result?.kind === "Replied" ? try untoldReplied(known.record.id, result.reply) : []
+    const untold = result?.kind === "Replied" ? try untoldReplied(known.record.id, result.reply, !(try Turns).streamed(result.clientMessageId)) : []
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
       Queue.endUnsafe(queue)

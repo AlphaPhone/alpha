@@ -294,8 +294,12 @@ the composer: live from the reply's action results, on the reply's body
 and on its last frame alike, and read again from its history row, the
 same way. A resend of a turn whose reply the agent already stored
 answers with that reply's words alone and no action results, so when a
-reply answers no words, no failure and no marked step, Alpha takes its
-untold steps from the reply's history row, typed or spoken. The notices
+resent reply, or a reply with no words, answers no failure and no marked
+step, Alpha takes its untold steps from the reply's history row, typed or
+spoken, and shows the reply's words, if any, with those notices. A
+streamed reply with words reads nothing more. When that read fails, Alpha
+reads it once more; when that fails too, the reply shows without its
+notices, and an empty one is declined, until the chat is read again. The notices
 of a reply being written go when its text goes: when another message is
 sent and when another chat is shown. A reply whose text is empty and that marks a step is answered:
 its bubble is those notices, never an empty bubble, a failed reply or one
