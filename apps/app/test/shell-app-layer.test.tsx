@@ -167,6 +167,30 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
     expect(slides()).toEqual(["translateX(-18%)"]);
   });
 
+  it("slides Phone in over Contacts after a trip Home, since a mark made on Contacts before going Home ends there", async () => {
+    const { alpha, slides, trail } = await stagedPhone();
+    const shell = (event: ShellEvent) => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send(event)));
+    await tab("Contacts");
+    await trail("Phone,Contacts");
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": a secondary press on Recents marks a return from the tabs but chooses nothing, so Contacts stays.
+    await drawn(() => {
+      const recents = Array.from(document.querySelectorAll("[role=tab]")).find((el) => el.textContent === "Recents");
+      if (!recents) throw new Error("missing tab Recents");
+      recents.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 2 }));
+    });
+    await trail("Phone,Contacts");
+    await hardware("home");
+    await trail("");
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": going Home ends that mark, so Phone opened over Contacts from there slides in as v119's stage did (45f6bed30 prototype/model.js:5759-5785).
+    await shell({ type: "openView", view: "Contacts" });
+    await trail("Contacts");
+    await shell({ type: "raise", detent: "Sheet" });
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await shell({ type: "openCommsView", view: "Phone" });
+    await trail("Contacts,Phone");
+    expect(slides()).toEqual(["translateX(18%)"]);
+  });
+
   it("swaps at once while an emergency call is live, as v119 never staged one", async () => {
     const { world, alpha, slides, trail } = await stagedPhone();
     world.telephony.live = [{ id: "possible-emergency", state: "active", connectedAt: world.now }];

@@ -838,6 +838,8 @@ function cloudMicController(config: CloudMicConfig) {
       if (config.currentSession() === session && owner.gap === gap) config.publish({ kind: "speechEnd", session, text })
     }, clock)
     owner.gap = gap
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": Mute pressed again while the microphone Unmute reopened is still opening keeps the words held on the gap, as v119's Mute kept the utterance whether or not its capture had opened (voice-assistant-session.ts:593-622).
+    const unopened = (): void => { if (gap !== kept || !gap.waiting) gap.cancel() }
     const capture = onInterrupt(
       tryPromise({
         try: () => owner.stream.listen({
@@ -870,11 +872,11 @@ function cloudMicController(config: CloudMicConfig) {
         catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
       }),
       () => sync(() => {
-        gap.cancel()
+        unopened()
         owner.abort.abort()
       }),
     ) catch effect (failure) => {
-      gap.cancel()
+      unopened()
       if (config.getPreview() === previewOwner) clearPreview(session)
       if (config.getSpeech() === owner) {
         config.setSpeech(undefined)
