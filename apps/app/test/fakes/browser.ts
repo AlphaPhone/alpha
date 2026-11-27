@@ -43,6 +43,8 @@ export interface BrowserScene {
   readonly tabs: Map<string, Held>;
   /** The tab drawn and where, as `present` last placed it. */
   shown: { id: string; x: number; y: number; width: number; height: number } | undefined;
+  /** Where `present` last drew the shown page: above Alpha's WebView, or below it, where Alpha draws its controls over the page. */
+  layer: "above-host" | "below-host";
   /** Alpha's places over the shown page, as `present` last left them to Alpha. */
   hostRects: readonly { x: number; y: number; width: number; height: number; cornerRadius: number }[];
   /** Every call the page made, by method. */
@@ -171,6 +173,7 @@ export function browserScene(): BrowserScene {
     tabs: new Map(),
     readingAvailable: true,
     shown: undefined,
+    layer: "above-host",
     hostRects: [],
     calls: [],
     failing: new Map(),
@@ -314,7 +317,8 @@ export function alphaBrowser(world: BrowserScene): Faked {
       present: (options) => {
         world.calls.push("present");
         world.shown = options.id === null ? undefined : { id: options.id, x: options.x, y: options.y, width: options.width, height: options.height };
-        world.hostRects = options.id !== null && "hostRects" in options && Array.isArray(options.hostRects) ? options.hostRects : [];
+        world.layer = options.id !== null && "layer" in options && options.layer === "below-host" ? "below-host" : "above-host";
+        world.hostRects = world.layer === "below-host" && "hostRects" in options && Array.isArray(options.hostRects) ? options.hostRects : [];
         draw();
         return Promise.resolve();
       },

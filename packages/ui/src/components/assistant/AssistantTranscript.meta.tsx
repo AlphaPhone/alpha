@@ -24,7 +24,7 @@ function finishingReply(canvasElement: HTMLElement) {
   const host = canvasElement.appendChild(Object.assign(document.createElement("div"), { style: "height: 160px; display: flex; flex-direction: column" }));
   const root = createRoot(host);
   const draw = (props: Partial<AssistantTranscriptProps>) => root.render(<AssistantTranscript messages={asked} className="h-full" {...props} />);
-  draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText, streaming: true }] });
+  draw({ liveMessages: [{ id: "reply", author: "alpha", text: replyText }] });
   return {
     host,
     async finish(log: HTMLElement) {

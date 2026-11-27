@@ -117,8 +117,13 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
     void runtime.runPromise(writer[kind]());
   const close = owner({ type: "close" }) ? () => action("close") : undefined;
   const checklist = saved.kind === "Checklist";
-  const deletion: Editor.Event = { type: "deleteNote", ready: bin !== undefined && Trash.ready(bin) };
+  const ready = bin !== undefined && Trash.ready(bin);
+  const deletion: Editor.Event = { type: "deleteNote", ready };
   const deletable = owner(deletion);
+  // spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did"
+  const deleteWhenSaved = !deletable && owner({ type: "deleteWhenSaved", ready });
+  const shareWhenSaved = owner({ type: "shareWhenSaved" });
+  const deleteRow = deletable || deleteWhenSaved || current.binning;
   const exporting = { type: "exportNote", note: current.note, revision: current.draft.base } as const;
   const linkedExport = current.link.tie !== "NoLink" && hasDocuments && current.draft.sync === "Kept" && transfer.can(exporting, "Owner");
   const sharing = { type: "openMenu", note: current.note, revision: current.draft.base, link: current.link, saved: current.draft.sync === "Kept" && !current.deleting } as const;
@@ -139,7 +144,7 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
   const discarding = owner({ type: "discardDraft" });
   const pinningNew = owner({ type: "pinNew", kept: true });
   const sharingNew = owner({ type: "shareNew", kept: true });
-  const menu = (isFresh || deletable || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
+  const menu = (isFresh || deleteRow || shareWhenSaved || linkedExport || actions.can(sharing, "Owner") || menuBound && actionsState.open || organised.pin !== undefined || organised.moves.length > 0) &&
     <Menu open={menuBound && actionsState.open || unboundMenu} onOpenChange={(open) => {
       if (open && actions.can(sharing, "Owner")) void actions.send(sharing, "Owner");
       else setUnboundMenu(open);
@@ -155,11 +160,13 @@ function EditorScreen({ runtime, saved }: { readonly runtime: Runtime; readonly 
         </>}
         {menuBound && current.link.tie === "NoLink" && <MenuItem ref={shareRef} aria-label="Share note" className={noteMenuItem}
           onSelect={(event) => { event.preventDefault(); if (actions.can(reviewShare, "Owner")) void actions.send(reviewShare, "Owner"); }}><Share2 /> Share</MenuItem>}
+        {!menuBound && shareWhenSaved && <MenuItem aria-label="Share note" className={noteMenuItem} onSelect={() => void runtime.runPromise(writer.shareWhenSaved())}><Share2 /> Share</MenuItem>}
         {organised.pin && <MenuItem className={noteMenuItem} onSelect={organised.pin}><Pin /> {organised.pinned ? "Unpin" : "Pin"}</MenuItem>}
         {organised.moves.map(({ folder, move }) => <MenuItem className={noteMenuItem} key={folder.id} onSelect={move}><FolderInput /> {folder.id === 0 ? "Move out of folder" : `Move to ${folder.name}`}</MenuItem>)}
         {linkedExport && <MenuItem className={noteMenuItem} onSelect={() => void transfer.send(exporting, "Owner")}><FileDown /> Save as text</MenuItem>}
-        {deletable && (menuBound || linkedExport || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
+        {deleteRow && (menuBound || shareWhenSaved || linkedExport || organised.pin !== undefined || organised.moves.length > 0) && <div role="separator" className="my-1 border-t border-border" />}
         {deletable && <MenuItem className={noteMenuItem} onSelect={() => send(deletion)}><Trash2 /> Delete</MenuItem>}
+        {!deletable && deleteRow && <MenuItem className={noteMenuItem} disabled={!deleteWhenSaved} onSelect={() => void runtime.runPromise(writer.deleteWhenSaved(ready))}><Trash2 /> Delete</MenuItem>}
       </MenuContent>
     </Menu>;
   return (

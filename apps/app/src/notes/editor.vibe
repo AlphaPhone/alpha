@@ -8,7 +8,7 @@ import { NoteStore } from "../platform/index.vibe"
 import { type Agent } from "../platform/index.vibe"
 import { ownerAt } from "../platform/index.vibe"
 import { fresh } from "../runtime/index.vibe"
-import { type Job, answer, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { type Job, answer, migratedStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { type Collection, type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind" | "pinned">
@@ -95,6 +95,8 @@ export service NoteEditor {
   discard(): void!!Agent
   pinNew(pinned: boolean): void!!(Editor.Machine | NoteContent)
   shareNew(): void!!(Editor.Machine | NoteContent)
+  shareWhenSaved(): void!!(Editor.Machine | NoteContent)
+  deleteWhenSaved(ready: boolean): void!!(Editor.Machine | NoteContent)
   settled(initial: DraftWords, id: string, revision: number): void!!
 }
 
@@ -199,6 +201,17 @@ const typing = Layer.effect(NoteEditor, effect {
       try ignore(editor.send({ type: "shareNew", kept }, "Owner"))
       try saveDraft("Owner")
     }),
+    // spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did"
+    shareWhenSaved: () => turn.withPermit(effect {
+      if (!Editor.canShareWhenSaved(try editor.get(), "Owner")) return
+      try ignore(editor.send({ type: "shareWhenSaved" }, "Owner"))
+      try saveDraft("Owner")
+    }),
+    deleteWhenSaved: (ready: boolean) => turn.withPermit(effect {
+      if (!Editor.canDeleteWhenSaved(try editor.get(), ready, "Owner")) return
+      try ignore(editor.send({ type: "deleteWhenSaved", ready }, "Owner"))
+      try saveDraft("Owner")
+    }),
     settled: (initial: DraftWords, id: string, revision: number) => turn.withPermit(effect {
       const current = try read.draft()
       if (current === undefined || current.owner !== initial.owner || current.creation !== initial.creation) return
@@ -266,5 +279,35 @@ const saving = started(effect {
   })
 }, "save drafts while Notes is open")
 
+// spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did"
+/**
+ * A Delete the owner chose while the note was being saved goes to Recently deleted once the save lands, at the revision
+ * saved: once the list has read the store at that revision, so Recently deleted checks the note the owner saw, and
+ * Recently deleted has no action of its own in flight.
+ */
+const binning = started(effect {
+  const editor = try Editor.Machine
+  const bin = try Trash.Machine
+  const list = try List.Machine
+  const states = Stream.zipLatest(Stream.zipLatest(editor.changes, bin.changes), list.changes)
+  try Stream.runForEach(states, effect ([[state, trash], listed]) => {
+    if (!Editor.canDeleteShown(state, true, phone) || Trash.busy(trash) || listed.read.status !== "Loaded" || listed.version < state.draft.base) return
+    try ignore(editor.send({ type: "deleteShown", ready: Trash.ready(try bin.get()) }, phone))
+  })
+}, "delete the note the owner asked to delete once its save lands")
+
+/** An editor kept before a Delete could wait on a save has no `binning`: it is read as asking for none, so its draft is not set aside. */
+effect function editorRecord(raw: string | undefined): (string | undefined)!! {
+  if (raw === undefined) return undefined
+  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
+  if (fields === undefined || "binning" in fields) return raw
+  const migrated = Editor.decodeState({ binning: Editor.initial.binning, ...fields }) catch () => undefined
+  return migrated === undefined ? raw : JSON.stringify(migrated)
+}
+
+function stored(key: string, start = Editor.initial) {
+  return Layer.provide(Editor.stored(key, start), migratedStore(key, editorRecord))
+}
+
 /** On leaving or reloading Notes, the saved words live in the phone vault, with only revision metadata in the machine. */
-export const editing = together(Layer.provideMerge(typing, reacting(Editor, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry })), saving)
+export const editing = together(Layer.provideMerge(typing, reacting({ ...Editor, stored }, { keep: 1, open: [{ type: "restart", readable: true }, phone], carry })), saving, binning)

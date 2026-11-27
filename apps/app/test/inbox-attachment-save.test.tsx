@@ -93,18 +93,44 @@ it("Migrates a pre-cancelled persisted reader record across restart without losi
   if (!storedRaw) throw new Error("Missing persisted reader record");
   const preCancel = JSON.parse(storedRaw) as Record<string, unknown>;
   delete preCancel.cancelled;
-  expect("pdf" in preCancel && "keep" in preCancel && !("cancelled" in preCancel)).toBe(true);
+  // spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail": a record kept before that tap was remembered has no `unsupported` either.
+  delete preCancel.unsupported;
+  expect("pdf" in preCancel && "keep" in preCancel && !("cancelled" in preCancel) && !("unsupported" in preCancel)).toBe(true);
   localStorage.setItem(kept, JSON.stringify({ ...preCancel, unsure: [held] }));
 
   const second = await open(world, only("home", "view:Inbox"));
   const secondRuntime = inbox.runtime(second.alpha);
   await until(second.alpha, secondRuntime, List, (s) => s.list.status === "Loaded");
   const migrated = await secondRuntime.runPromise(Shown.use((machine) => machine.get()));
-  expect([migrated.unsure, migrated.cancelled, localStorage.getItem(kept + ".unreadable")]).toEqual([[held], 0, null]);
+  expect([migrated.unsure, migrated.cancelled, migrated.unsupported, localStorage.getItem(kept + ".unreadable")]).toEqual([[held], 0, 0, null]);
 
   await openTermSheetRow();
   await until(second.alpha, secondRuntime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
   await press(/^Open\s*agenda\.txt/);
   await until(second.alpha, secondRuntime, Shown, (s) => s.attachment === 1 && s.handling === "Opening");
   expect(inDialog("Save as…")).toEqual([]);
+});
+
+// spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail"
+it("An attachment Alpha can neither show nor save reads Unsupported type or size, and a tap says Open in Gmail on the message, as v119 did", async () => {
+  const world = { ...scene(), phone: true };
+  const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
+  if (!termSheet) throw new Error("Missing mailbox fixture");
+  termSheet.files = [{ partId: "2", name: "archive.zip", mimeType: "application/zip", size: 6 * 1024 * 1024, supported: false }];
+  const { alpha, runtime } = await openTermSheetInInbox(world);
+
+  const notes = () => [...document.querySelectorAll("[role=note]")].map((one) => one.textContent);
+  const tile = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.startsWith("archive.zip"));
+  await drawn(() => expect([tile()?.textContent, tile()?.disabled]).toEqual(["archive.zip 6.3 MB · Unsupported type or size", false]));
+  expect(notes()).not.toContain("Open in Gmail");
+  await drawn(() => tile()?.click());
+  await until(alpha, runtime, Shown, (s) => s.unsupported === 1);
+  await drawn(() => expect(notes()).toContain("Open in Gmail"));
+  // spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail": nothing is fetched or put under review, and no review opens.
+  const shown = await runtime.runPromise(Shown.use((machine) => machine.get()));
+  expect([shown.attachment, shown.file.outcome, world.inbox.savedAttachments.size, document.querySelector("[role=dialog]")]).toEqual([0, "Planned", 0, null]);
+
+  // spec/app/inbox/message.md, "An attachment Alpha can neither show nor save still answers a tap: it is to be opened in Gmail": leaving the message lets the notice go.
+  await press("Back to the list");
+  await until(alpha, runtime, Shown, (s) => s.message === 0 && s.unsupported === 0);
 });

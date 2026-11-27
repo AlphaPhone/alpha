@@ -104,6 +104,8 @@ request is proposed while no change is under way. The card shows the
 change as the request holds it: the title, the day and times with their
 time zone, the place, the calendar, the people and that no invitations are
 sent unless the request says so, all day, and this occurrence or every one.
+Its heading names the change as Sunday's v119 did: Add event for a new
+event and Change event for a change.
 A request gone from the list is withdrawn; a new revision of the same
 request is a change of its event. A change the owner declined, the agent
 withdrew or Google refused reads the list again at once, so the next
@@ -277,7 +279,9 @@ so the owner approves where they asked and never has to open Calendar to
 find it. Which replies filed a request is read from the Calendar action's
 own result, never from the owner's words. While a change is under way its
 card stays at the foot of each conversation where a reply filed one. Once
-it ends, how it ended shows there until the owner asks something else.
+it ends, how it ended shows under the reply that filed it, as Sunday's v119
+showed each request on its own reply's card, so it never reads as a later
+reply's outcome, until the owner asks something else.
 
 The card at the foot of a conversation is bound to the request the
 calendar holds: it shows, and its Approve and Decline act, only while that

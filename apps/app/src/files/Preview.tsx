@@ -25,6 +25,7 @@ import { launcherInnerHeader, launcherTop } from "../shell/ui.tsx";
 const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";
 const actionRow = "min-h-11 rounded-lg px-3.5 py-2 [&_svg]:size-5";
 const fully = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const linesPerCard = 8;
 
 export interface PreviewProps {
   /** Provides the preview and Recent machines, and what the viewer read, of preview.vibe. */
@@ -159,7 +160,7 @@ export function Preview({ runtime, today }: PreviewProps) {
           {state.content.status === "Loading" && <Spinner label="Opening the file" />}
           {state.content.status === "Failed" && <Alert variant="warn">{state.why === "Locked" ? "This PDF is locked" : state.why === "TooLarge" ? "This file is too large to show" : state.why === "TooSlow" ? "This PDF took too long to open" : state.why === "Unsealed" ? "This PDF could not be opened safely" : "This file cannot be shown here"}</Alert>}
           {state.drawing.status === "Failed" && <Alert variant="warn">{state.why === "Unsealed" ? "This page could not be opened safely" : "This page cannot be shown"}</Alert>}
-          {mine && content.text !== undefined && <pre className="font-mono text-base leading-normal whitespace-pre-wrap break-words">{content.text}</pre>}
+          {mine && content.text !== undefined && <TextCards name={name} text={content.text} />}
           {mine && state.kind === "Photo" && content.uri !== undefined && <img alt={name} src={content.uri} decoding="async" className="mx-auto w-full max-h-[55dvh] object-contain" />}
           {mine && state.kind === "Media" && content.uri !== undefined && (file?.mimeType.startsWith("audio/") ? <audio {...mediaProps} src={content.uri} className="w-full" /> : <video {...mediaProps} src={content.uri} className="mx-auto w-full max-h-[55dvh]" />)}
           {owner({ type: "play" }) && <Button variant="ghost" size="icon" aria-label={state.playing ? "Pause" : "Play"} className="mx-auto mt-2 flex" onClick={() => tell({ type: "play" })}>{state.playing ? <Pause /> : <Play />}</Button>}
@@ -217,6 +218,30 @@ export function Preview({ runtime, today }: PreviewProps) {
         </FilesCard>
     </section>
   );
+}
+
+/**
+ * A text file as v119's live preview drew it (selection-adapter.ts:272-283, template.html:3259-3270 at 45f6bed30): white
+ * paper cards of eight numbered lines, each headed with the file's name and, after the first, "(continued)".
+ */
+function TextCards({ name, text }: { readonly name: string; readonly text: string }) {
+  const lines = text.split("\n").map((words, index) => ({ number: index + 1, words }));
+  const cards = Array.from({ length: Math.ceil(lines.length / linesPerCard) }, (_, card) => lines.slice(card * linesPerCard, (card + 1) * linesPerCard));
+  return cards.map((rows) => (
+    <div key={rows[0]?.number}
+      // eslint-disable-next-line better-tailwindcss/no-unknown-classes -- design.md, "Dark": v119's paper stays white with dark text in either app theme
+      className="light mt-5 aspect-[0.77] rounded-frame bg-background px-6.5 py-7.5 text-foreground shadow-md ring-1 ring-border">
+      <p className="mb-4.5 font-display text-quote font-normal">{rows[0]?.number === 1 ? name : `${name} (continued)`}</p>
+      <ol className="mb-4">
+        {rows.map(({ number, words }) => (
+          <li key={number} className="flex gap-2.5 border-b py-1.5 text-badge">
+            <span className="w-21 shrink-0 text-muted-foreground">{number}</span>
+            <span className="min-w-0 font-medium wrap-anywhere">{words}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  ));
 }
 
 /**
