@@ -15,6 +15,7 @@ import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
 import { addLayerAt } from "./home/addHome.vibe";
 import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
+import { finishThinAppTask, watchAppSurface, watchOverlaySurface } from "./platform/contextBridge.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { versions } from "./settings/build.ts";
@@ -23,6 +24,7 @@ import { measureChrome, watchChrome } from "./shell/chrome.vibe";
 import { ShellLayerHost } from "./shell/ShellLayerHost.tsx";
 import { home } from "./shell/shell.vibe";
 import { isCommsView, viewHasHeader, views } from "./shell/views.tsx";
+import { type AlphaSurface, currentSurface } from "./surface.ts";
 import { canLeaveSignInStep, SignIn, useFirstRun } from "./startup/SignIn.tsx";
 import { AccessWalkthrough } from "./startup/SettingsAccess.tsx";
 import { firstFrame } from "./startup/cover.vibe";
@@ -31,6 +33,8 @@ import { launcherBeforeMount, openHomeSettings, reloadBeforeMount } from "./star
 export interface AppProps {
   /** Alpha as boot.tsx opened it: the root runtime, and every screen at its place. */
   alpha: Alpha;
+  /** Optional explicit surface override; defaults to `currentSurface()`. */
+  surface?: AlphaSurface;
 }
 
 type StartedSwipe = {
@@ -208,6 +212,116 @@ function useShellSwipe(alpha: Alpha, blocked: boolean, launcher: boolean, owner:
   };
 }
 
+/** Transparent system-wide Ask Alpha overlay surface hosted inside `AlphaVoiceInteractionSession`. */
+function OverlaySurface({ alpha }: { readonly alpha: Alpha }) {
+  const { cause } = useMachine(alpha.runtime);
+  const layers = useLayers(alpha.runtime).state;
+  const canvas = useCanvas(alpha.runtime).state;
+  const phone = native();
+  const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
+  const overlayRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    const stopChrome = watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
+    const stopOverlay = watchOverlaySurface(node);
+    return () => {
+      stopOverlay();
+      stopChrome();
+    };
+  }, [alpha]);
+  return (
+    <ShellLayerHost alpha={alpha} portalContainer={portalNode}>
+      <main
+        ref={overlayRef}
+        data-alpha-surface="overlay"
+        data-alpha-native={phone ? "" : undefined}
+        style={canvas?.covered ? { height: canvas.visible } : undefined}
+        className="pointer-events-none relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-transparent font-sans text-base text-foreground *:pointer-events-auto"
+      >
+        <div
+          data-alpha-assistant-host=""
+          className="relative flex min-h-0 flex-1 flex-col justify-end [&>[data-alpha-detent]]:absolute [&>[data-alpha-detent]]:inset-x-0 [&>[data-alpha-detent]]:bottom-0 [&>[data-alpha-detent]]:max-w-none"
+          inert={cause !== undefined || (layers !== undefined && assistantInert(layers))}
+        >
+          {alpha.slot("assistant")}
+        </div>
+        <div data-alpha-top-alerts="" className="pointer-events-none fixed inset-x-0 top-[var(--alpha-safe-top)] z-alert mx-auto flex max-w-103 flex-col gap-2 px-3 pt-2 *:pointer-events-auto">
+          {alpha.slot("overlay")}
+        </div>
+        {alpha.slot("notice")}
+        <div ref={setPortalNode} data-alpha-portal-root="" className="contents" />
+      </main>
+    </ShellLayerHost>
+  );
+}
+
+/** Standalone single-view surface packaged inside a thin Alpha app APK. */
+function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: View }) {
+  const { cause, send } = useMachine(alpha.runtime);
+  const layers = useLayers(alpha.runtime).state;
+  const canvas = useCanvas(alpha.runtime).state;
+  const phone = native();
+  const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
+  const comms = isCommsView(view);
+  const inert = cause !== undefined || (layers !== undefined && pageInert(layers));
+  const hasStepBack = cause === undefined && layers !== undefined && takesBack(layers);
+  const canGoBack = String(hasStepBack);
+  const appRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    void send({ type: "openView", view });
+    const stopChrome = watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
+    const stopApp = watchAppSurface(view, (detail) => {
+      node.ownerDocument.defaultView?.dispatchEvent(new CustomEvent("alpha-view-intent", { detail }));
+    });
+    const win = node.ownerDocument.defaultView;
+    const onRootBack = () => {
+      if (node.ownerDocument.documentElement.dataset.alphaCanGoBack !== "true") finishThinAppTask();
+    };
+    win?.addEventListener("alpha-back", onRootBack);
+    return () => {
+      win?.removeEventListener("alpha-back", onRootBack);
+      stopApp();
+      stopChrome();
+    };
+  }, [alpha, send, view]);
+  return (
+    <ShellLayerHost alpha={alpha} portalContainer={portalNode}>
+      <main
+        ref={appRef}
+        data-alpha-surface="app"
+        data-alpha-view={view}
+        data-alpha-native={phone ? "" : undefined}
+        style={canvas?.covered ? { height: canvas.visible } : undefined}
+        className={cn(
+          "relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent in-data-[alpha-browser-under]:bg-transparent",
+          view === "Camera" && "bg-camera-panel",
+          !phone && "sm:pointer-fine:max-w-103 sm:pointer-fine:border-x sm:pointer-fine:border-border/60",
+        )}
+      >
+        <div
+          data-alpha-shell-page=""
+          data-alpha-comms-stage={comms ? "" : undefined}
+          ref={(node) => {
+            const root = node?.ownerDocument.documentElement;
+            if (root && root.dataset.alphaCanGoBack !== canGoBack) root.dataset.alphaCanGoBack = canGoBack;
+          }}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto overscroll-contain"
+          inert={inert}
+        >
+          {comms && alpha.slot("phone/stage")}
+          {!viewHasHeader(view) && <AppHeader
+            title={views[view].label}
+            leading={hasStepBack && <AppBack alpha={alpha} />}
+            className="shrink-0"
+          />}
+          {alpha.slot(`view:${view}`)}
+        </div>
+        {alpha.slot("notice")}
+        <div ref={setPortalNode} data-alpha-portal-root="" className="contents" />
+      </main>
+    </ShellLayerHost>
+  );
+}
+
 /**
  * Alpha: Home, or the app on top of the trail under its title, with Back offered exactly when the rules allow it, and
  * over them Ask Alpha, whatever covers the screen, and the notices. Each screen is its area's, drawn at its place.
@@ -219,7 +333,19 @@ function useShellSwipe(alpha: Alpha, blocked: boolean, launcher: boolean, owner:
  * stage did (45f6bed30 prototype/model.js:5759-5785).
  * @model spec/app/shell/index.md
  */
-export function App({ alpha }: AppProps) {
+export function App({ alpha, surface }: AppProps) {
+  const resolved = surface ?? currentSurface();
+  switch (resolved.mode) {
+    case "overlay":
+      return <OverlaySurface alpha={alpha} />;
+    case "app":
+      return <AppSurface alpha={alpha} view={resolved.view} />;
+    case "monolith":
+      return <MonolithApp alpha={alpha} />;
+  }
+}
+
+function MonolithApp({ alpha }: { readonly alpha: Alpha }) {
   const { state, cause, can } = useMachine(alpha.runtime);
   const layers = useLayers(alpha.runtime).state;
   const page = usePage(alpha.runtime).state;
