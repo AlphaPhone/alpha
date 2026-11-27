@@ -48,17 +48,60 @@ lemma loadMore_ensures(s: Mailbox)
   }
 }
 
-lemma AccountsAnsweredPart1(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+lemma AccountsAnsweredAlways1A(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
   requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysCountsAreNotNegative(accountsAnswered(s, ticket, ok, connected).state)
+{
+  hide *;
+  reveal inv, alwaysCountsAreNotNegative, accountsAnswered, dropOutlivedKept, emptied, turned, asking, readable, searchableIn, noCount, kit__read_answer, kit__read_ask;
+}
+
+lemma AccountsAnsweredAlways1B(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysAPageCursorIsUsedOnce(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways1C(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysAFurtherPageNeedsAFreshList(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways2(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysChosenMessagesBelongToAFreshList(accountsAnswered(s, ticket, ok, connected).state)
   ensures alwaysAccountsAreKnownOnlyFromAnAnswer(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways3(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysTheAccountSelectedIsConnected(accountsAnswered(s, ticket, ok, connected).state)
   ensures alwaysNothingIsShownWithoutReadAccess(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways4A(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysASavedListIsBoundToItsCredential(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways4B(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysTheListKeptIsOfItsCredential(accountsAnswered(s, ticket, ok, connected).state)
+{
+  SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredAlways4C(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysAFreshCountWasRead(accountsAnswered(s, ticket, ok, connected).state)
 {
   SoleReadableIsConnected(connected);
@@ -99,7 +142,14 @@ lemma accountsAnswered_ensures(s: Mailbox, ticket: int, ok: bool, connected: seq
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepARestartKnowsNoGrant(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
 {
   if inv(s) && canAccountsAnswered(s, ticket) {
-    AccountsAnsweredPart1(s, ticket, ok, connected);
+    AccountsAnsweredAlways1A(s, ticket, ok, connected);
+    AccountsAnsweredAlways1B(s, ticket, ok, connected);
+    AccountsAnsweredAlways1C(s, ticket, ok, connected);
+    AccountsAnsweredAlways2(s, ticket, ok, connected);
+    AccountsAnsweredAlways3(s, ticket, ok, connected);
+    AccountsAnsweredAlways4A(s, ticket, ok, connected);
+    AccountsAnsweredAlways4B(s, ticket, ok, connected);
+    AccountsAnsweredAlways4C(s, ticket, ok, connected);
     AccountsAnsweredPart2(s, ticket, ok, connected);
   }
 }
