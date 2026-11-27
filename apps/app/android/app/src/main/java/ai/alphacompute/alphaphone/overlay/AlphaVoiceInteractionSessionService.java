@@ -28,7 +28,8 @@ import org.json.JSONObject;
 
 /** Session factory maintaining a warm transparent WebView hosting the {@code overlay} surface for sub-50ms Ask Alpha opens. */
 public final class AlphaVoiceInteractionSessionService extends VoiceInteractionSessionService {
-    private static final String OVERLAY_URL = "https://localhost/?surface=overlay";
+    private static final String ASSET_DOMAIN = WebViewAssetLoader.DEFAULT_DOMAIN;
+    private static final String OVERLAY_URL = "https://" + ASSET_DOMAIN + "/?surface=overlay";
 
     /** Reusable warm WebView pool shared across {@link AlphaVoiceInteractionSession} activations. */
     static final class WarmOverlayWebViewPool {
@@ -110,13 +111,13 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
 
             WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
-                .setDomain("localhost")
+                .setDomain(ASSET_DOMAIN)
                 .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(appContext))
                 .build();
             webView.setWebViewClient(new WebViewClient() {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     Uri url = request.getUrl();
-                    if (url != null && "https".equalsIgnoreCase(url.getScheme()) && "localhost".equalsIgnoreCase(url.getHost())) {
+                    if (url != null && "https".equalsIgnoreCase(url.getScheme()) && ASSET_DOMAIN.equalsIgnoreCase(url.getHost())) {
                         String path = url.getPath();
                         if (path == null || path.isEmpty() || "/".equals(path)) {
                             url = url.buildUpon().path("/public/index.html").build();
