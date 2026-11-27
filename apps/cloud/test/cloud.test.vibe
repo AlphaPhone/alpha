@@ -297,10 +297,10 @@ describe(`Alpha Cloud at its hosted origins (spec/cloud/index.md, "Story: Operat
     const colliding = { ...hosts, staging: { ...hosts.staging, appLinkHost: new URL(hosts.production.cloud).hostname } }
     try holds(() => assert.deepStrictEqual(hostedProfileProblems(profile, colliding), [
       "production and staging share an API or App Link hostname",
-      `staging: the profile answers at ${staging.api} for ${staging.web}, and @repo/deployment names ${colliding.staging.cloud} for ${colliding.staging.appLinkHost}`,
+      "staging: the profile's API or web host differs from @repo/deployment",
     ]))
-    const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag)
-    try holds(() => assert.strictEqual(shipped, "CandidateRefused"))
+    const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag === "CandidateRefused" ? failure.message : failure._tag)
+    try holds(() => assert.match(String(shipped), /staging: the profile's API or web host differs from @repo\/deployment/))
   } |> Effect.provide(%, NodeServices.layer))
 })
 

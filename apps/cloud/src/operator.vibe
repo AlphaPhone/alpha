@@ -26,7 +26,7 @@ schema ResourcesFileSchema {
 }
 
 /** A step of the operator's command could not be carried out; the message says which and why, and holds no secret. */
-export error OperatorFailed { problem: string }
+export error OperatorFailed { problem: string, message?: string }
 
 /** The secrets each environment's operator supplies. */
 const providedSecrets = ["DATABASE_URL", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
@@ -167,7 +167,10 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
   const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
   const settled = read.generated ? generated(values) : values
   if (read.generated) try writeSecrets(file, settled)
-  if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  if (read.vault !== "Complete") {
+    const problem = secretProblems(settled, environment).join("\n")
+    throw new OperatorFailed({ problem, message: problem })
+  }
   const signingKey = settled.CLOUD_ENTITLEMENT_KEY ?? ""
   const publicKey = Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }
   return { values: settled, entitlementPublicKey: publicKey }
@@ -212,14 +215,14 @@ effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSy
 }
 
 /** The profile disagrees with Alpha Cloud's hosts or another rule of its deployment. */
-export error CandidateRefused { problems: ReadonlyArray<string> }
+export error CandidateRefused { problems: ReadonlyArray<string>, message: string }
 
 /** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping its deployment rules. */
 export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
   const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
   const hosts = try hostedClouds()
   const problems = hostedProfileProblems(profile, hosts)
-  if (problems.length > 0) throw new CandidateRefused({ problems })
+  if (problems.length > 0) throw new CandidateRefused({ problems, message: problems.join("\n") })
   return { profile, hosts }
 }
 
