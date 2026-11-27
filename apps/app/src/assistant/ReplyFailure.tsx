@@ -1,4 +1,4 @@
-// spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"
+// spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
 import { AssistantCard } from "@repo/ui";
 import type { Failure, Fix } from "../../gen/app__assistant__reply.effect.vibe";
 import { fixShown, managesPlan, showsWait, waitSeconds } from "../../gen/app__assistant__reply.ts";
@@ -44,4 +44,16 @@ export function ReplyFailure({ kind, fix = "NoFix", waitMs = -1, live = false, o
       : { kind: "action", action, title, ...(detail === undefined ? {} : { detail }), ...(action === "funding" ? { label: "Manage plan" } : {}) }}
     onAct={action === "retry" ? onRetry : action !== undefined ? onSettings : undefined}
   />;
+}
+
+/** A step's action as Alpha names it in its notice: `BOOK_TABLE` reads "Book table". */
+function stepName(action: string): string {
+  const words = action.toLowerCase().split("_").filter((word) => word !== "").join(" ");
+  return words === "" ? "A step" : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+/** Alpha's notice, in the failed reply's style, for each step of a reply the agent marked untold. */
+export function UntoldSteps({ untold }: { untold: readonly string[] }) {
+  const steps = untold.map((action, at) => ({ action, earlier: untold.slice(0, at).filter((one) => one === action).length }));
+  return steps.map(({ action, earlier }) => <AssistantCard key={`${action} ${earlier}`} card={{ kind: "plain", text: `${stepName(action)} did not complete` }} />);
 }

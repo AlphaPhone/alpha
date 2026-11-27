@@ -614,9 +614,18 @@ const presence = started(effect {
   try checkNotification
   const page = Stream.changes(Stream.concat(Stream.fromEffect(device.showing()), device.visible))
   const inFront = Stream.zipLatest(Stream.changes(Stream.map(shell.changes, (s) => showing(s, "Maps"))), page)
+  const target = onlineTarget()
+  const notificationTaps = target === undefined
+    ? Stream.empty
+    : Stream.as(Stream.fromEventListener(target, "alpha:maps-open"), undefined)
   let wasFront: boolean | undefined
   let wasVisible: boolean | undefined
-  try Stream.runForEach(inFront, effect ([mapsShown, visible]) => {
+  try Stream.runForEach(Stream.merge(inFront, notificationTaps), effect (visit) => {
+    if (visit === undefined) {
+      try checkNotification
+      return
+    }
+    const [mapsShown, visible] = visit
     const returnedToForeground = visible && wasVisible === false
     wasVisible = visible
     if (returnedToForeground) try checkNotification
