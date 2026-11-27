@@ -2,6 +2,7 @@ package ai.alphacompute.alphaphone.overlay;
 
 import ai.alphacompute.alphaphone.ipc.AlphaContextRegistryService;
 import ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader;
+import ai.alphacompute.control.AlphaControlPolicy;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
 import android.app.ActivityOptions;
@@ -145,9 +146,15 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
     @Override public void onHandleAssist(AssistState state) {
         super.onHandleAssist(state);
         if (isDeviceLocked()) return;
+        AssistStructure structure = state.getAssistStructure();
+        ComponentName component = structure == null ? null : structure.getActivityComponent();
+        String packageName = component == null ? null : component.getPackageName();
+        String activityName = component == null ? null : component.getClassName();
+        if (packageName != null && AlphaControlPolicy.isBlockedTarget(packageName, activityName)) {
+            return;
+        }
         JSONObject payload = new JSONObject();
         Uri webUri = null;
-        String packageName = null;
         try {
             AssistContent content = state.getAssistContent();
             if (content != null) {
@@ -160,14 +167,9 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
                     payload.put("structuredData", structured);
                 }
             }
-            AssistStructure structure = state.getAssistStructure();
-            if (structure != null) {
-                ComponentName component = structure.getActivityComponent();
-                if (component != null) {
-                    packageName = component.getPackageName();
-                    payload.put("packageName", packageName);
-                    payload.put("activityName", component.getClassName());
-                }
+            if (structure != null && component != null) {
+                payload.put("packageName", packageName);
+                payload.put("activityName", activityName);
                 StringBuilder summary = new StringBuilder();
                 int[] visited = new int[] { 0 };
                 String title = extractAssistSummary(structure, summary, visited);
@@ -188,6 +190,7 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
         } catch (JSONException ignored) {
         }
         AlphaOverlayHostPlugin.emitAssistContext(payload);
+        webViewPool.emitAssistContext(payload);
         webViewPool.dispatchWindowEvent("alpha-assist-context", payload);
     }
 

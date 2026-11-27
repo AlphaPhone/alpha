@@ -25,9 +25,11 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -37,10 +39,25 @@ public final class AlphaAgentBrokerService extends Service {
     private static final String TAG = "AlphaAgentBroker";
     private static final String ARCHIVE_RECOVERY_PREFIX = "archiveRecovery:";
 
+    private record ActiveHandle(
+        String owner,
+        String id,
+        IBinder binder,
+        IBinder.DeathRecipient deathRecipient
+    ) {
+        void unlink() {
+            if (binder == null || deathRecipient == null) return;
+            try {
+                binder.unlinkToDeath(deathRecipient, 0);
+            } catch (NoSuchElementException | RuntimeException ignored) {
+            }
+        }
+    }
+
     private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
     private final Map<String, AutoCloseable> statusObservers = new ConcurrentHashMap<>();
-    private final Map<String, String> activeCallOwners = new ConcurrentHashMap<>();
-    private final Map<String, String> activeSubOwners = new ConcurrentHashMap<>();
+    private final Map<String, ActiveHandle> activeCalls = new ConcurrentHashMap<>();
+    private final Map<String, ActiveHandle> activeSubs = new ConcurrentHashMap<>();
     private final ExecutorService ioWorkers = Executors.newCachedThreadPool(task -> {
         Thread thread = new Thread(task, "AlphaAgentBrokerIo");
         thread.setDaemon(true);
@@ -111,7 +128,12 @@ public final class AlphaAgentBrokerService extends Service {
             }
             Log.i(TAG, "request caller=" + callingPkg + " method=" + method + " path=" + path);
             String owner = ownerKey(callingPkg, Binder.getCallingPid());
-            ioWorkers.execute(() -> executeRequest(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
+            try {
+                ioWorkers.execute(() -> executeRequest(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
+            } catch (RejectedExecutionException shuttingDown) {
+                closeQuietly(bodyFd);
+                notifyRequestError(cb, callId, AlphaIpcContract.FAIL_BROKEN, "Broker shutting down");
+            }
         }
 
         @Override public void requestStream(
@@ -140,16 +162,19 @@ public final class AlphaAgentBrokerService extends Service {
             }
             Log.i(TAG, "requestStream caller=" + callingPkg + " method=" + method + " path=" + path);
             String owner = ownerKey(callingPkg, Binder.getCallingPid());
-            ioWorkers.execute(() -> executeStream(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
+            try {
+                ioWorkers.execute(() -> executeStream(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
+            } catch (RejectedExecutionException shuttingDown) {
+                closeQuietly(bodyFd);
+                notifyStreamEnd(cb, callId, "failed", AlphaIpcContract.FAIL_BROKEN);
+            }
         }
 
         @Override public boolean abort(String callId) {
             String callingPkg = requireAuthorizedPackage();
             if (callId == null || callId.isEmpty()) return false;
             String owner = ownerKey(callingPkg, Binder.getCallingPid());
-            String trackedOwner = activeCallOwners.get(callId);
-            if (trackedOwner != null && !trackedOwner.equals(owner)) return false;
-            activeCallOwners.remove(callId);
+            releaseCall(owner, callId);
             return AgentService.channel().abort(owner, callId);
         }
 
@@ -178,8 +203,10 @@ public final class AlphaAgentBrokerService extends Service {
                 notifyEventEnd(cb, subId, "failed", AlphaIpcContract.FAIL_ROUTE_REFUSED);
                 return;
             }
-            activeSubOwners.put(subId, owner);
-            linkCallbackDeath(cb.asBinder(), () -> cleanupSubscription(owner, subId));
+            String key = scopedKey(owner, subId);
+            if (!trackHandle(activeSubs, key, owner, subId, cb.asBinder(), () -> cleanupSubscription(owner, subId))) {
+                return;
+            }
             String resolvedClientId = clientId == null || clientId.isEmpty() ? owner : clientId;
             FailCode refused = AgentService.channel().subscribe(owner, subId, channelTopic, resolvedClientId, new AgentChannel.Listener() {
                 @Override public void head(String id, long index, int status, Map<String, String> headers) {}
@@ -194,12 +221,12 @@ public final class AlphaAgentBrokerService extends Service {
                 }
 
                 @Override public void settled(String id, Outcome outcome, byte[] body) {
-                    activeSubOwners.remove(id);
+                    releaseSub(owner, id);
                     notifyEventEnd(cb, id, outcomeKindWire(outcome), failCodeWire(outcome));
                 }
             });
             if (refused != null) {
-                activeSubOwners.remove(subId);
+                releaseSub(owner, subId);
                 notifyEventEnd(cb, subId, "failed", failCodeName(refused));
             }
         }
@@ -230,14 +257,16 @@ public final class AlphaAgentBrokerService extends Service {
             }
         }
         statusObservers.clear();
-        for (Map.Entry<String, String> entry : activeCallOwners.entrySet()) {
-            AgentService.channel().abort(entry.getValue(), entry.getKey());
+        for (ActiveHandle handle : activeCalls.values()) {
+            handle.unlink();
+            AgentService.channel().abort(handle.owner(), handle.id());
         }
-        activeCallOwners.clear();
-        for (Map.Entry<String, String> entry : activeSubOwners.entrySet()) {
-            AgentService.channel().abort(entry.getValue(), entry.getKey());
+        activeCalls.clear();
+        for (ActiveHandle handle : activeSubs.values()) {
+            handle.unlink();
+            AgentService.channel().abort(handle.owner(), handle.id());
         }
-        activeSubOwners.clear();
+        activeSubs.clear();
         ioWorkers.shutdownNow();
         super.onDestroy();
     }
@@ -262,36 +291,42 @@ public final class AlphaAgentBrokerService extends Service {
             notifyRequestError(cb, callId, code, failed.getMessage());
             return;
         }
-        activeCallOwners.put(callId, owner);
-        linkCallbackDeath(cb.asBinder(), () -> {
-            activeCallOwners.remove(callId);
+        String key = scopedKey(owner, callId);
+        if (!trackHandle(activeCalls, key, owner, callId, cb.asBinder(), () -> {
+            releaseCall(owner, callId);
             AgentService.channel().abort(owner, callId);
-        });
+        })) {
+            return;
+        }
         FailCode refused = AgentService.channel().ask(owner, callId, method, path, false, body, parseHeaders(headersJson), new AgentChannel.Listener() {
             @Override public void head(String id, long index, int status, Map<String, String> headers) {}
             @Override public void chunk(String id, long index, byte[] data) {}
             @Override public void event(String id, long index, JSONObject event) {}
 
             @Override public void settled(String id, Outcome outcome, byte[] replyBody) {
-                activeCallOwners.remove(id);
+                releaseCall(owner, id);
                 if (outcome.kind() != OutcomeKind.RESPONSE) {
                     notifyRequestError(cb, id, failCodeWire(outcome), outcome.kind().name());
                     return;
                 }
-                ioWorkers.execute(() -> {
-                    try (PfdStreams.Payload packed = PfdStreams.pack(replyBody, AlphaIpcContract.MAX_PFD_BODY_BYTES)) {
-                        cb.onResponse(id, (int) outcome.status(), packed.inlineBody(), packed.bodyFd());
-                    } catch (IOException | RemoteException failed) {
-                        String code = failed instanceof PfdStreams.PayloadTooLargeException
-                            ? AlphaIpcContract.FAIL_TOO_LARGE
-                            : AlphaIpcContract.FAIL_BROKEN;
-                        notifyRequestError(cb, id, code, failed.getMessage());
-                    }
-                });
+                try {
+                    ioWorkers.execute(() -> {
+                        try (PfdStreams.Payload packed = PfdStreams.pack(replyBody, AlphaIpcContract.MAX_PFD_BODY_BYTES)) {
+                            cb.onResponse(id, (int) outcome.status(), packed.inlineBody(), packed.bodyFd());
+                        } catch (IOException | RemoteException failed) {
+                            String code = failed instanceof PfdStreams.PayloadTooLargeException
+                                ? AlphaIpcContract.FAIL_TOO_LARGE
+                                : AlphaIpcContract.FAIL_BROKEN;
+                            notifyRequestError(cb, id, code, failed.getMessage());
+                        }
+                    });
+                } catch (RejectedExecutionException shuttingDown) {
+                    notifyRequestError(cb, id, AlphaIpcContract.FAIL_BROKEN, "Broker shutting down");
+                }
             }
         });
         if (refused != null) {
-            activeCallOwners.remove(callId);
+            releaseCall(owner, callId);
             notifyRequestError(cb, callId, failCodeName(refused), refused.name());
         }
     }
@@ -316,17 +351,19 @@ public final class AlphaAgentBrokerService extends Service {
             notifyStreamEnd(cb, callId, "failed", code);
             return;
         }
-        activeCallOwners.put(callId, owner);
-        linkCallbackDeath(cb.asBinder(), () -> {
-            activeCallOwners.remove(callId);
+        String key = scopedKey(owner, callId);
+        if (!trackHandle(activeCalls, key, owner, callId, cb.asBinder(), () -> {
+            releaseCall(owner, callId);
             AgentService.channel().abort(owner, callId);
-        });
+        })) {
+            return;
+        }
         FailCode refused = AgentService.channel().ask(owner, callId, method, path, true, body, parseHeaders(headersJson), new AgentChannel.Listener() {
             @Override public void head(String id, long index, int status, Map<String, String> headers) {
                 try {
                     cb.onHead(id, index, status, encodeHeaders(headers));
                 } catch (RemoteException dead) {
-                    activeCallOwners.remove(id);
+                    releaseCall(owner, id);
                     AgentService.channel().abort(owner, id);
                 }
             }
@@ -337,7 +374,7 @@ public final class AlphaAgentBrokerService extends Service {
                     try {
                         cb.onChunk(id, index, slice);
                     } catch (RemoteException dead) {
-                        activeCallOwners.remove(id);
+                        releaseCall(owner, id);
                         AgentService.channel().abort(owner, id);
                         return;
                     }
@@ -347,17 +384,21 @@ public final class AlphaAgentBrokerService extends Service {
             @Override public void event(String id, long index, JSONObject event) {}
 
             @Override public void settled(String id, Outcome outcome, byte[] replyBody) {
-                activeCallOwners.remove(id);
+                releaseCall(owner, id);
                 notifyStreamEnd(cb, id, outcomeKindWire(outcome), failCodeWire(outcome));
             }
         });
         if (refused != null) {
-            activeCallOwners.remove(callId);
+            releaseCall(owner, callId);
             notifyStreamEnd(cb, callId, "failed", failCodeName(refused));
         }
     }
 
     private void subscribeStatus(String owner, String subId, IAlphaEventCallback cb) {
+        String key = scopedKey(owner, subId);
+        if (!trackHandle(activeSubs, key, owner, subId, cb.asBinder(), () -> cleanupSubscription(owner, subId))) {
+            return;
+        }
         AtomicLong seq = new AtomicLong(0);
         Runnable push = () -> {
             try {
@@ -367,23 +408,20 @@ public final class AlphaAgentBrokerService extends Service {
             }
         };
         AutoCloseable observer = AgentService.observe(push);
-        AutoCloseable previous = statusObservers.put(subId, observer);
+        AutoCloseable previous = statusObservers.put(key, observer);
         if (previous != null) {
             try {
                 previous.close();
             } catch (Exception ignored) {
             }
         }
-        activeSubOwners.put(subId, owner);
-        linkCallbackDeath(cb.asBinder(), () -> cleanupSubscription(owner, subId));
         push.run();
     }
 
     private void cleanupSubscription(String owner, String subId) {
-        String trackedOwner = activeSubOwners.get(subId);
-        if (trackedOwner != null && !trackedOwner.equals(owner)) return;
-        activeSubOwners.remove(subId);
-        AutoCloseable observer = statusObservers.remove(subId);
+        String key = scopedKey(owner, subId);
+        releaseSub(owner, subId);
+        AutoCloseable observer = statusObservers.remove(key);
         if (observer != null) {
             try {
                 observer.close();
@@ -392,6 +430,41 @@ public final class AlphaAgentBrokerService extends Service {
             return;
         }
         AgentService.channel().abort(owner, subId);
+    }
+
+    private boolean trackHandle(
+        Map<String, ActiveHandle> map,
+        String key,
+        String owner,
+        String id,
+        IBinder target,
+        Runnable onDied
+    ) {
+        IBinder.DeathRecipient recipient = onDied::run;
+        ActiveHandle handle = new ActiveHandle(owner, id, target, recipient);
+        ActiveHandle previous = map.put(key, handle);
+        if (previous != null) {
+            previous.unlink();
+        }
+        if (target == null) return true;
+        try {
+            target.linkToDeath(recipient, 0);
+            return true;
+        } catch (RemoteException alreadyDead) {
+            map.remove(key, handle);
+            onDied.run();
+            return false;
+        }
+    }
+
+    private void releaseCall(String owner, String callId) {
+        ActiveHandle removed = activeCalls.remove(scopedKey(owner, callId));
+        if (removed != null) removed.unlink();
+    }
+
+    private void releaseSub(String owner, String subId) {
+        ActiveHandle removed = activeSubs.remove(scopedKey(owner, subId));
+        if (removed != null) removed.unlink();
     }
 
     private String verifyPackageOrNull() {
@@ -410,13 +483,8 @@ public final class AlphaAgentBrokerService extends Service {
         return "ipc-" + packageName + "-" + callingPid;
     }
 
-    private static void linkCallbackDeath(IBinder target, Runnable onDied) {
-        if (target == null) return;
-        try {
-            target.linkToDeath(onDied::run, 0);
-        } catch (RemoteException alreadyDead) {
-            onDied.run();
-        }
+    private static String scopedKey(String owner, String id) {
+        return owner + ":" + (id == null ? "" : id);
     }
 
     private static Map<String, Object> parseHeaders(String headersJson) {

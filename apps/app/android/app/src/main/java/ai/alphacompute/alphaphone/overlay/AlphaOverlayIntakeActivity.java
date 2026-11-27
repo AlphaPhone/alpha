@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone.overlay;
 
+import ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
 import android.app.Activity;
@@ -98,14 +99,15 @@ public final class AlphaOverlayIntakeActivity extends Activity {
         String pkg = null;
         if (Build.VERSION.SDK_INT >= 34) {
             pkg = getLaunchedFromPackage();
-        }
-        if (pkg == null) {
+            if (pkg == null) return null;
+        } else {
             Uri referrer = getReferrer();
             if (referrer != null && "android-app".equals(referrer.getScheme())) {
                 pkg = referrer.getHost();
             }
         }
-        if (pkg == null || !AlphaSuitePolicy.defaults().isKnownPackage(pkg)) return null;
+        AlphaSuitePolicy policy = AlphaSuitePolicyLoader.load(this);
+        if (pkg == null || !policy.isKnownPackage(pkg)) return null;
         return AlphaIpcContract.hasCoreSignature(this, pkg) ? pkg : null;
     }
 

@@ -11,6 +11,9 @@ import android.os.IBinder;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -54,11 +57,27 @@ public final class AlphaContextRegistryService extends Service {
         }
     }
 
+    private record ClientRegistration(
+        String packageName,
+        IBinder token,
+        IBinder.DeathRecipient deathRecipient
+    ) {
+        void unlink() {
+            if (token == null || deathRecipient == null) return;
+            try {
+                token.unlinkToDeath(deathRecipient, 0);
+            } catch (NoSuchElementException | RuntimeException ignored) {
+            }
+        }
+    }
+
     private static final Object STATE_LOCK = new Object();
     private static volatile ActiveContext currentContext;
+    private static volatile AlphaContextRegistryService liveInstance;
 
     private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
     private final RemoteCallbackList<IAlphaContextObserver> observers = new RemoteCallbackList<>();
+    private final Map<IBinder, ClientRegistration> clientRegistrations = new ConcurrentHashMap<>();
 
     private final IAlphaContextRegistry.Stub binder = new IAlphaContextRegistry.Stub() {
         @Override public void publishContext(String view, String route, String snapshotJson, boolean sensitive, long leaseMs) {
@@ -132,6 +151,23 @@ public final class AlphaContextRegistryService extends Service {
                 observers.unregister(observer);
             }
         }
+
+        @Override public void registerClient(IBinder clientToken) {
+            String callingPkg = requireAuthorizedPackage();
+            if (clientToken == null) return;
+            IBinder.DeathRecipient recipient = () -> handleClientDied(callingPkg, clientToken);
+            ClientRegistration registration = new ClientRegistration(callingPkg, clientToken, recipient);
+            ClientRegistration previous = clientRegistrations.put(clientToken, registration);
+            if (previous != null) {
+                previous.unlink();
+            }
+            try {
+                clientToken.linkToDeath(recipient, 0);
+            } catch (RemoteException alreadyDead) {
+                clientRegistrations.remove(clientToken, registration);
+                handleClientDied(callingPkg, clientToken);
+            }
+        }
     };
 
     /** In-process accessor for AlphaCore's {@code AlphaVoiceInteractionSession} to read unexpired active app context. */
@@ -148,13 +184,21 @@ public final class AlphaContextRegistryService extends Service {
         }
     }
 
-    /** Clears any context owned by {@code packageName} when that process exits or unbinds. */
+    /** Clears any context owned by {@code packageName} when that process exits or unbinds and notifies observers. */
     public static void clearForPackage(String packageName) {
         if (packageName == null || packageName.isEmpty()) return;
+        boolean changed = false;
         synchronized (STATE_LOCK) {
             ActiveContext existing = currentContext;
             if (existing != null && packageName.equals(existing.packageName())) {
                 currentContext = null;
+                changed = true;
+            }
+        }
+        if (changed) {
+            AlphaContextRegistryService instance = liveInstance;
+            if (instance != null) {
+                instance.broadcastContext(null);
             }
         }
     }
@@ -162,6 +206,7 @@ public final class AlphaContextRegistryService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         policy = AlphaSuitePolicyLoader.load(this);
+        liveInstance = this;
     }
 
     @Override public IBinder onBind(Intent intent) {
@@ -169,8 +214,28 @@ public final class AlphaContextRegistryService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (liveInstance == this) {
+            liveInstance = null;
+        }
+        for (ClientRegistration registration : clientRegistrations.values()) {
+            registration.unlink();
+        }
+        clientRegistrations.clear();
         observers.kill();
         super.onDestroy();
+    }
+
+    private void handleClientDied(String packageName, IBinder token) {
+        ClientRegistration removed = clientRegistrations.remove(token);
+        if (removed != null) {
+            removed.unlink();
+        }
+        for (ClientRegistration remaining : clientRegistrations.values()) {
+            if (packageName.equals(remaining.packageName())) {
+                return;
+            }
+        }
+        clearForPackage(packageName);
     }
 
     private void broadcastContext(String activeJson) {

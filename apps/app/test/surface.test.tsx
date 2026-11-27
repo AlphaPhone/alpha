@@ -326,6 +326,33 @@ describe("Overlay external control kill-switch banner", () => {
   // spec/app/control/index.md, "The kill-switch immediately revokes any active lease, clears any in-flight operation, and signals the native bridge and overlay"
   it('stays hidden when idle, displays active lease progress, and stops immediately on owner tap (spec/app/control/index.md, "The kill-switch immediately revokes any active lease, clears any in-flight operation, and signals the native bridge and overlay")', async () => {
     const stopReasons: string[] = [];
+    let killed = false;
+    let lease = {
+      leaseId: 0,
+      packageName: "",
+      maxOps: 0,
+      usedOps: 0,
+      expiresAtMs: 0,
+      status: "LeaseInactive" as "LeaseInactive" | "LeaseActive" | "LeaseRevoked",
+    };
+    const statePayload = () => ({
+      tier: "TierAccessibility" as const,
+      capabilities: ["ui.observe.v1", "ui.act.v1"],
+      foreground: {
+        snapId: 1,
+        packageName: "org.mozilla.firefox",
+        activityName: "org.mozilla.fenix.HomeActivity",
+        webUri: "https://example.com",
+        targetKind: "AllowedApp" as const,
+        protection: "ScreenClear" as const,
+        windowCount: 1,
+        observedAtMs: 1_000,
+      },
+      lease,
+      pending: null,
+      lastResult: "done" as const,
+      killed,
+    });
     const http = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) => Effect.sync(() => {
       const pathname = new URL(request.url, "http://agent.test").pathname;
       const body = request.body._tag === "Uint8Array"
@@ -336,38 +363,24 @@ describe("Overlay external control kill-switch banner", () => {
         new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } }),
       );
       if (pathname === "/api/health") return reply({ ready: true });
+      if (pathname === "/api/alpha/control/state") return reply(statePayload());
       if (pathname === "/api/alpha/control/lease") {
-        return reply({
-          lease: {
-            leaseId: 1,
-            packageName: typeof body.packageName === "string" ? body.packageName : "org.mozilla.firefox",
-            maxOps: Number(body.maxOps ?? 3),
-            usedOps: 0,
-            expiresAtMs: 61_000,
-            status: "LeaseActive",
-          },
-        });
+        killed = false;
+        lease = {
+          leaseId: 1,
+          packageName: typeof body.packageName === "string" ? body.packageName : "org.mozilla.firefox",
+          maxOps: Number(body.maxOps ?? 3),
+          usedOps: 0,
+          expiresAtMs: 61_000,
+          status: "LeaseActive",
+        };
+        return reply({ lease });
       }
       if (pathname === "/api/alpha/control/stop") {
         stopReasons.push(typeof body.reason === "string" ? body.reason : "kill_switch");
-        return reply({
-          tier: "TierAccessibility",
-          capabilities: ["ui.observe.v1", "ui.act.v1"],
-          foreground: {
-            snapId: 1,
-            packageName: "org.mozilla.firefox",
-            activityName: "org.mozilla.fenix.HomeActivity",
-            webUri: "https://example.com",
-            targetKind: "AllowedApp",
-            protection: "ScreenClear",
-            windowCount: 1,
-            observedAtMs: 1_000,
-          },
-          lease: { leaseId: 1, packageName: "org.mozilla.firefox", maxOps: 3, usedOps: 1, expiresAtMs: 61_000, status: "LeaseRevoked" },
-          pending: null,
-          lastResult: "done",
-          killed: true,
-        });
+        killed = true;
+        if (lease.status === "LeaseActive") lease = { ...lease, status: "LeaseRevoked" };
+        return reply(statePayload());
       }
       return reply({ error: "not_found" }, 404);
     })));

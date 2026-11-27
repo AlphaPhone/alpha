@@ -1,6 +1,7 @@
 package ai.alphacompute.alphaphone.overlay;
 
-import ai.alphacompute.alphaphone.AlphaAssistActivity;
+import ai.alphacompute.alphaphone.MainActivity;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -13,6 +14,7 @@ public final class AlphaVoiceInteractionService extends VoiceInteractionService 
     public static final String EXTRA_ENTRY_SOURCE = "alpha.overlay.entrySource";
     public static final String EXTRA_START_VOICE = "alpha.overlay.startVoice";
     public static final String EXTRA_INITIAL_QUERY = "alpha.overlay.initialQuery";
+    private static final String ACTION_TEXT_ASK = "ai.alphacompute.alphaphone.TEXT_ASK";
 
     private static volatile WeakReference<AlphaVoiceInteractionService> liveService = new WeakReference<>(null);
 
@@ -29,7 +31,7 @@ public final class AlphaVoiceInteractionService extends VoiceInteractionService 
         super.onShutdown();
     }
 
-    /** Shows the active Ask Alpha {@link VoiceInteractionSession}, falling back to {@link AlphaAssistActivity} if unbound. */
+    /** Shows the active Ask Alpha {@link VoiceInteractionSession}, falling back to {@link MainActivity} if unbound. */
     public static boolean showOverlay(Context context, Bundle args) {
         AlphaVoiceInteractionService service = liveService.get();
         Bundle payload = args == null ? new Bundle() : new Bundle(args);
@@ -40,17 +42,18 @@ public final class AlphaVoiceInteractionService extends VoiceInteractionService 
                     VoiceInteractionSession.SHOW_WITH_ASSIST | VoiceInteractionSession.SHOW_WITH_SCREENSHOT
                 );
                 return true;
-            } catch (RuntimeException ignored) {
+            } catch (SecurityException | RuntimeException ignored) {
             }
         }
         if (context == null) return false;
-        Intent assist = new Intent(context, AlphaAssistActivity.class)
-            .setAction(Intent.ACTION_ASSIST)
+        Intent fallback = new Intent(context, MainActivity.class)
+            .setAction(ACTION_TEXT_ASK)
+            .putExtras(payload)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
-            context.startActivity(assist);
+            context.startActivity(fallback);
             return true;
-        } catch (RuntimeException unavailable) {
+        } catch (SecurityException | ActivityNotFoundException | RuntimeException unavailable) {
             return false;
         }
     }

@@ -13,6 +13,8 @@ import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Signature-protected ContentProvider synchronizing allowlisted non-secret preferences across AlphaCore and thin apps. */
 public final class AlphaPreferencesProvider extends ContentProvider {
@@ -130,6 +132,58 @@ public final class AlphaPreferencesProvider extends ContentProvider {
     }
 
     private String readValue(Context context, SharedPreferences store, String key) {
+        return readValueInternal(context, store, key);
+    }
+
+    /** In-process read helper for AlphaCore's overlay surface. */
+    public static String readForCore(Context context, String key) {
+        if (context == null || !AlphaIpcContract.isReadablePreferenceKey(key)) return null;
+        SharedPreferences store = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        return readValueInternal(context, store, key);
+    }
+
+    /** In-process write helper for AlphaCore's overlay surface. */
+    public static boolean writeForCore(Context context, String key, String value) {
+        if (context == null || !AlphaIpcContract.isSharedPreferenceKey(key) || value == null) return false;
+        if (value.getBytes(StandardCharsets.UTF_8).length > MAX_PREF_VALUE_BYTES) return false;
+        SharedPreferences store = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        boolean committed = store.edit().putString(key, value).commit();
+        if (committed && AlphaIpcContract.KEY_TEXT_SCALE.equals(key)) {
+            mirrorTextScale(context, value);
+        }
+        if (committed) {
+            context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+        }
+        return committed;
+    }
+
+    /** In-process remove helper for AlphaCore's overlay surface. */
+    public static boolean removeForCore(Context context, String key) {
+        if (context == null || !AlphaIpcContract.isSharedPreferenceKey(key)) return false;
+        SharedPreferences store = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        boolean committed = store.edit().remove(key).commit();
+        if (committed && AlphaIpcContract.KEY_TEXT_SCALE.equals(key)) {
+            context.getSharedPreferences(APPEARANCE_PREFS, Context.MODE_PRIVATE).edit().remove(TEXT_SCALE_INT_KEY).commit();
+        }
+        if (committed) {
+            context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+        }
+        return committed;
+    }
+
+    /** In-process snapshot helper for AlphaCore's overlay surface. */
+    public static Map<String, String> snapshotForCore(Context context) {
+        Map<String, String> values = new LinkedHashMap<>();
+        if (context == null) return values;
+        SharedPreferences store = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        for (String key : AlphaIpcContract.READABLE_PREFERENCE_KEYS) {
+            String value = readValueInternal(context, store, key);
+            if (value != null) values.put(key, value);
+        }
+        return values;
+    }
+
+    private static String readValueInternal(Context context, SharedPreferences store, String key) {
         String direct = store.getString(key, null);
         if (direct != null) return direct;
         if (AlphaIpcContract.KEY_TEXT_SCALE.equals(key)) {

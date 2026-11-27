@@ -3,6 +3,7 @@ package ai.alphacompute.alphaphone.overlay;
 import ai.alphacompute.alphaphone.BuildConfig;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -30,12 +31,16 @@ import org.json.JSONObject;
 public final class AlphaVoiceInteractionSessionService extends VoiceInteractionSessionService {
     private static final String ASSET_DOMAIN = WebViewAssetLoader.DEFAULT_DOMAIN;
     private static final String OVERLAY_URL = "https://" + ASSET_DOMAIN + "/?surface=overlay";
+    private static final int MAX_PENDING_SCRIPTS = 128;
 
     /** Reusable warm WebView pool shared across {@link AlphaVoiceInteractionSession} activations. */
     static final class WarmOverlayWebViewPool {
         private final Context appContext;
         private final Handler mainHandler = new Handler(Looper.getMainLooper());
+        private final List<String> pendingScripts = new ArrayList<>();
         private WebView warmView;
+        private AlphaOverlayCapacitorBridge capacitorBridge;
+        private boolean pageReady;
 
         WarmOverlayWebViewPool(Context context) {
             this.appContext = context.getApplicationContext();
@@ -64,10 +69,17 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
         }
 
         void destroy() {
-            WebView view = warmView;
-            warmView = null;
-            if (view == null) return;
             Runnable teardown = () -> {
+                pageReady = false;
+                pendingScripts.clear();
+                AlphaOverlayCapacitorBridge bridge = capacitorBridge;
+                capacitorBridge = null;
+                if (bridge != null) {
+                    bridge.close();
+                }
+                WebView view = warmView;
+                warmView = null;
+                if (view == null) return;
                 if (view.getParent() instanceof ViewGroup parent) {
                     parent.removeView(view);
                 }
@@ -82,17 +94,45 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
         }
 
         void dispatchWindowEvent(String eventName, JSONObject detail) {
-            WebView view = warmView;
-            if (view == null || eventName == null || eventName.isEmpty()) return;
+            if (eventName == null || eventName.isEmpty()) return;
             String encodedName = JSONObject.quote(eventName);
             String encodedDetail = JSONObject.quote(detail == null ? "{}" : detail.toString());
             String script = "(() => { window.dispatchEvent(new CustomEvent(" + encodedName
                 + ", { detail: JSON.parse(" + encodedDetail + ") })); })()";
+            evaluateScript(script);
+        }
+
+        void emitAssistContext(JSONObject payload) {
+            AlphaOverlayCapacitorBridge bridge = capacitorBridge;
+            if (bridge != null) {
+                bridge.emitPluginEvent("AlphaOverlayHost", "assistContext", payload);
+            }
+        }
+
+        private void evaluateScript(String script) {
+            if (script == null || script.isEmpty()) return;
             mainHandler.post(() -> {
-                if (warmView != null) {
+                if (warmView != null && pageReady) {
                     warmView.evaluateJavascript(script, null);
+                } else if (pendingScripts.size() < MAX_PENDING_SCRIPTS) {
+                    pendingScripts.add(script);
                 }
             });
+        }
+
+        private void flushPendingScripts(WebView view) {
+            if (pendingScripts.isEmpty()) return;
+            List<String> queued = new ArrayList<>(pendingScripts);
+            pendingScripts.clear();
+            for (String script : queued) {
+                view.evaluateJavascript(script, null);
+            }
+        }
+
+        private static boolean isOverlayOrigin(Uri url) {
+            return url != null
+                && "https".equalsIgnoreCase(url.getScheme())
+                && ASSET_DOMAIN.equalsIgnoreCase(url.getHost());
         }
 
         @SuppressLint("SetJavaScriptEnabled")
@@ -110,14 +150,26 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
             settings.setAllowContentAccess(false);
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
 
+            capacitorBridge = AlphaOverlayCapacitorBridge.attach(
+                appContext,
+                webView,
+                ASSET_DOMAIN,
+                this::evaluateScript
+            );
+
             WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
                 .setDomain(ASSET_DOMAIN)
                 .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(appContext))
                 .build();
             webView.setWebViewClient(new WebViewClient() {
+                @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                    Uri url = request == null ? null : request.getUrl();
+                    return !isOverlayOrigin(url);
+                }
+
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                     Uri url = request.getUrl();
-                    if (url != null && "https".equalsIgnoreCase(url.getScheme()) && ASSET_DOMAIN.equalsIgnoreCase(url.getHost())) {
+                    if (isOverlayOrigin(url)) {
                         String path = url.getPath();
                         if (path == null || path.isEmpty() || "/".equals(path)) {
                             url = url.buildUpon().path("/public/index.html").build();
@@ -127,6 +179,21 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
                         return assetLoader.shouldInterceptRequest(url);
                     }
                     return null;
+                }
+
+                @Override public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                    pageReady = false;
+                    if (url != null && isOverlayOrigin(Uri.parse(url))) {
+                        view.evaluateJavascript(AlphaOverlayCapacitorBridge.bootstrapScript(), null);
+                    }
+                }
+
+                @Override public void onPageFinished(WebView view, String url) {
+                    if (url != null && isOverlayOrigin(Uri.parse(url))) {
+                        view.evaluateJavascript(AlphaOverlayCapacitorBridge.bootstrapScript(), null);
+                        pageReady = true;
+                        flushPendingScripts(view);
+                    }
                 }
             });
             webView.addJavascriptInterface(new OverlayJsBridge(), "AlphaOverlayNative");

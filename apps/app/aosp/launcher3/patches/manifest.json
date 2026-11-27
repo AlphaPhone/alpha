@@ -3,7 +3,7 @@
   "project": "packages/apps/Launcher3",
   "revision": "c612e6ece389f21c40f8cb9cd9a4b44239f00009",
   "patch": "alpha-qsb-ask-bar.patch",
-  "patchSha256": "bb71f91f895c34baf373dca3f60a476d431c9991d6a1a03c818cf23a517fba39",
+  "patchSha256": "c526b6eda3283f16396d8931747c28d28a52d2330089be5481cefdec3f29cc26",
   "files": [
     {
       "path": "src/com/android/launcher3/qsb/QsbContainerView.java",

@@ -36,6 +36,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -101,7 +102,12 @@ public final class AlphaPlatformBrokerService extends Service {
             Map<String, String> headers = parseStringMap(headersJson);
             boolean billingSession = expectedSessionCredentialId != null && !expectedSessionCredentialId.isBlank();
             String bindingId = billingSession ? expectedSessionCredentialId : expectedCredentialId;
-            workers.execute(() -> executeCloud(callId, method, target, headers, inlineBody, bodyFd, bindingId, billingSession, cb));
+            try {
+                workers.execute(() -> executeCloud(callId, method, target, headers, inlineBody, bodyFd, bindingId, billingSession, cb));
+            } catch (RejectedExecutionException shuttingDown) {
+                closeQuietly(bodyFd);
+                notifyCloudError(cb, callId, "network", "Broker shutting down");
+            }
         }
 
         @Override public String signInCall(String method, String argsJson) {
