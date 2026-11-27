@@ -20,6 +20,7 @@ const numbersKey = "alpha.calendar.numbers"
 const decodeNumbers = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({
   last: Schema.Number,
   numbers: Schema.Array(Schema.Union([Schema.Tuple([Schema.String, Schema.Number]), Schema.Tuple([Schema.String, Schema.Number, Schema.Number])])),
+  seen: Schema.optional(Schema.Array(Schema.Tuple([Schema.String, Schema.Number]))),
 })))
 
 // spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm"
