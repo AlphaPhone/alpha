@@ -15,6 +15,7 @@ import {
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
   oklchToHex,
+  resolveAndroidAvdHome,
   runCli,
   scanSecurityInvariants,
   sortApksCoreFirst,
@@ -317,6 +318,67 @@ describe("project CLI", () => {
       io: recorded.io,
     })).toBe(0);
     expect(recorded.out()).toBe("ok:HELLO WORLD\n");
+
+    const flagValue = createRecorder();
+    expect(await runCli({
+      argv: ["echo", "--prefix=--help", "hi"],
+      commands: [custom],
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: flagValue.io,
+    })).toBe(0);
+    expect(flagValue.out()).toBe("--help:hi\n");
+
+    const ambiguousFlagValue = createRecorder();
+    expect(await runCli({
+      argv: ["echo", "--prefix", "--help", "hi"],
+      commands: [custom],
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: ambiguousFlagValue.io,
+    })).toBe(2);
+    expect(ambiguousFlagValue.out()).toBe("");
+
+    const bundledHelp = createRecorder();
+    expect(await runCli({
+      argv: ["echo", "-uh"],
+      commands: [custom],
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: bundledHelp.io,
+    })).toBe(0);
+    expect(bundledHelp.out()).toContain("Usage: pnpm cli echo [options]");
+
+    const passthrough = createRecorder();
+    expect(await runCli({
+      argv: ["echo", "--", "--help"],
+      commands: [custom],
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: passthrough.io,
+    })).toBe(0);
+    expect(passthrough.out()).toBe("--help\n");
+
+    expect(() => defineCommand({ name: "help", summary: "Reserved", run: () => ({ ok: true, data: null }) })).toThrow();
+    expect(() => defineCommand({
+      name: "bad",
+      summary: "Reserved flag",
+      flags: { json: { kind: "boolean", description: "Reserved" } },
+      run: () => ({ ok: true, data: null }),
+    })).toThrow();
+    expect(() => defineCommand({
+      name: "bad-short",
+      summary: "Reserved short",
+      flags: { header: { kind: "string", short: "h", description: "Reserved" } },
+      run: () => ({ ok: true, data: null }),
+    })).toThrow();
+    await expect(runCli({
+      argv: ["echo"],
+      commands: [custom, custom],
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: createRecorder().io,
+    })).rejects.toThrow(/Duplicate CLI command/);
   });
 
   test("executes directly on Node 26 via src/main.ts", () => {
@@ -593,8 +655,26 @@ describe("project CLI", () => {
       `Enabled services:{${enabledSetting}}`,
       `services:{Service[label=Alpha Control, component=${enabledSetting}]}`,
     ].join("\n");
+    const android35BoundDump = [
+      `Enabled services:{${enabledSetting}}`,
+      "Bound services:{Service[label=Alpha Device Control, feedbackType[FEEDBACK_GENERIC], capabilities=161]}",
+    ].join("\n");
     expect(inspectAccessibilityDump(boundDump, enabledSetting).passed).toBe(true);
+    expect(inspectAccessibilityDump(android35BoundDump, enabledSetting).passed).toBe(true);
     expect(inspectAccessibilityDump(`Enabled services:{${enabledSetting}}\nservices:{}`, enabledSetting).passed).toBe(false);
+
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-next-avd-home-"));
+    try {
+      const xdgConfig = path.join(tmpHome, ".config");
+      const xdgAvdDir = path.join(xdgConfig, ".android/avd");
+      fs.mkdirSync(xdgAvdDir, { recursive: true });
+      fs.writeFileSync(path.join(xdgAvdDir, "alpha_next_api35.ini"), "path=/tmp/fake\n", "utf8");
+      expect(resolveAndroidAvdHome({ XDG_CONFIG_HOME: xdgConfig }, "alpha_next_api35", tmpHome)).toBe(xdgAvdDir);
+      expect(resolveAndroidAvdHome({ ANDROID_AVD_HOME: "/custom/avd", XDG_CONFIG_HOME: xdgConfig }, "alpha_next_api35", tmpHome)).toBe("/custom/avd");
+      expect(resolveAndroidAvdHome({ XDG_CONFIG_HOME: xdgConfig }, "other_avd", tmpHome)).toBe(path.join(tmpHome, ".android/avd"));
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
 
     const controlLogs = [
       "11-27 01:10:00.100 1000 1000 I AlphaAccessibilityService: event=connected tier=TierAccessibility",

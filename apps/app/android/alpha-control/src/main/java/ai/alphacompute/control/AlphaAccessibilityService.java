@@ -135,6 +135,7 @@ public final class AlphaAccessibilityService extends AccessibilityService {
 
     private static final String TAG_SERVICE = "AlphaAccessibilityService";
     private static final String TAG_POLICY = "AlphaControlPolicy";
+    private static final long RETRY_OBSERVE_INTERVAL_MS = 400L;
     private static final AtomicReference<AlphaAccessibilityService> LIVE = new AtomicReference<>();
     private static final AtomicReference<ControlListener> LISTENER = new AtomicReference<>();
     private static final Map<String, String> ASSIST_WEB_URIS = new ConcurrentHashMap<>();
@@ -146,11 +147,14 @@ public final class AlphaAccessibilityService extends AccessibilityService {
     });
 
     private final AtomicInteger localRevision = new AtomicInteger(0);
+    private final AtomicInteger lastObservedNodes = new AtomicInteger(0);
+    private final AtomicLong lastRetryObserveElapsedMs = new AtomicLong(0L);
     private final AtomicLong lastScreenshotElapsedMs = new AtomicLong(0L);
     private final Object nodeCacheLock = new Object();
     private final Map<String, AccessibilityNodeInfo> liveNodes = new HashMap<>();
     private volatile String activePackage = "";
     private volatile String activeActivity = "";
+    private volatile String lastObservedPackage = "";
     private volatile boolean activeWindowFlagSecure;
 
     /** Return the currently connected accessibility service instance, or null if disabled. */
@@ -209,8 +213,11 @@ public final class AlphaAccessibilityService extends AccessibilityService {
                 activeActivity,
                 cls == null ? null : cls.toString()
             );
-            if (!activePackage.equals(previousPackage)) {
+            boolean packageChanged = !activePackage.equals(previousPackage);
+            if (packageChanged) {
                 activeWindowFlagSecure = false;
+                lastObservedNodes.set(0);
+                lastRetryObserveElapsedMs.set(0L);
             }
             ControlListener listener = LISTENER.get();
             if (listener != null) {
@@ -218,10 +225,45 @@ public final class AlphaAccessibilityService extends AccessibilityService {
                     Log.i(TAG_POLICY, "event=refuse pkg=" + activePackage + " targetKind=BlockedApp protection=ScreenClear");
                 }
                 listener.onForegroundChanged(activePackage, activeActivity);
-            } else if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                && !activePackage.isEmpty()
-                && !activePackage.equals(previousPackage)) {
-                captureObservation(false, 80);
+            } else if (!activePackage.isEmpty()) {
+                long nowMs = SystemClock.elapsedRealtime();
+                boolean shouldObserve = (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && packageChanged)
+                    || shouldRetryEmptyObservation(
+                        activePackage,
+                        activeActivity,
+                        lastObservedPackage,
+                        lastObservedNodes.get(),
+                        lastRetryObserveElapsedMs.get(),
+                        nowMs
+                    );
+                if (shouldObserve) {
+                    captureObservation(false, 80, event.getSource());
+                }
+            }
+            return;
+        }
+        if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            CharSequence eventPkgSeq = event.getPackageName();
+            String eventPkg = eventPkgSeq == null ? "" : eventPkgSeq.toString();
+            if (activePackage.isEmpty() && !eventPkg.isEmpty() && !AlphaControlPolicy.isBlockedTarget(eventPkg, null)) {
+                activePackage = eventPkg;
+            }
+            long nowMs = SystemClock.elapsedRealtime();
+            if (shouldRetryEmptyObservation(
+                activePackage,
+                activeActivity,
+                lastObservedPackage,
+                lastObservedNodes.get(),
+                lastRetryObserveElapsedMs.get(),
+                nowMs
+            )) {
+                lastRetryObserveElapsedMs.set(nowMs);
+                ControlListener listener = LISTENER.get();
+                if (listener != null) {
+                    listener.onForegroundChanged(activePackage, activeActivity);
+                } else {
+                    captureObservation(false, 80, event.getSource());
+                }
             }
         }
     }
@@ -236,6 +278,9 @@ public final class AlphaAccessibilityService extends AccessibilityService {
     public void onDestroy() {
         LIVE.compareAndSet(this, null);
         clearNodeCache();
+        lastObservedNodes.set(0);
+        lastObservedPackage = "";
+        lastRetryObserveElapsedMs.set(0L);
         ControlListener listener = LISTENER.get();
         if (listener != null) listener.onServiceStateChanged(false);
         super.onDestroy();
@@ -243,6 +288,14 @@ public final class AlphaAccessibilityService extends AccessibilityService {
 
     /** Capture the current multi-window observation while honoring lockscreen, FLAG_SECURE, and sensitive-node rules. */
     public CapturedObservation captureObservation(boolean includeNonInteractive, int maxNodes) {
+        return captureObservation(includeNonInteractive, maxNodes, null);
+    }
+
+    private CapturedObservation captureObservation(
+        boolean includeNonInteractive,
+        int maxNodes,
+        AccessibilityNodeInfo eventSource
+    ) {
         int limit = Math.max(1, Math.min(maxNodes, AlphaControlPolicy.MAX_OBSERVED_NODES));
         KeyguardManager keyguard = getSystemService(KeyguardManager.class);
         UserManager users = getSystemService(UserManager.class);
@@ -253,13 +306,19 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         List<AccessibilityWindowInfo> windows = getWindows();
         int windowCount = windows == null ? 0 : windows.size();
         AccessibilityWindowInfo primaryAppWindow = findPrimaryAppWindow(windows);
+        AccessibilityNodeInfo activeWindowRoot = getRootInActiveWindow();
+        AccessibilityNodeInfo sourceRoot = rootOf(eventSource);
         String pkg = activePackage;
         String windowTitle = "";
         boolean flagSecure = activeWindowFlagSecure;
 
-        AccessibilityNodeInfo primaryRoot = primaryAppWindow != null
-            ? primaryAppWindow.getRoot()
-            : getRootInActiveWindow();
+        AccessibilityNodeInfo primaryRoot = primaryAppWindow != null ? primaryAppWindow.getRoot() : null;
+        if (primaryRoot == null) {
+            primaryRoot = activeWindowRoot;
+        }
+        if (primaryRoot == null) {
+            primaryRoot = sourceRoot;
+        }
         if (primaryAppWindow != null) {
             CharSequence title = primaryAppWindow.getTitle();
             if (title != null) windowTitle = title.toString();
@@ -282,6 +341,9 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         String targetKind = pkg.isEmpty() ? "NoTarget" : (blocked ? "BlockedApp" : "AllowedApp");
         if (protection != AlphaControlPolicy.ScreenProtection.ScreenClear || blocked) {
             clearNodeCache();
+            lastObservedPackage = pkg;
+            lastObservedNodes.set(0);
+            lastRetryObserveElapsedMs.set(SystemClock.elapsedRealtime());
             Log.i(TAG_POLICY, "event=refuse pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name());
             Log.i(TAG_SERVICE, "event=observe pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name() + " nodes=0 snapId=" + revision);
             return new CapturedObservation(revision, pkg, activity, null, protection, windowCount, Collections.emptyList());
@@ -291,27 +353,43 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         Map<String, AccessibilityNodeInfo> nextCache = new HashMap<>();
         String detectedUrl = ASSIST_WEB_URIS.get(pkg);
 
+        if (primaryAppWindow != null) {
+            AccessibilityNodeInfo root = primaryAppWindow.getRoot();
+            if (root != null && isAllowedRootPackage(root, pkg, activity)) {
+                String candidateUrl = collectNodes(root, primaryAppWindow.getId(), includeNonInteractive, limit, serialized, nextCache, pkg);
+                if (detectedUrl == null && candidateUrl != null) {
+                    detectedUrl = candidateUrl;
+                }
+            }
+        }
         if (windows != null && !windows.isEmpty()) {
             for (int w = 0; w < windows.size() && serialized.size() < limit; w++) {
                 AccessibilityWindowInfo window = windows.get(w);
-                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                if (window == primaryAppWindow || window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo root = window.getRoot();
-                if (root == null) continue;
+                if (root == null || !isAllowedRootPackage(root, pkg, activity)) continue;
                 String candidateUrl = collectNodes(root, window.getId(), includeNonInteractive, limit, serialized, nextCache, pkg);
                 if (detectedUrl == null && candidateUrl != null) {
                     detectedUrl = candidateUrl;
                 }
             }
-        } else {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) {
-                if (pkg.isEmpty() && root.getPackageName() != null) {
-                    pkg = root.getPackageName().toString();
-                }
-                String candidateUrl = collectNodes(root, 0, includeNonInteractive, limit, serialized, nextCache, pkg);
-                if (detectedUrl == null && candidateUrl != null) {
-                    detectedUrl = candidateUrl;
-                }
+        }
+        if (serialized.isEmpty() && activeWindowRoot != null && isAllowedRootPackage(activeWindowRoot, pkg, activity)) {
+            if (pkg.isEmpty() && activeWindowRoot.getPackageName() != null) {
+                pkg = activeWindowRoot.getPackageName().toString();
+            }
+            String candidateUrl = collectNodes(activeWindowRoot, 0, includeNonInteractive, limit, serialized, nextCache, pkg);
+            if (detectedUrl == null && candidateUrl != null) {
+                detectedUrl = candidateUrl;
+            }
+        }
+        if (serialized.isEmpty() && sourceRoot != null && isAllowedRootPackage(sourceRoot, pkg, activity)) {
+            if (pkg.isEmpty() && sourceRoot.getPackageName() != null) {
+                pkg = sourceRoot.getPackageName().toString();
+            }
+            String candidateUrl = collectNodes(sourceRoot, 0, includeNonInteractive, limit, serialized, nextCache, pkg);
+            if (detectedUrl == null && candidateUrl != null) {
+                detectedUrl = candidateUrl;
             }
         }
 
@@ -319,6 +397,10 @@ public final class AlphaAccessibilityService extends AccessibilityService {
             liveNodes.clear();
             liveNodes.putAll(nextCache);
         }
+        lastObservedPackage = pkg;
+        lastObservedNodes.set(serialized.size());
+        lastRetryObserveElapsedMs.set(SystemClock.elapsedRealtime());
+        targetKind = pkg.isEmpty() ? "NoTarget" : "AllowedApp";
         Log.i(TAG_SERVICE, "event=observe pkg=" + pkg + " targetKind=" + targetKind + " protection=" + protection.name() + " nodes=" + serialized.size() + " snapId=" + revision);
         return new CapturedObservation(
             revision,
@@ -542,12 +624,61 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         return currentActivity == null ? "" : currentActivity;
     }
 
+    static boolean shouldRetryEmptyObservation(
+        String activePkg,
+        String activeAct,
+        String lastObsPkg,
+        int lastObsNodes,
+        long lastRetryMs,
+        long nowMs
+    ) {
+        if (activePkg == null || activePkg.isEmpty()) return false;
+        if (AlphaControlPolicy.isBlockedTarget(activePkg, activeAct)) return false;
+        boolean needsSnapshot = lastObsNodes <= 0 || !activePkg.equals(lastObsPkg == null ? "" : lastObsPkg);
+        if (!needsSnapshot) return false;
+        return lastRetryMs <= 0L || (nowMs - lastRetryMs) >= RETRY_OBSERVE_INTERVAL_MS;
+    }
+
+    static boolean shouldEmitNode(
+        boolean visible,
+        boolean includeNonInteractive,
+        boolean interactive,
+        boolean hasContent
+    ) {
+        if (visible) {
+            return includeNonInteractive || interactive || hasContent;
+        }
+        return interactive || hasContent;
+    }
+
+    private static AccessibilityNodeInfo rootOf(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        AccessibilityNodeInfo current = node;
+        for (int depth = 0; depth < 32; depth++) {
+            AccessibilityNodeInfo parent = current.getParent();
+            if (parent == null || parent == current) break;
+            current = parent;
+        }
+        return current;
+    }
+
+    private static boolean isAllowedRootPackage(AccessibilityNodeInfo root, String expectedPkg, String activity) {
+        if (root == null) return false;
+        CharSequence rawPkg = root.getPackageName();
+        String rootPkg = rawPkg == null ? "" : rawPkg.toString();
+        if (!rootPkg.isEmpty() && AlphaControlPolicy.isBlockedTarget(rootPkg, rootPkg.equals(expectedPkg) ? activity : null)) {
+            return false;
+        }
+        return true;
+    }
+
     private boolean isSensitiveViewActive(List<AccessibilityWindowInfo> windows, AccessibilityNodeInfo primaryRoot) {
         AccessibilityNodeInfo inputFocus = findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
         if (inputFocus != null && isNodeSensitive(inputFocus)) return true;
         AccessibilityNodeInfo a11yFocus = findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
         if (a11yFocus != null && isNodeSensitive(a11yFocus)) return true;
         int maxVisited = AlphaControlPolicy.MAX_OBSERVED_NODES * 2;
+        boolean scannedAnyWindow = false;
         if (windows != null && !windows.isEmpty()) {
             int remaining = maxVisited;
             for (AccessibilityWindowInfo window : windows) {
@@ -555,13 +686,16 @@ public final class AlphaAccessibilityService extends AccessibilityService {
                 if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
                 AccessibilityNodeInfo root = window.getRoot();
                 if (root == null) continue;
+                scannedAnyWindow = true;
                 int scanned = scanSensitiveNodes(root, remaining);
                 if (scanned < 0) return true;
                 remaining -= scanned;
             }
-            return false;
         }
-        return primaryRoot != null && scanSensitiveNodes(primaryRoot, maxVisited) < 0;
+        if (!scannedAnyWindow && primaryRoot != null) {
+            return scanSensitiveNodes(primaryRoot, maxVisited) < 0;
+        }
+        return false;
     }
 
     private static int scanSensitiveNodes(AccessibilityNodeInfo root, int maxVisited) {
@@ -572,7 +706,7 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         int visited = 0;
         while (!stack.isEmpty() && visited < maxVisited) {
             AccessibilityNodeInfo current = stack.remove(stack.size() - 1);
-            if (current == null || !current.isVisibleToUser()) continue;
+            if (current == null) continue;
             visited++;
             if (isNodeAccessibilityDataSensitive(current)) return -1;
             if (current.isPassword() && (current.isFocused() || current.isAccessibilityFocused())) return -1;
@@ -606,9 +740,12 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         List<AccessibilityNodeInfo> stack = new ArrayList<>();
         stack.add(root);
         int index = 0;
-        while (!stack.isEmpty() && out.size() < limit) {
+        int visited = 0;
+        int maxVisited = Math.max(limit * 16, 1024);
+        while (!stack.isEmpty() && out.size() < limit && visited < maxVisited) {
             AccessibilityNodeInfo current = stack.remove(stack.size() - 1);
-            if (current == null || !current.isVisibleToUser()) continue;
+            if (current == null) continue;
+            visited++;
             String resId = current.getViewIdResourceName();
             String rawText = current.getText() == null ? null : current.getText().toString();
             String rawDesc = current.getContentDescription() == null ? null : current.getContentDescription().toString();
@@ -619,8 +756,9 @@ public final class AlphaAccessibilityService extends AccessibilityService {
             boolean clickable = current.isClickable();
             boolean editable = current.isEditable();
             boolean scrollable = current.isScrollable();
+            boolean interactive = clickable || editable || scrollable;
             boolean hasContent = (rawText != null && !rawText.isBlank()) || (rawDesc != null && !rawDesc.isBlank());
-            if (includeNonInteractive || clickable || editable || scrollable || hasContent) {
+            if (shouldEmitNode(current.isVisibleToUser(), includeNonInteractive, interactive, hasContent)) {
                 boolean sensitive = isNodeSensitive(current);
                 Rect bounds = new Rect();
                 current.getBoundsInScreen(bounds);

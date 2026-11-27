@@ -9,6 +9,7 @@ export {
   inspectCorePackageDump,
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
+  resolveAndroidAvdHome,
   sortApksCoreFirst,
   type AccessibilityInspection,
   type ControlTelemetryInspection,

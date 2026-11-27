@@ -74,6 +74,38 @@ public final class AlphaControlPolicyTest {
             "SettingsActivity".equals(AlphaAccessibilityService.resolveNextActivity("org.mozilla.firefox", "com.android.settings", "HomeActivity", "SettingsActivity")),
             "explicit class name updates activeActivity"
         );
+        check(
+            AlphaAccessibilityService.shouldEmitNode(false, false, true, false),
+            "interactive descendants must emit even if visibility lags during window transition"
+        );
+        check(
+            AlphaAccessibilityService.shouldEmitNode(false, false, false, true),
+            "text descendants must emit even if visibility lags during window transition"
+        );
+        check(
+            !AlphaAccessibilityService.shouldEmitNode(false, true, false, false),
+            "invisible empty containers must not emit noise while remaining traversable"
+        );
+        check(
+            AlphaAccessibilityService.shouldRetryEmptyObservation("com.android.chrome", "FirstRunActivity", "com.android.chrome", 0, 1_000L, 1_450L),
+            "empty observation for AllowedApp must retry after 400ms"
+        );
+        check(
+            !AlphaAccessibilityService.shouldRetryEmptyObservation("com.android.chrome", "FirstRunActivity", "com.android.chrome", 0, 1_000L, 1_200L),
+            "empty observation retry must stay rate-limited under 400ms"
+        );
+        check(
+            !AlphaAccessibilityService.shouldRetryEmptyObservation("com.android.chrome", "FirstRunActivity", "com.android.chrome", 8, 1_000L, 2_000L),
+            "populated observation for current package must not retry"
+        );
+        check(
+            AlphaAccessibilityService.shouldRetryEmptyObservation("com.android.chrome", "FirstRunActivity", "com.google.android.apps.nexuslauncher", 12, 1_000L, 1_500L),
+            "stale package observation must retry once activePackage switches to AllowedApp"
+        );
+        check(
+            !AlphaAccessibilityService.shouldRetryEmptyObservation("com.android.settings", "Settings", "com.android.settings", 0, 1_000L, 2_000L),
+            "blocked packages must not trigger content-change retry captures"
+        );
 
         check(!AlphaControlPolicy.isScreenshotAllowed(1_000L, 1_500L, false), "Tier-1 screenshot must throttle under 1100ms");
         check(AlphaControlPolicy.isScreenshotAllowed(1_000L, 2_200L, false), "Tier-1 screenshot allowed after 1100ms");
