@@ -776,24 +776,30 @@ async function onComposer(world: Scene, ...otherMounts: Mount[]) {
 
 const listening = (state: Voice.Voice) => state.phase === "Listening" && state.mic === "On";
 
-/** Ask Alpha alone on `world`, with Talk tapped from its composer and listening. */
-async function talkingOnComposer(world: Scene) {
+/** Ask Alpha alone on `world`, with Talk tapped from its composer and `ready`, listening unless it says otherwise. */
+async function talkingOnComposer(world: Scene, ready: (state: Voice.Voice) => boolean = listening) {
   const { alpha, area } = await onComposer(world);
   await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
   await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
   await press("Talk");
-  await drawnUntil(alpha, area, Voice.Machine, listening);
+  await drawnUntil(alpha, area, Voice.Machine, ready);
   return { alpha, area };
 }
 
 /** Talk on `world`, stopped from its conversation once `meanwhile` has changed the phone, and quiet again. */
-async function stoppedOnComposer(world: Scene, meanwhile: () => void) {
+async function stoppedOnComposer(world: Scene, meanwhile: (talking: Awaited<ReturnType<typeof talkingOnComposer>>) => void | Promise<void>) {
   const { alpha, area } = await talkingOnComposer(world);
-  meanwhile();
+  await meanwhile({ alpha, area });
   await press("Open conversation");
   await press("Stop voice conversation");
   await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
   return { alpha, area };
+}
+
+/** Whether voice is closed by a stop not yet confirmed off, with neither Talk nor a new capture offered. */
+async function closedByStop(world: Scene, area: ReturnType<typeof assistant.runtime>, starts = world.voice.startLiveCaptureCalls) {
+  const state = await area.runPromise(Effect.flatMap(Voice.Machine, (voice) => voice.get()));
+  return [state.latched, Voice.canStartTalking(state, 0), button("Talk"), world.voice.startLiveCaptureCalls - starts];
 }
 
 /** With the microphone off, Talk is offered and enabled, and a tap on it listens again. */
@@ -1030,8 +1036,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("offers Stop and no keyboard control in Talk, as the Sunday demo build did, and Stop releases the microphone and speaker", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha, area } = await talkingOnComposer(world);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
+    const { alpha, area } = await talkingOnComposer(world, (state) => listening(state) && state.speaker === "SpeakerOn");
     await press("Open conversation");
     const row = document.querySelector<HTMLElement>('section[aria-label="Voice conversation"]');
     expect(row).not.toBeNull();
@@ -1059,13 +1064,12 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
-    expect(Voice.canStartTalking(await area.runPromise(Effect.flatMap(Voice.Machine, (voice) => voice.get())), 0)).toBe(false);
     const starts = world.voice.startLiveCaptureCalls;
-    expect(button("Talk")).toBeUndefined();
+    expect(await closedByStop(world, area, starts)).toEqual([true, false, undefined, 0]);
 
     await drawn(() => advance(area, Voice.releaseAgainMs));
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
-    expect([button("Talk"), world.voice.startLiveCaptureCalls]).toEqual([undefined, starts]);
+    expect(await closedByStop(world, area, starts)).toEqual([true, false, undefined, 0]);
 
     world.voice.liveCaptureReleaseFails = false;
     await seen(false);
@@ -1075,14 +1079,104 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
-  it("offers Talk again a moment after a stop whose microphone let go late", async () => {
+  it("offers Talk again without a return to the foreground once a microphone that let go late is asked again, less often each time", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
-    world.voice.liveCaptureReleaseFails = false;
+    const asked = world.voice.stopLiveCaptureCalls;
     await drawn(() => advance(area, Voice.releaseAgainMs));
+    await untilCondition(area, () => world.voice.stopLiveCaptureCalls === asked + 2);
+    await drawn(() => advance(area, 0));
+    const second = Voice.againAfter(Voice.releaseAgainMs);
+    expect(second).toBeGreaterThan(Voice.releaseAgainMs);
+    world.voice.liveCaptureReleaseFails = false;
+    await drawn(() => advance(area, second - 1));
+    expect(await closedByStop(world, area)).toEqual([true, false, undefined, 0]);
+    await drawn(() => advance(area, 1));
     await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
     await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("keeps voice closed when Alpha returns to the foreground while it is still asking whether the microphone is off", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    const slow = Promise.withResolvers<void>();
+    world.voice.liveCaptureStopGate = () => slow.promise;
+    const asked = world.voice.stopLiveCaptureCalls;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await untilCondition(area, () => world.voice.stopLiveCaptureCalls > asked);
+    await seen(false);
+    await seen(true);
+    world.voice.liveCaptureStopGate = undefined;
+    slow.resolve();
+    await untilCondition(area, () => world.voice.stopLiveCaptureCalls > asked + 2);
+    await drawn(() => advance(area, 0));
+    expect([world.voice.activeMicSession === undefined, ...(await closedByStop(world, area))]).toEqual([false, true, false, undefined, 0]);
+  });
+
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
+  it("offers Talk again after a stop whose speaker volume could not be set back, and Talk listens once it can be", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, async (talking) => {
+      await drawnUntil(talking.alpha, talking.area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
+      await press("Mute speaker");
+      await drawnUntil(talking.alpha, talking.area, Voice.Machine, (state) => state.speaker === "SpeakerOff");
+      world.voice.speakerGainGate = (muted) => muted ? Promise.resolve() : Promise.reject(new Error("Output gain unavailable"));
+    });
+    expect([world.voice.speakerMuted, (await getVoice(area)).latched, button("Talk")?.disabled]).toEqual([true, false, false]);
+    world.voice.speakerGainGate = undefined;
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("never stops a reading the owner started while voice was closed by a speech stop, and offers Talk again once that stop is confirmed", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.playbackStopFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    world.voice.playbackStopFails = false;
+    const read = Promise.withResolvers<void>();
+    world.voice.playbackHold = () => read.promise;
+    const reading = area.runPromise(Effect.flatMap(VoiceBridge, (bridge) => Stream.runCollect(bridge.readAloud(1, "A page read aloud."))));
+    await untilCondition(area, () => world.voice.played.some((one) => one.text === "A page read aloud."));
+    const stops = world.voice.playbackStops.length;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    expect([world.voice.playbackStops.slice(stops), ...(await closedByStop(world, area))]).toEqual([[], true, false, undefined, 0]);
+
+    world.voice.playbackHold = undefined;
+    read.resolve();
+    await reading;
+    await drawn(() => advance(area, Voice.againAfter(Voice.releaseAgainMs)));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    expect(world.voice.playbackStops.slice(stops)).toEqual([undefined]);
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
+  it("offers Talk again after a stop the relay rejected while it was starting a session it then refused, and keeps voice closed for one it opened", async () => {
+    const { world, alpha, area } = await openCloudVoiceSheet(false);
+    const starting = Promise.withResolvers<void>();
+    world.voice.cloudStartGate = () => starting.promise;
+    world.voice.cloudStopFails = true;
+    const starts = world.voice.startCloudSpeechCalls;
+    await press("Talk");
+    await untilCondition(area, () => world.voice.startCloudSpeechCalls > starts);
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.latched);
+    starting.reject(rejection("Cloud speech could not connect", "connect"));
+    world.voice.cloudStartGate = undefined;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+
+    world.voice.cloudStopFails = false;
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.network);
+    world.voice.cloudStopFails = true;
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.latched);
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    expect([(await getVoice(area)).latched, button("Talk")]).toEqual([true, undefined]);
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {

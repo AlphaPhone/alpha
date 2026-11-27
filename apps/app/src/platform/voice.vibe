@@ -1,6 +1,6 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
 import { parseVoiceTranscriptEnvelope } from "@elizaos/agent"
-import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
+import { type CloudStreamPort, type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
 import { fresh } from "../runtime/index.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
@@ -636,7 +636,7 @@ effect function phoneDictation(publish: (event: VoiceEvent) => void): PhoneDicta
   }
 }
 
-function phoneReading(restoreOutput: () => boolean!!): Pick<VoiceBridge.Shape, "readAloud" | "silenceReading"> {
+function phoneReading(restoreOutput: () => boolean!!): Pick<VoiceBridge.Shape, "readAloud" | "silenceReading"> & { reading(): boolean } {
   const readings = new Map<number, { readonly id: string; readonly stopped: Deferred.Deferred<boolean> }>()
   let stoppedThrough = 0
 
@@ -719,7 +719,7 @@ function phoneReading(restoreOutput: () => boolean!!): Pick<VoiceBridge.Shape, "
     })
   }
 
-  return { readAloud, silenceReading }
+  return { readAloud, silenceReading, reading: () => readings.size > 0 }
 }
 
 const phoneVoiceAccess = {
@@ -786,8 +786,8 @@ interface CloudVoiceSession {
   readonly stream: CloudStreamingSpeech
   readonly abort: AbortController
   capture: Awaited<ReturnType<CloudStreamingSpeech["listen"]>> | undefined
-  /** Whether the relay ever opened a capture for this session: until it has, nothing of it can listen or speak. */
-  opened: boolean
+  /** Relay sessions this conversation asked to start that the relay has not refused: while there are none, nothing of it can listen or speak. */
+  relayStarts: number
   /** The utterance the current capture is hearing, sent once the relay's final is followed by the long gap. */
   gap: TurnGap | undefined
 }
@@ -814,6 +814,26 @@ interface CloudMicConfig {
   readonly checkCallInterrupt: boolean
 }
 
+/** `relay`, counting on `owner` each session it is asked to start until the relay refuses that start. */
+function countedRelay(relay: CloudStreamPort, owner: () => CloudVoiceSession): CloudStreamPort {
+  const counted: CloudStreamPort = {
+    startCloudSpeech: (input) => {
+      const started = relay.startCloudSpeech(input)
+      owner().relayStarts += 1
+      void started.then(undefined, () => { owner().relayStarts -= 1 })
+      return started
+    },
+    stopCloudSpeech: (input) => relay.stopCloudSpeech(input),
+    setCloudSpeechMuted: (input) => relay.setCloudSpeechMuted(input),
+    speakCloudSpeech: (input) => relay.speakCloudSpeech(input),
+    cancelCloudSpeech: (input) => relay.cancelCloudSpeech(input),
+    addListener: (event, callback) => relay.addListener(event, callback),
+  }
+  const outputMuted = relay.setCloudSpeechOutputMuted
+  if (outputMuted !== undefined) counted.setCloudSpeechOutputMuted = (input) => outputMuted.call(relay, input)
+  return counted
+}
+
 function cloudMicController(config: CloudMicConfig) {
   const clearPreview = (session: number): void => {
     const current = config.getPreview()
@@ -824,7 +844,7 @@ function cloudMicController(config: CloudMicConfig) {
   effect function listen(
     session: number,
     credentialId: CredentialId,
-    relay: Parameters<typeof createCloudStreamingSpeech>[1],
+    relay: CloudStreamPort,
     preview?: VoicePreview,
   ): boolean!VoiceBridgeFailed {
     const existing = config.getSpeech()
@@ -832,7 +852,7 @@ function cloudMicController(config: CloudMicConfig) {
       session,
       abort: makeAbort(),
       capture: undefined,
-      opened: false,
+      relayStarts: 0,
       gap: undefined,
       stream: createCloudStreamingSpeech({
         environment: CLOUD_ENVIRONMENT,
@@ -843,7 +863,7 @@ function cloudMicController(config: CloudMicConfig) {
           if (config.currentSession() !== session || current?.session !== session) return
           current.outlet?.show(owner.gap?.joined(text) ?? text)
         },
-      }, relay),
+      }, countedRelay(relay, () => owner)),
     }
     if (config.currentSession() !== session) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
     config.setSpeech(owner)
@@ -917,31 +937,39 @@ function cloudMicController(config: CloudMicConfig) {
       throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
     }
     owner.capture = capture
-    owner.opened = true
     return capture.fullDuplex
   }
   return { clearPreview, listen }
 }
 
+/** Ask the phone to stop each of `requests`, where `undefined` is all of its speech, answering those it did not confirm stopped. */
+effect function stopPlaybackOf(requests: ReadonlyArray<string | undefined>): Array<string | undefined>!! {
+  if (!registered(LOCAL_PLUGIN)) return []
+  const failed: Array<string | undefined> = []
+  for (const requestId of requests) {
+    const stopped = try (tryPromise(() => localPlugin().stopPlayback(requestId === undefined ? {} : { requestId })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+    if (!stopped) failed.push(requestId)
+  }
+  return failed
+}
+
+/** Take the tracked requests of `requests` to stop, or all of the phone's speech (`undefined`) when none are tracked. */
+function claimedPlayback(requests: Set<string>): Array<string | undefined> {
+  const tracked: Array<string | undefined> = [...requests]
+  requests.clear()
+  return tracked.length === 0 ? [undefined] : tracked
+}
+
 /** Stop local TTS playback for every tracked request, or globally when none are tracked. */
 effect function stopLocalPlayback(requests: Set<string>): boolean!! {
-  if (!registered(LOCAL_PLUGIN)) return true
-  const tracked = [...requests]
-  requests.clear()
-  if (tracked.length === 0) {
-    return try (tryPromise(() => localPlugin().stopPlayback({})) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
-  }
-  let ok = true
-  for (const requestId of tracked) {
-    ok = (try (tryPromise(() => localPlugin().stopPlayback({ requestId })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && ok
-  }
-  return ok
+  return (try stopPlaybackOf(claimedPlayback(requests))).length === 0
 }
 
 /** Per-session sentence and acknowledgment playback with turn-scoped interruption. */
 function phonePlayback(
   readActiveSession: () => number,
   readCloudStream: (session: number) => CloudStreamingSpeech | undefined,
+  reading: () => boolean,
 ) {
   let activePlaybackSession = 0
   let activePlaybackTurn = 0
@@ -1025,22 +1053,37 @@ function phonePlayback(
     try stopLocalPlayback(localPlaybackRequests)
   }
 
-  effect function stopForSession(session: number, ownsSession: boolean): boolean!! {
-    const ownsPlayback = activePlaybackSession === session
-    if (ownsPlayback || ownsSession) {
-      if (ownsPlayback) {
-        activePlaybackSession = 0
-        activePlaybackTurn = 0
+  /**
+   * The stop of `session`'s speech: its first ask stops what the session plays, or all of the phone's speech where
+   * nothing it plays is tracked; each later ask stops only what an earlier one could not, and waits while a reading
+   * the owner started plays rather than stop that too.
+   */
+  function sessionStop(session: number, ownsSession: boolean): QuietStop {
+    let left: ReadonlyArray<string | undefined> | undefined
+    return () => effect {
+      if (left === undefined) {
+        const ownsPlayback = activePlaybackSession === session
+        if (!ownsPlayback && !ownsSession) {
+          left = []
+          return true
+        }
+        if (ownsPlayback) {
+          activePlaybackSession = 0
+          activePlaybackTurn = 0
+        }
+        abortCloudSpeech()
+        if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
+        latestLocalRequest = undefined
+        left = claimedPlayback(localPlaybackRequests)
+      } else if (left.includes(undefined) && reading()) {
+        return false
       }
-      abortCloudSpeech()
-      if (cueStop !== undefined) try Deferred.succeed(cueStop, undefined)
-      latestLocalRequest = undefined
-      return try stopLocalPlayback(localPlaybackRequests)
+      left = try stopPlaybackOf(left)
+      return left.length === 0
     }
-    return true
   }
 
-  return { playSentence, playCue, hush, stopForSession }
+  return { playSentence, playCue, hush, sessionStop }
 }
 
 // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s": the phone's cue is audible once play answers, and is over at its playback's end or a stop.
@@ -1202,26 +1245,34 @@ effect function settles(run: () => Promise<unknown>): boolean!! {
   return try (tryPromise(run) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
 }
 
-/** A shut Cloud session's stops: its capture, and its relay session where one ever opened. */
+/** A shut Cloud session's stops: its capture, and its relay session unless the relay never started one. */
 function cloudStops(owner: CloudVoiceSession): QuietStop[] {
   const capture = owner.capture
-  const stream: QuietStop = () => effect { return (try settles(() => owner.stream.stop())) || !owner.opened }
+  const stream: QuietStop = () => effect { return (try settles(() => owner.stream.stop())) || owner.relayStarts === 0 }
   return capture === undefined ? [stream] : [() => settles(() => capture.cancel()), stream]
 }
 
-/** The stops shut conversations could not confirm: `settle` asks each and keeps those that fail, `release` asks the kept ones again. */
+/**
+ * The stops of shut conversations not yet confirmed off: each is kept from before it is first asked until an ask
+ * confirms it, so an ask cut short loses none. `settle` asks a shut's stops, `release` asks again those still kept.
+ */
 function unconfirmedStops() {
   let kept: ReadonlyArray<QuietStop> = []
+  effect function ask(stops: ReadonlyArray<QuietStop>): boolean!! {
+    let quiet = true
+    for (const stop of stops) {
+      if (try stop()) kept = kept.filter((one) => one !== stop)
+      else quiet = false
+    }
+    return quiet
+  }
   effect function settle(stops: ReadonlyArray<QuietStop>): boolean!! {
-    const failed: QuietStop[] = []
-    for (const stop of stops) if (!(try stop())) failed.push(stop)
-    kept = [...kept, ...failed]
-    return failed.length === 0
+    kept = [...kept, ...stops]
+    return try ask(stops)
   }
   effect function release(): boolean!! {
-    const asked = kept
-    kept = []
-    return try settle(asked)
+    try ask(kept)
+    return kept.length === 0
   }
   return { settle, release }
 }
@@ -1244,7 +1295,8 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudPreview: { readonly session: number; readonly outlet: VoicePreview | undefined } | undefined
   const { restoreLocalOutput, setLocalSpeakerMuted } = try phoneSpeaker()
   const nativeCap = phoneNativeCapture(lifetime, () => activeSession, restoreLocalOutput)
-  const playback = phonePlayback(() => activeSession, (session) => (cloudSpeech?.session === session ? cloudSpeech.stream : undefined))
+  const { readAloud, silenceReading, reading } = phoneReading(() => restoreLocalOutput(() => true))
+  const playback = phonePlayback(() => activeSession, (session) => (cloudSpeech?.session === session ? cloudSpeech.stream : undefined), reading)
   const unconfirmed = unconfirmedStops()
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
 
@@ -1332,7 +1384,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     clearCloudPreview(session)
     const ownsSession = activeSession === session
     if (ownsSession) activeSession = 0
-    const stops: QuietStop[] = [() => playback.stopForSession(session, ownsSession)]
+    const stops: QuietStop[] = [playback.sessionStop(session, ownsSession)]
     const owner = cloudSpeech
     if (owner?.session === session) {
       cloudSpeech = undefined
@@ -1346,7 +1398,6 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   }
 
   const { stoppedRecording, ...dictation } = try phoneDictation(publish)
-  const { readAloud, silenceReading } = phoneReading(() => restoreLocalOutput(() => true))
 
   return {
     ...phoneVoiceAccess,
