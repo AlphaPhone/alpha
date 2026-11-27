@@ -21,7 +21,10 @@ it names, for the phone's events and the agent's alike, so an event keeps
 its number across a restart and no other event is ever given it: a
 deletion, or a form of the [editor](./editor.md), kept across a restart is
 for the event it was for. The number of an event long unseen may be let
-go, and then names no event. A deletion reaches its event, the series from
+go, and then names no event. Where the phone cannot read the numbers Alpha
+kept, nothing kept under them is let go, and Alpha reads them again at its
+next start; kept numbers that are not whole numbers held exactly are set
+aside, never numbered on from. A deletion reaches its event, the series from
 this occurrence on, or the whole series, as the owner chose, at the
 revision the owner confirmed it from; the occurrences of a repeating event
 on the phone share one revision, counted from the series' title, place, notes
