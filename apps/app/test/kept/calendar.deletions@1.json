@@ -1,13 +1,16 @@
 {
   "key": "alpha/app/calendar/deletions@1",
   "spec": "spec/app/calendar/deletions.md",
-  "shape": "0b05c3e3cbd54c89",
+  "shape": "04646a632c0e73e9",
   "sealed": {
-    "shape": "0b05c3e3cbd54c89",
-    "state": "5fc891dd53b6a0fe"
+    "shape": "04646a632c0e73e9",
+    "state": "a649efc44be73253"
   },
   "state": {
     "owner": 1,
+    "asked": 0,
+    "askedReach": "OneEvent",
+    "askedRevision": 0,
     "waiting": 0,
     "reach": "OneEvent",
     "revision": 3,
@@ -23,10 +26,18 @@
     "hiding": 0,
     "hidingReach": "OneEvent",
     "dropped": 0,
-    "failed": 0
+    "failed": 0,
+    "changed": false
   },
   "kept": [
-    "owner"
+    "owner",
+    "waiting",
+    "reach",
+    "revision",
+    "hiding",
+    "hidingReach",
+    "dropped",
+    "failed"
   ],
   "earlier": [
     {
@@ -46,6 +57,29 @@
         "paused": false,
         "sending": 0,
         "hiding": 0,
+        "dropped": 0,
+        "failed": 0
+      }
+    },
+    {
+      "from": "cd12a00869 (#1827)",
+      "until": "897db85aa1",
+      "state": {
+        "owner": 1,
+        "waiting": 0,
+        "reach": "OneEvent",
+        "revision": 3,
+        "undo": {
+          "holding": "Free",
+          "until": 0
+        },
+        "notice": false,
+        "scale": 100,
+        "paused": false,
+        "sending": 0,
+        "sendingReach": "OneEvent",
+        "hiding": 0,
+        "hidingReach": "OneEvent",
         "dropped": 0,
         "failed": 0
       }
