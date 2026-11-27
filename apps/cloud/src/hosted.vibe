@@ -27,13 +27,16 @@ export function hostedProfileProblems(profile: CloudProfile, hosts: Record<Cloud
     const settings = profile.environments[environment]
     const cloud = hosts[environment]
     if (!profileFits(cloud, { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }))
-      problems.push(`${environment}: the profile answers at ${settings.api} for ${settings.web}, and @repo/deployment names ${cloud.cloud} for ${cloud.appLinkHost}`)
+      problems.push(`${environment}: the profile's API or web host differs from @repo/deployment`)
     if (!offersAlphasServices(settings.name, settings.entitlementAudience, [...settings.capabilities]))
       problems.push(`${environment}: the profile is not Alpha's own cloud, with its name, its services and Alpha's package as the audience`)
+    const realtime = settings.speech?.realtimeUrl
+    if (realtime === undefined || !realtime.startsWith("wss://") || URL.parse(realtime)?.origin !== realtime)
+      problems.push(`${environment}: speech realtimeUrl must be a wss origin without an endpoint path`)
     if (settings.mail.kind !== "binding" || !mailsAsAlpha(settings.mailSender, settings.mail.binding))
       problems.push(`${environment}: the profile must use Alpha's own Cloudflare email binding and sender`)
     if (!returnsOffApi(registrationAt(environment === "production" ? "Production" : "Staging", cloud.appLinkHost), settings.api))
-      problems.push(`${environment}: a return of Alpha's registration lies on the API origin ${settings.api}`)
+      problems.push(`${environment}: a return of Alpha's registration lies on the API origin`)
     const models = settings.inference?.models ?? []
     if (models.length !== 1 || !models.every((model) => chatModelFits(model.id, model.upstreamModel, model.defaultMaxTokens ?? 0)))
       problems.push(`${environment}: chat is not Alpha's model at the longest reply its provider generates`)

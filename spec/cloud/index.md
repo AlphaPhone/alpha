@@ -152,6 +152,10 @@ from `apps/cloud/profile/candidate.example.json` for those environments.
 
 ### Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package
 
+The hosted speech profile gives the relay a secure WebSocket origin. The
+relay appends the provider's transcription and synthesis paths to that
+origin. The profile therefore supplies no endpoint path.
+
 ```quint
 pure val ownCloudName = "Alpha Cloud"
 pure val ownCapabilities: List[str] = List("inference", "speech", "maps", "managedGoogle", "billing")
