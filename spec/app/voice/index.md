@@ -1373,9 +1373,10 @@ pure def typeTranscript(v: Voice, ticket: int): Voice = { ...v, recorder: D::typ
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
-Dictation asked for on a phone without speech does not start, and a
-transcript that would make the text too long is left out; neither shows
-words. A call state the phone has not told does not keep dictation from
+Dictation asked for on a phone without speech does not start, and shows
+no words. A transcript goes into the field whole, as Sunday's v119 put it
+there, even past the longest text the phone sends: the owner shortens the
+text before it can be sent, and nothing dictated is lost. A call state the phone has not told does not keep dictation from
 starting. A messaging bar's recorder shows no words: its stage, a failed
 transcription included, is said only to a screen reader, and its retry,
 discard and stop controls stay.
