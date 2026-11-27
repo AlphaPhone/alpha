@@ -1,6 +1,6 @@
 // spec/app/calendar/index.md, "Story: See my days"; spec/app/calendar/index.md, "Story: See only my own account's calendar"
-import type { AndroidCalendarEditorFields, AndroidCalendarEvent, AndroidCalendarHandoffEvent, AndroidCalendarList, AndroidCalendarPlugin, AndroidCalendarRow } from "@elizaos/os-bridges";
-import { type Faked, plugin, rejection } from "./phone.ts";
+import { ANDROID_CALENDAR_METHODS, type AndroidCalendarEditorFields, type AndroidCalendarEvent, type AndroidCalendarHandoffEvent, type AndroidCalendarList, type AndroidCalendarPlugin, type AndroidCalendarRow } from "@elizaos/os-bridges";
+import { type Faked, type Native, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 /** One attendee of an event, as eliza's `@elizaos/plugin-calendar` answers it. */
@@ -319,6 +319,12 @@ interface Creations {
   prepareAgentSource(): Promise<{ status: string; sourceId?: string; sourceRevision?: string }>;
 }
 
+/** The phone's calls: what eliza's definition lists, which eliza checks against the compiled plugin, then the calls it does not name yet. */
+type PhoneCalendar = Omit<AndroidCalendarPlugin, "save"> & Creations;
+const CREATION_CALLS = Object.keys({
+  saveOptions: true, pendingCreations: true, executeAgent: true, cancelAgent: true, requestWorkflowReadAccess: true, readWorkflowRange: true, prepareAgentSource: true,
+} satisfies Record<Exclude<keyof Creations, "save">, true>) as ReadonlyArray<Exclude<keyof Creations, "save">>;
+
 /** The phone event `id` as the plugin compares it: its revision is what it says. */
 const revisionOf = (event: AndroidCalendarEvent) => JSON.stringify([event.title, event.body, event.location, event.begin, event.end]);
 
@@ -339,7 +345,7 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     if (scene.lost) return Promise.reject(rejection("Calendar write could not be confirmed. Check creation receipts before retrying."));
     return Promise.resolve({ status: "saved", id, calendarId: "local", creationId });
   }
-  return plugin<Omit<AndroidCalendarPlugin, "save"> & Creations>(() => ({
+  const calls: Native<PhoneCalendar> = {
     checkPermissions: () => Promise.resolve({ calendar: scene.granted ? "granted" : "prompt" }),
     requestAccess() {
       scene.asked += 1;
@@ -408,7 +414,8 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id || (occurrence && event.begin !== originalStart));
       return Promise.resolve({ status: "committed", readback: { parentAfter: occurrence ? "ParentLive" : "ParentGone", fieldsMatch: true, exclusionExact: true, cancelledAtStart: 0, instanceRemains: false } });
     },
-  }));
+  };
+  return plugin<PhoneCalendar>(() => Object.fromEntries([...ANDROID_CALENDAR_METHODS, ...CREATION_CALLS].map((name) => [name, calls[name]])) as Native<PhoneCalendar>);
 }
 
 /** Someone on the reference week's events, as `PEOPLE` of develop's fixtures names them. */
