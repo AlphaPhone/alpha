@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { NOT_DISPATCHED } from "@elizaos/agent";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
@@ -1079,6 +1079,39 @@ describe("on a phone", () => {
     await later(third.alpha, 100);
     const held = await third.runtime.runPromise(Held.use((d) => d.get()));
     expect([held.waiting, held.undo.holding, document.body.textContent?.includes("Alpha restarted before deleting"), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([0, "Undone", false, ["Walk", "Gym"]]);
+  });
+
+  it(`A doubt and a hide are let go only by a whole read of the day their event was last seen on (spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")`, async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.phoneEvents.push({ id: "p9", calendarId: "local", title: "Optician", begin: world.at(-24, 10), end: world.at(-24, 11), allDay: false, recurring: false });
+    const first = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phone.status === "Loaded" && s.google.status === "Loaded");
+    const standup = shown.all("Google").find((row) => row.title === "Standup")?.id ?? 0;
+    const optician = shown.all("Phone").find((row) => row.title === "Optician")?.id ?? 0;
+    const form = await first.runtime.runPromise(Editor.use((e) => e.get()));
+    await first.close();
+    const deletions = "alpha/app/calendar/deletions@1";
+    localStorage.setItem("alpha/app/calendar/editor@1", JSON.stringify({ ...form, latched: [standup, optician] }));
+    localStorage.setItem(deletions, JSON.stringify({ ...JSON.parse(localStorage.getItem(deletions) ?? "{}"), hiding: standup }));
+
+    // spec/app/calendar/index.md, "A read the phone cut short, or Google gave only in part, is shown as limited, never as complete": a part of Google's day without Standup is no sign it went.
+    world.calendar.events = world.calendar.events.filter((event) => event.title !== "Standup");
+    world.calendar.feedState = "partial";
+    // spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next": anchored on 1 December, the read begins on 1 November, and never sees the Optician on 31 October.
+    asleep(world, 7 * 24 * hour);
+    const second = await startAgain(world, (s) => s.phone.status === "Loaded" && s.google.status === "Loaded" && s.googleLimited);
+    await later(second.alpha, 100);
+    expect([(await second.runtime.runPromise(Editor.use((e) => e.get()))).latched, (await second.runtime.runPromise(Held.use((d) => d.get()))).hiding]).toEqual([[standup, optician], standup]);
+  });
+
+  it(`An earlier build reads the numbers this one keeps (spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm")`, async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const { alpha } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 1 && s.google.status === "Loaded");
+    await later(alpha, 100);
+    const earlier = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ last: Schema.Number, numbers: Schema.Array(Schema.Tuple([Schema.String, Schema.Number])) })));
+    const read = await Effect.runPromise(Effect.match(earlier(localStorage.getItem("alpha.calendar.numbers") ?? ""), { onFailure: () => undefined, onSuccess: (kept) => kept.numbers.map(([name]) => name) }));
+    expect(read ?? []).toContain("Phone:p1");
   });
 
   it(`A doubt whose event went while Alpha was closed is let go by the first read that shows it gone (spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is")`, async () => {

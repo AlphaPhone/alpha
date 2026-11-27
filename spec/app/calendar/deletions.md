@@ -219,7 +219,8 @@ the phone says only Android Calendar may delete is opened there. While a
 deletion is sent Calendar says Deleting…, or Declining… for an invitation.
 A declined invitation stays in the calendar, changed, so the read that
 shows it changed shows it again. The owner is told "Event changed." or
-"Couldn't delete this event."
+"Couldn't delete this event." Only a whole read of its own source, for a
+window that holds the day it was last seen on, shows a hidden event gone.
 
 ```quint
 pure def canEnded(s: Deletions, id: int, done: bool, changed: bool): bool = id > 0 and id == s.sending

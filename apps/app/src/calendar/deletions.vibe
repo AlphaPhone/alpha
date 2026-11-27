@@ -8,7 +8,7 @@ import { type Said, offer, say, withdraw } from "../notices/index.vibe"
 import { type Due, Job, contained, due, filledStore, following, hearing, reacting, started, together, untimed } from "../runtime/index.vibe"
 import { calendarInFront } from "./calendar.vibe"
 import { Shown } from "./stores.vibe"
-import { civilDay } from "./time.ts"
+import { readHolds } from "./time.ts"
 
 const undoArea = "Calendar"
 
@@ -157,7 +157,7 @@ const reconciled = started(effect {
     const d = try held.get()
     if (d.hiding === 0) return
     const id = d.hiding
-    const prior = shown.lastSeen(id)
+    const prior = shown.lastSeen(id) ?? shown.seenAt(id)
     if (prior === undefined && !shown.known(id) && !shown.forgets(id)) return
     const sourceLoaded = prior === undefined
       ? s.phone.status === "Loaded" || s.google.status === "Loaded"
@@ -165,7 +165,8 @@ const reconciled = started(effect {
     if (!sourceLoaded) return
     const current = shown.find(id)
     if (current === undefined) {
-      const covered = prior === undefined || (!(prior.source === "Phone" && s.phoneLimited) && Math.abs(civilDay(prior.begin) - s.anchor) <= 31)
+      const covered = prior === undefined
+        || (prior.source === "Phone" ? !s.phoneLimited && readHolds(prior.begin, s.phoneDay) : !s.googleLimited && readHolds(prior.begin, s.googleDay))
       if (!covered) return
       meta.forget(id)
       try contained(held.send({ type: "readShows", id, unchanged: false }), "clearing a deleted event after read")
