@@ -129,7 +129,7 @@ pure def canCalendarChanged(s: Link, ready: bool, busy: bool): bool = ready != s
 pure def calendarChanged(s: Link, ready: bool, busy: bool): Moved = advance(ready, { ...s, ready: ready, busy: busy })
 
 pure def alwaysBudgetsHold(s: Link): bool =
-  s.reviews <= 3 and s.writes <= 2 and s.writes <= s.reviews and s.linkReads <= 1
+  s.reviews <= 3 and s.writes <= 2 and s.writes <= s.reviews and s.linkReads >= 0 and s.linkReads <= 1
     and ((s.phase == Reviewing or s.phase == WaitWrite) implies s.writes < s.reviews)
     and ((s.phase == WaitReview or s.phase == WaitWrite) implies s.reviews <= 2)
     and (s.linkReads == 1 implies (s.phase == Listing or s.phase == Done))
@@ -229,7 +229,8 @@ pure def canCancel(s: Link): bool = running(s) and not(s.cancelled)
 
 pure def cancel(s: Link): Moved = advance(s.ready, { ...s, cancelled: true })
 
-pure def alwaysACancelledSetupIsNeverSynced(s: Link): bool = s.cancelled implies s.ending != Synced
+pure def alwaysACancelledSetupIsNeverSynced(s: Link): bool =
+  (s.cancelled implies s.ending != Synced) and (running(s) implies s.ending == NoOutcome)
 ```
 
 ## Story: See whether my agent's Calendar reaches Google
@@ -321,7 +322,8 @@ pure def pauseAnswered(s: Link, ticket: int, answered: bool, paused: bool, revis
   else { ...s, pause: PauseUnknown }
 
 pure def alwaysAConfirmedPauseWasReviewed(s: Link): bool =
-  (s.pause == PauseConfirmed implies (s.seen >= 0 and s.paused)) and (s.pause == Pausing implies (s.seen >= 0 and not(running(s))))
+  s.seen >= -1 and (running(s) implies s.pause == NoPause)
+    and (s.pause == PauseConfirmed implies (s.seen >= 0 and s.paused)) and (s.pause == Pausing implies (s.seen >= 0 and not(running(s))))
 
 pure def sometimesPauseConfirmed(s: Link): bool = s.pause == PauseConfirmed
 

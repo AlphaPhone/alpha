@@ -254,6 +254,12 @@ pure def canLetGo(d: Schedules): bool = Q::canRelease(d.change)
 
 pure def letGo(d: Schedules): Schedules = { ...d, change: Q::release(d.change) }
 
+pure val eval_witness_canLetGo = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 1, Active, Morning, 7, 0, 0, 1, 0, false),
+  ("reviewChange", Pause), "confirmChange", "sendChange",
+  "changeUnanswered", "checkChange", ("changeChecked", 1, false, false), "letGo")
+
 pure def stepDiscardNeverDropsASentChange(before: Schedules, via: str, after: Schedules): bool =
   via == "discard" implies (before.change.attempt.outcome == A::Recorded and after.change.attempt.outcome == A::Refused)
 ```
@@ -264,10 +270,11 @@ pure def stepDiscardNeverDropsASentChange(before: Schedules, via: str, after: Sc
 pure def alwaysAChangeIsKeptHonestly(d: Schedules): bool = and {
   Q::sound(d.change), Q::sound(d.runNow), d.count >= 0,
   S::wellFormed(d.when), S::wellFormed(d.draft.when), S::wellFormed(d.asked.when),
+  d.open implies d.owner >= 1, d.review.showing implies d.open,
   (Q::kept(d.change) and d.changing == Create) implies d.asked.source >= 1,
   Q::kept(d.change) implies d.owner >= 1,
   d.schedules.status == R::Loading implies d.owner >= 1,
-  0 <= d.done, d.done <= d.missed, d.occurrence <= d.missed, Q::kept(d.runNow) implies d.occurrence >= 1,
+  0 <= d.done, d.done <= d.missed, d.occurrence <= d.missed, Q::kept(d.runNow) implies (d.occurrence >= 1 and d.occurrence > d.done),
 }
 
 pure def stepAChangeIsSentAsReviewed(before: Schedules, via: str, after: Schedules, out: List[Effect]): bool =
@@ -288,9 +295,21 @@ pure def stepAChangeIsSentAsReviewed(before: Schedules, via: str, after: Schedul
 pure def sometimesAnEveningBriefIsCreated(d: Schedules): bool =
   d.changing == Create and d.asked.template == Evening and d.change.attempt.outcome == A::Confirmed
 
+pure val eval_witness_sometimesAnEveningBriefIsCreated = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 0, NoSchedule, Morning, 7, 0, 0, 0, 0, true),
+  ("openEditor", 0), ("pickTemplate", Evening), ("pickSource", 1, true),
+  ("reviewChange", Create), "confirmChange", "sendChange", ("changeAnswered", 1, true))
+
 pure def sometimesAScheduleIsPaused(d: Schedules): bool = d.changing == Pause and d.change.live and d.asked.source == d.source
 
 pure def sometimesAChangeIsRetried(d: Schedules): bool = d.change.again and d.change.live
+
+pure val eval_witness_sometimesAChangeIsRetried = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 1, Active, Morning, 7, 0, 0, 1, 0, false),
+  ("reviewChange", Pause), "confirmChange", "sendChange",
+  "changeUnanswered", "checkChange", ("changeChecked", 1, true, false), "retry")
 
 pure def sometimesAChangeIsDiscarded(d: Schedules): bool = d.discarded and d.change.attempt.outcome == A::Refused
 
@@ -368,6 +387,12 @@ pure def canResendRunNow(d: Schedules): bool = Q::canResend(d.runNow) and d.occu
 pure def resendRunNow(d: Schedules): Moved =
   { state: { ...d, runNow: Q::resend(d.runNow) }, out: List(RunDigest({ id: d.runNow.attempt.id, occurrence: d.occurrence })) }
 
+pure val eval_witness_canResendRunNow = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 1, Active, Morning, 7, 0, 0, 1, 1, false),
+  ("reviewRunNow", true, false), ("confirmRunNow", true, false),
+  "sendRunNow", "runNowUnanswered", "checkRunNow", ("runNowChecked", 1, true, false), "resendRunNow")
+
 pure def canLetGoRunNow(d: Schedules): bool = Q::canRelease(d.runNow)
 
 pure def letGoRunNow(d: Schedules): Schedules =
@@ -398,7 +423,19 @@ pure def sometimesAMissedDigestRuns(d: Schedules): bool = d.runNow.attempt.outco
 pure def sometimesARefusedRunNowIsOfferedAgain(d: Schedules): bool =
   d.runNow.attempt.outcome == A::Refused and not(d.runNow.offered) and d.missed > d.done and d.runReview.showing
 
+pure val eval_witness_sometimesARefusedRunNowIsOfferedAgain = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 1, Active, Morning, 7, 0, 0, 1, 1, false),
+  ("reviewRunNow", true, false), ("confirmRunNow", true, false),
+  "sendRunNow", ("runNowAnswered", 1, false), ("reviewRunNow", true, false))
+
 pure def sometimesARunNowIsLetGo(d: Schedules): bool = d.runNow.attempt.outcome == A::Unknown and d.done >= 1
+
+pure val eval_witness_sometimesARunNowIsLetGo = (
+  ("ownerChanged", 1), "openPanel",
+  ("schedulesRead", 1, true, 1, Active, Morning, 7, 0, 0, 1, 1, false),
+  ("reviewRunNow", true, false), ("confirmRunNow", true, false),
+  "sendRunNow", "runNowUnanswered", "checkRunNow", ("runNowChecked", 1, false, false), "letGoRunNow")
 ```
 
 ## Story: Keep schedules to their owner and through a restart

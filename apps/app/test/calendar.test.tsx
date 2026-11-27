@@ -1010,17 +1010,17 @@ describe("on a phone", () => {
 
   const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
 
-  async function fileTwoReplies() {
+  async function fileTwoCalendarRequests() {
     const world = morning(true);
     const { alpha, agent, file } = await askingCalendar(world);
     await file("approval-earlier-reply", "camera setup", 9);
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
     await file("approval-newer-reply", "lens check", 11);
-    return { world, alpha, agent, file };
+    return { world, alpha, agent };
   }
 
   it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
-    const { world, alpha, agent } = await fileTwoReplies();
+    const { world, alpha, agent } = await fileTwoCalendarRequests();
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await drawn(() => {});
     expect(["camera setup", "lens check"].map((text) => askedCard().includes(text))).toEqual([true, false]);
@@ -1041,15 +1041,15 @@ describe("on a phone", () => {
     await file("approval-primary", "camera setup", 9, "primary");
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
-    const card = askedCard();
-    expect([card.includes("Eliza Calendar"), card.includes("Your agent's calendar"), card.includes("Add event"), card.includes("Create an event")])
-      .toEqual([true, false, true, false]);
+    expect(["Eliza Calendar", "Your agent's calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 headed a new event's card "Add event" (prototype/calendar-approval-fields.ts:46)
+    expect(["Add event", "Create an event"].map((text) => askedCard().includes(text))).toEqual([true, false]);
     expect(button("Approve")).toBeDefined();
     expect(world.calendar.writes).toEqual([]);
   });
 
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
-    const { world, alpha, agent } = await fileTwoReplies();
+    const { world, alpha, agent } = await fileTwoCalendarRequests();
     const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
     if (typeof earlier !== "object" || earlier === null) throw new Error("no fields");
     Object.assign(earlier, { title: "camera setup, moved" });

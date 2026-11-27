@@ -703,7 +703,7 @@ pure def good(signer: int, version: int): Release =
 
 pure val installedValues = Set(0, 1, 2, 3)
 pure val signerValues = Set(1, 2)
-pure val ticketValues = Set(1, 2, 3, 4)
+pure val ticketValues = 1.to(20)
 pure val nowValues = Set(0, 30000, 60000, 900000, 2000000)
 pure val quiet: Activity = { ...unknownActivity, home: true, front: true, audio: true }
 pure val activityValues =

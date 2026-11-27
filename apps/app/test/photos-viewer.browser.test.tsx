@@ -34,20 +34,20 @@ async function viewing(name: string, launcher: boolean) {
   await page.viewport(412, 915);
   const world = { ...scene(), phone: true };
   if (launcher) world.settings.roles = world.settings.roles.map((r) => ({ ...r, held: r.role === "home" ? true : r.held }));
-  const firstPhoto = world.photos.rows[0];
+  const poster = world.photos.rows[0]?.image ?? "";
   world.photos.rows[0] = {
-    ...(firstPhoto ?? { image: "" }),
     id: "m:external_primary:v:9",
     name: "Clip.mp4",
-    owned: true,
     kind: "video",
+    owned: true,
+    path: "https://localhost/_alpha_video_/clip.mp4",
+    image: poster,
     width: 1280,
     height: 720,
     size: 10_000,
+    duration: 5,
     date: 1795400500000,
     revision: "rev-video-9",
-    duration: 5,
-    path: "https://localhost/_alpha_video_/clip.mp4",
   };
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   const runtime = photosArea.runtime(alpha);

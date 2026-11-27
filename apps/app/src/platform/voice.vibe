@@ -1,7 +1,7 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
 import { parseVoiceTranscriptEnvelope } from "@elizaos/agent"
 import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
-import { fresh } from "../runtime/index.vibe"
+import { fresh } from "../runtime/attempts.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
 import { pageMicrophone, pageSpeechBase, pageSpeechRelay } from "./pageSpeech.ts"
@@ -1145,27 +1145,19 @@ function phoneNativeCapture(
   return { current: () => nativeCapture, openLocal, stop, retire }
 }
 
-effect function closeCloudOwnerMic(owner: CloudVoiceSession): boolean!VoiceBridgeFailed {
+function dropEmptyGap(owner: CloudVoiceSession): void {
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": words Mute finds waiting on the gap are still sent when it ends, as v119's setMuted closed the capture and then still sent them (voice-assistant-session.ts:596-611).
   if (owner.gap?.held === "") {
     owner.gap.cancel()
     owner.gap = undefined
   }
-  if (owner.capture === undefined) return false
-  const capture = owner.capture
-  owner.capture = undefined
-  try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
-  return true
 }
 
-effect function stopCloudOwner(owner: CloudVoiceSession): boolean!! {
+function abortCloudSession(owner: CloudVoiceSession): void {
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": Stop drops words still waiting on the gap, as v119's stop did (voice-assistant-session.ts:574-575).
   owner.gap?.cancel()
   owner.gap = undefined
   owner.abort.abort()
-  const capture = owner.capture
-  const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))
-  return (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && cancelled
 }
 
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
@@ -1235,7 +1227,15 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   effect function closeMic(session: number): void!VoiceBridgeFailed {
     clearCloudPreview(session)
     const owner = cloudSpeech
-    if (owner?.session === session && (try closeCloudOwnerMic(owner))) return
+    if (owner?.session === session) {
+      dropEmptyGap(owner)
+      if (owner.capture !== undefined) {
+        const capture = owner.capture
+        owner.capture = undefined
+        try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
+        return
+      }
+    }
     try nativeCap.stop(session, false)
   }
 
@@ -1262,7 +1262,12 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session === session) {
       cloudSpeech = undefined
-      confirmed = (try stopCloudOwner(owner)) && confirmed
+      abortCloudSession(owner)
+      const capture = owner.capture
+      if (capture !== undefined) {
+        confirmed = (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+      }
+      confirmed = (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
     }
     if (registered(LOCAL_PLUGIN)) {
       const stopCap = try (nativeCap.stop(session, true) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
@@ -1347,7 +1352,11 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     clearCloudPreview(session)
     const owner = cloudSpeech
     if (owner?.session !== session) return
-    try closeCloudOwnerMic(owner)
+    dropEmptyGap(owner)
+    if (owner.capture === undefined) return
+    const capture = owner.capture
+    owner.capture = undefined
+    try tryPromise({ try: () => capture.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
   }
 
   effect function speak(session: number, text: string, started: () => void): void!VoiceBridgeFailed {
@@ -1383,7 +1392,10 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session !== session) return true
     cloudSpeech = undefined
-    return try stopCloudOwner(owner)
+    abortCloudSession(owner)
+    const capture = owner.capture
+    const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))
+    return (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && cancelled
   }
 
   return {

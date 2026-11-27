@@ -66,7 +66,10 @@ pure val homeOrder: List[S::View] = List(
   S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
   S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
 
-pure val homeCatalog: List[S::View] = homeOrder.append(S::Wallet).append(S::Telegram).append(S::Slack)
+pure val homeCatalog: List[S::View] = List(
+  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
+  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings,
+  S::Wallet, S::Telegram, S::Slack)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),

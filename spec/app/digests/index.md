@@ -56,7 +56,7 @@ type Effect =
 type Digests = {
   owner: int, open: bool, checks: Checks,
   stage: Stage, inbox: R::Read, page: int, pageEnd: int, pageRan: Brief,
-  bucket: Bucket, others: int -> Bucket, notice: bool,
+  bucket: Bucket, others: int -> Bucket, owners: List[int], notice: bool,
   background: Switch, notices: Switch,
   focus: int, fromNotice: bool, details: R::Read, ending: Outcome,
 }
@@ -70,13 +70,16 @@ pure val off: Switch = { on: false, wanted: false, attempt: A::plan(0) }
 pure val initial: Digests = {
   owner: 0, open: false, checks: NoChecks,
   stage: Idle, inbox: R::unread, page: 0, pageEnd: 0, pageRan: noBrief,
-  bucket: empty, others: Map(), notice: false,
+  bucket: empty, others: Map(), owners: List(), notice: false,
   background: off, notices: off,
   focus: 0, fromNotice: false, details: R::unread, ending: Finished,
 }
 
+pure def bucketOf(d: Digests, who: int): Bucket =
+  if (d.owners.some(k => k == who)) d.others.getOr(who, empty) else empty
+
 pure val ticketValues = Set(1, 2, 3)
-pure val roundValues = 1.to(10)
+pure val roundValues = 1.to(20)
 pure val idValues = Set(1, 2)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val upToValues = Set(0, 1, 2, 3)
@@ -315,11 +318,16 @@ pure def ackAnswered(d: Digests, round: int, ok: bool): Digests =
 ### Results are acknowledged, announced and shown on Home only once kept, and only for the owner they belong to
 
 ```quint
+pure def bucketSound(b: Bucket): bool = and {
+  0 <= b.acked, b.acked <= b.kept, 0 <= b.posted, b.posted <= b.kept, 0 <= b.results, b.results <= b.kept,
+  0 <= b.brief.result, b.brief.result <= b.kept, b.brief.failed implies b.brief.result >= 1,
+}
+
 pure def alwaysNothingIsAcknowledgedOrAnnouncedBeforeItIsKept(d: Digests): bool =
   val b = d.bucket
   and {
-    0 <= b.acked, b.acked <= b.kept, 0 <= b.posted, b.posted <= b.kept, 0 <= b.results, b.results <= b.kept,
-    0 <= b.brief.result, b.brief.result <= b.kept, b.brief.failed implies b.brief.result >= 1,
+    bucketSound(b), d.owners.every(k => bucketSound(bucketOf(d, k))),
+    d.inbox.ticket >= 0,
     d.stage == Keeping implies (d.pageEnd > b.kept and d.page == d.pageEnd - b.kept),
     d.pageRan.result != 0 implies (d.stage == Keeping and b.kept < d.pageRan.result and d.pageRan.result <= d.pageEnd),
     d.pageRan.failed implies d.pageRan.result >= 1,
@@ -357,7 +365,7 @@ pure def monotone(a: Bucket, b: Bucket): bool =
 
 pure def stepHistoryIsDurable(before: Digests, via: str, after: Digests): bool =
   if (after.owner == before.owner) monotone(before.bucket, after.bucket)
-  else after.others.getOr(before.owner, empty) == before.bucket and after.bucket == before.others.getOr(after.owner, empty)
+  else bucketOf(after, before.owner) == before.bucket and after.bucket == bucketOf(before, after.owner)
 ```
 
 ### Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it
@@ -388,6 +396,14 @@ pure val fair_ackAnswered = "weak"
 ```quint
 pure def sometimesHomeHasABrief(d: Digests): bool =
   briefForHome(d).result >= 2 and d.bucket.acked == d.bucket.kept and d.stage == Idle and not(d.open)
+
+pure val eval_witness_sometimesHomeHasABrief = (
+  ("ownerChanged", 1, true, false),
+  "pull",
+  ("fetched", 1, 1, true, 2, 2, 2, false),
+  ("pageKept", 1, true, false),
+  ("ackAnswered", 1, true),
+)
 
 pure def sometimesTheBriefFailed(d: Digests): bool = briefForHome(d).failed and d.stage == Idle
 
@@ -437,7 +453,9 @@ pure def keptSwitch(s: Switch, on: bool): Switch = { ...unconfirmed(s), on: on, 
 
 pure def ownerChanged(d: Digests, owner: int, backgroundOn: bool, noticesOn: bool): Moved =
   { state: { ...d, owner: owner, open: false, checks: NoChecks, stage: Idle, inbox: { ...d.inbox, status: R::Idle }, page: 0, pageRan: noBrief,
-             others: d.others.put(d.owner, d.bucket), bucket: d.others.getOr(owner, empty), notice: false,
+             others: d.others.put(d.owner, d.bucket),
+             owners: if (d.owners.some(k => k == d.owner)) d.owners else d.owners.append(d.owner),
+             bucket: bucketOf(d, owner), notice: false,
              focus: 0, fromNotice: false, details: { ...d.details, status: R::Idle },
              background: keptSwitch(d.background, backgroundOn), notices: keptSwitch(d.notices, noticesOn) },
     out: drop(d) }
@@ -496,5 +514,5 @@ pure def lawAReadCannotConfirmANativeChange(d: Digests, owner: int, scheduled: b
 ### An owner's results can wait for them while another owner is signed in
 
 ```quint
-pure def sometimesResultsWaitForTheirOwner(d: Digests): bool = d.others.getOr(1, empty).kept >= 1 and d.owner == 2
+pure def sometimesResultsWaitForTheirOwner(d: Digests): bool = bucketOf(d, 1).kept >= 1 and d.owner == 2
 ```

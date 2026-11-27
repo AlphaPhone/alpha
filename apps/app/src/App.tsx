@@ -77,6 +77,7 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
   const tabReturnRef = useRef(false);
   const slidRef = useRef<Risen["slide"]>(undefined);
   const slide = risen.slide;
+  const showing = shell?.trail.at(-1);
   const risenOver = useCallback(() => setRisen((was) => ({ ...was, overHome: false })), []);
   // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
   const holdLayer = useCallback((node: HTMLDivElement | null) => {
@@ -84,17 +85,14 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
     if (slide !== undefined && slidRef.current !== slide) {
       slidRef.current = slide;
       const fromTabs = slide.from === "Contacts" && slide.to === "Phone" && tabReturnRef.current;
-      tabReturnRef.current = false;
       if (!fromTabs) slideStage(node, slide.side);
-    } else if (slide === undefined && risen.view !== "Contacts") {
-      tabReturnRef.current = false;
     }
+    if (showing !== "Contacts") tabReturnRef.current = false;
     // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits": Home shows under a rising app until the rise is over, ended or stopped early.
     const stopped = (event: Event) => { if (event.target === node) risenOver(); };
     node.addEventListener("animationcancel", stopped);
     return () => node.removeEventListener("animationcancel", stopped);
-  }, [slide, risen.view, risenOver]);
-  const showing = shell?.trail.at(-1);
+  }, [showing, slide, risenOver]);
   if (shell !== undefined && risen.view !== showing) {
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": an emergency call is never staged (45f6bed30 prototype/model.js:6286).
     const staged = shell.assistant === "Sheet" && !landscape && !emergency && isCommsView(risen.view) && isCommsView(showing);
