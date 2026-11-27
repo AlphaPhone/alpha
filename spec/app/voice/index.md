@@ -117,7 +117,6 @@ type Effect =
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
   | Release({ afterMs: int })
-  | SayCallEnded
   | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
   | CheckDictation({ ticket: int })
   | Record({ ticket: int })
@@ -216,8 +215,7 @@ pure def canReturned(v: Voice): bool = (quiet(v) and (v.warmed or v.latched)) or
 
 pure def returned(v: Voice): Change =
   { state: { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice },
-    out: (if (v.callNotice == CallNoticeOnReturn) List(SayCallEnded) else List())
-      .concat(if (v.latched) List(Release({ afterMs: 0 })) else List()) }
+    out: if (v.latched) List(Release({ afterMs: 0 })) else List() }
 
 pure def stepPrewarmNeverOpensTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   via == "prewarm" implies (after.mic == before.mic and after.prompting == before.prompting and after.phase == before.phase)
@@ -1005,14 +1003,17 @@ pure def sometimesDenied(v: Voice): bool = v.phase == Failed and v.failure == D:
 > As the owner, I want a call to end Talk and release the microphone and
 > speaker. After the call, I can choose to start Talk again.
 
-### A phone call ends Talk and Alpha tells the owner once
+### A phone call ends Talk quietly, and only the owner starts it again
 
 Talk releases its audio and retires its in-flight turn under the normal
-confirmed stop. A call reported by the phone or a matching native speech
-request can identify this stop. If the activity hid during Talk, remember
-whether a call was observed before Alpha showed again and show the notice
-then. A plain app switch clears the pending cause without a notice.
-Only an explicit Talk request starts a new conversation after the call.
+confirmed stop, and shows no words: no toast, popup, banner or status
+line, then or when Alpha shows again. A call reported by the phone or a
+matching native speech request can identify this stop. If the activity
+hid during Talk, remember whether a call was observed until Alpha shows
+again; a plain app switch clears the pending cause the same way. Only an
+explicit Talk request starts a new conversation after the call. A call
+state the phone has not told is not a call, and does not keep Talk from
+starting.
 
 ```quint
 pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
@@ -1020,8 +1021,7 @@ pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
 
 pure def callInterrupted(v: Voice, session: int, foreground: bool): Change =
   val ended = if (talking(v)) shutDown(D::NoFailure, false, v) else { state: v, out: List() }
-  { state: { ...ended.state, callNotice: if (foreground) NoCallNotice else CallNoticeOnReturn },
-    out: ended.out.concat(if (foreground) List(SayCallEnded) else List()) }
+  { state: { ...ended.state, callNotice: if (foreground) NoCallNotice else CallNoticeOnReturn }, out: ended.out }
 
 pure def stepACallStopsTalk(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   (via == "callInterrupted") implies (not(talking(after)) and
@@ -1392,6 +1392,13 @@ pure def typeTranscript(v: Voice, ticket: int): Voice = { ...v, recorder: D::typ
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
+Dictation asked for on a phone without speech does not start, and shows
+no words. A transcript goes into the field whole, as Sunday's v119 put it
+there, even past the longest text the phone sends: the owner shortens the
+text before it can be sent, and nothing dictated is lost. A call state the phone has not told does not keep dictation from
+starting. A messaging bar's recorder shows no words: its stage, a failed
+transcription included, is said only to a screen reader, and its retry,
+discard and stop controls stay.
 In a Messages conversation, stopping a recording puts a successful transcript
 straight into that conversation's editable draft. Leaving the conversation
 before it arrives discards it.

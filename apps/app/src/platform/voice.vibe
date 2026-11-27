@@ -1210,18 +1210,27 @@ function cloudStops(owner: CloudVoiceSession): QuietStop[] {
 }
 
 /** The stops shut conversations could not confirm: `settle` asks each and keeps those that fail, `release` asks the kept ones again. */
-function unconfirmedStops() {
-  let kept: ReadonlyArray<QuietStop> = []
+effect function unconfirmedStops() {
+  const gate = try Semaphore.make(1)
+  const kept = new Set<QuietStop>()
   effect function settle(stops: ReadonlyArray<QuietStop>): boolean!! {
-    const failed: QuietStop[] = []
-    for (const stop of stops) if (!(try stop())) failed.push(stop)
-    kept = [...kept, ...failed]
-    return failed.length === 0
+    return try Semaphore.withPermit(gate, effect {
+      let quiet = true
+      for (const stop of stops) {
+        kept.add(stop)
+        if (try stop()) kept.delete(stop)
+        else quiet = false
+      }
+      return quiet
+    })
   }
   effect function release(): boolean!! {
-    const asked = kept
-    kept = []
-    return try settle(asked)
+    return try Semaphore.withPermit(gate, effect {
+      for (const stop of [...kept]) {
+        if (try stop()) kept.delete(stop)
+      }
+      return kept.size === 0
+    })
   }
   return { settle, release }
 }
@@ -1245,7 +1254,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const { restoreLocalOutput, setLocalSpeakerMuted } = try phoneSpeaker()
   const nativeCap = phoneNativeCapture(lifetime, () => activeSession, restoreLocalOutput)
   const playback = phonePlayback(() => activeSession, (session) => (cloudSpeech?.session === session ? cloudSpeech.stream : undefined))
-  const unconfirmed = unconfirmedStops()
+  const unconfirmed = try unconfirmedStops()
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
 
   const publish = (event: VoiceEvent) => {
@@ -1395,7 +1404,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
   let cloudPreview: CloudMicPreview | undefined
   let cloudSpeechAbort: AbortController | undefined
   let cueStop: Deferred.Deferred<void> | undefined
-  const unconfirmed = unconfirmedStops()
+  const unconfirmed = try unconfirmedStops()
   const eventSubscribers = new Set<(event: VoiceEvent) => void>()
   const publish = (event: VoiceEvent) => {
     for (const emit of eventSubscribers) emit(event)
