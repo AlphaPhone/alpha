@@ -13,7 +13,7 @@ import { type Readback, type WriteKind, agentCalendarAccepts, answerReadback, de
 import { Agent } from "../platform/index.vibe"
 import { Device } from "../platform/index.vibe"
 import { ask, attemptedWith } from "../platform/index.vibe"
-import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os-bridges"
+import type { AndroidCalendarEditorFields } from "@elizaos/os-bridges"
 import { launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
 import { PhoneCalendar, type Written } from "../platform/index.vibe"
 import { Attempts, fresh } from "../runtime/index.vibe"
@@ -24,7 +24,7 @@ import { answer, contained, filledStore, hearing, reacting, run, started, togeth
 import { Time } from "../runtime/index.vibe"
 import { calendarInFront } from "./calendar.vibe"
 import { type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
-import { type Row, androidWindowOf } from "./shown.ts"
+import { type Row, androidWindowOf, deletionScope, pickOf } from "./shown.ts"
 import { Shown } from "./stores.vibe"
 import { civilDay, feedParams, utcStart, wallDateTime, zone } from "./time.ts"
 
@@ -220,14 +220,6 @@ export effect function fromNote(fields: Fields, day: number) {
   return opened
 }
 
-/** An event of the phone as eliza's calendar review picks it. */
-function pickOf(row: Row): CalendarPick {
-  return {
-    event: { id: row.key, calendarId: row.calendarId, title: row.title, body: row.notes, location: row.place, ...androidWindowOf(row), allDay: row.allDay, recurring: row.recurring },
-    calendar: { id: row.calendarId, writable: true, local: true },
-  }
-}
-
 function fieldsOf(fields: Fields): AndroidCalendarEditorFields {
   return { title: fields.title.trim(), body: fields.notes, location: fields.place, begin: fields.begin, end: fields.end }
 }
@@ -331,11 +323,6 @@ effect function updateCalendarReminder(fields: Fields, owning: number, id: numbe
   const saved = try editDatedReminder(fields.reminderId, fields.reminderRevision, reminderFields(fields), attempt, reschedule)
   if (saved && reschedule) try say(fields.reminderAlert === null ? "Saved · No alert" : "Reminder rescheduled")
   return { confirmed: saved, known: true }
-}
-
-/** Which occurrences eliza's deletion review takes; it has no "this and following". */
-function deletionScope(scope: Scope, recurring: boolean): AndroidCalendarDeletionScope | undefined {
-  return scope === "ThisOne" ? (recurring ? "occurrence" : "event") : scope === "WholeSeries" ? "series" : undefined
 }
 
 const calendarBase = "/api/lifeops/calendar"
@@ -528,7 +515,10 @@ effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "U
   const shown = try Shown
   const row = shown.find(id) ?? (kind === "Remove" ? shown.lastSeen(id) : undefined)
   if (row === undefined) return refused
-  if (kind === "Remove" && row.revision !== base) return changedSince
+  if (kind === "Remove" && row.revision !== base) {
+    if (phone.cancel) try phone.cancel(row.key)
+    return changedSince
+  }
   if (kind === "Update") {
     const draft = try readEventDraft(owning)
     if (draft === undefined) return refused
