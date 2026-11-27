@@ -7,6 +7,7 @@ import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
 import { type Calendar as CalendarView, Machine as View } from "../gen/app__calendar.effect.vibe";
 import { Machine as Changes } from "../gen/app__calendar__agent.effect.vibe";
+import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { Machine as Editor } from "../gen/app__calendar__editor.effect.vibe";
 import { Machine as Held } from "../gen/app__calendar__deletions.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
@@ -30,6 +31,7 @@ import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { asleep, button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
+import { account } from "./fakes/cloud.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
 underAct();
@@ -1562,6 +1564,70 @@ describe("on a phone", () => {
   it(`An answer of the agent's approvals list read for the owner before a sign-out is refused, so that owner's request never shows signed out (spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars")`, async () => {
     const { named, writes } = await heldAcrossSignOut("approvals");
     expect([...named, askedCard().includes("lens check"), writes]).toEqual([true, false, false, false, []]);
+  });
+
+  /** Owner A's request to answer Maybe to `title`'s invitation, an event of the agent's calendar at `begin`. */
+  const maybeTo = (title: string, begin: number) => agentRequest(`approval-${agentEvent(title, begin, begin).id}`, {
+    action: "respond_invitation", account: "owner", scope: "instance", response: "tentative",
+    target: { source: { calendarId: "eliza-calendar/primary" }, eventId: agentEvent(title, begin, begin).id, startAt: new Date(begin).toISOString(), expectedVersion: "1" },
+  });
+
+  /**
+   * Owner A taps Approve on the card of `filed` in Calendar while the read named by `held` waits: the agent's approvals list read
+   * again at the tap, or the day of the event, read where Calendar's own window does not hold it. A goes Home, owner B signs in,
+   * and Calendar, opened again, takes B, whose reads of the list wait unanswered. Once the held read answers, tells whether B is
+   * signed in in A's place, how the card ended, whether Approve shows, what was written, how many toasts B was shown and whether
+   * B is shown that nothing changed.
+   */
+  async function approvedAcrossOwnerChange(held: "approvals" | "feed", filed: (world: ReturnType<typeof morning>) => ReturnType<typeof agentRequest>) {
+    const { world, alpha, runtime, reread } = await onPhoneCalendar();
+    world.calendar.approvals.push(filed(world));
+    await reread();
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.complete);
+    const a = (await runtime.runPromise(Effect.flatMap(View, (machine) => machine.get()))).owner;
+    const releases = held === "approvals" ? world.calendar.heldApprovals : world.calendar.heldFeed;
+    const hold = (on: boolean) => {
+      if (held === "approvals") world.calendar.holdApprovals = on;
+      else world.calendar.holdFeed = on;
+    };
+    hold(true);
+    await press("Approve");
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    hold(false);
+    const tapped = releases.splice(0);
+    world.calendar.holdApprovals = true;
+    await hardware("home");
+    const before = account.id;
+    onTestFinished(() => void Object.assign(account, { id: before }));
+    Object.assign(account, { id: "user-b" });
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.front && s.owner > 0 && s.owner !== a);
+    const issued = async () => (await alpha.runtime.runPromise(Effect.flatMap(Toasts, (machine) => machine.get()))).issued;
+    const shown = await issued();
+    await drawn(() => tapped.forEach((release) => release()));
+    await until(alpha, runtime, Changes, (s) => s.stage === "Idle");
+    await drawn(() => {});
+    const b = (await runtime.runPromise(Effect.flatMap(View, (machine) => machine.get()))).owner;
+    const card = await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
+    return [b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes, await issued() - shown, document.body.textContent?.includes("Nothing changed")];
+  }
+
+  it("Approve tapped for one owner sends nothing once another owner signed in while the tap read the agent's list again (spec/app/calendar/agent.md, \"The request is read again at the tap; a newer revision is shown as updated, and nothing is sent\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+    const ended = await approvedAcrossOwnerChange("approvals", (at) => maybeTo("Team lunch", at.at(0, 12)));
+    // spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent": approving is for the owner Calendar read at the tap, so A's approval is never sent once Calendar holds B, and B is told nothing of it
+    expect(ended).toEqual([true, "Withdrawn", false, [], 0, false]);
+  });
+
+  it("Approve tapped for one owner sends nothing once another owner signed in while the tap read the day of an event outside Calendar's window (spec/app/calendar/agent.md, \"The request is read again at the tap; a newer revision is shown as updated, and nothing is sent\"; spec/app/calendar/agent.md, \"A card is complete only with known fields, a valid time and, for a change, a verified target\")", async () => {
+    const ended = await approvedAcrossOwnerChange("feed", (at) => {
+      const begin = at.at(200, 12);
+      at.calendar.events.push(agentEvent("Offsite", begin, begin + hour, {
+        attendees: [{ email: "owner@alpha.test", displayName: "You", responseStatus: "needsAction", self: true, organizer: false, optional: false }],
+      }));
+      return maybeTo("Offsite", begin);
+    });
+    // spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent": the tap reads the event's own day after it read the list, and an owner who signed in meanwhile gets nothing of A's sent, and no words
+    expect(ended).toEqual([true, "Withdrawn", false, [], 0, false]);
   });
 
   it(`Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it")`, async () => {
