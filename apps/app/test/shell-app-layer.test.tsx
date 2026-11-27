@@ -72,20 +72,7 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
   });
 
   it("slides a communications app in from the side while Ask Alpha rests at its sheet, and swaps at once for Phone's own tabs or with Ask Alpha closed", async () => {
-    await windowSize(412, 915);
-    const world = { ...alphaImage(), now: 1_700_000_400_000 };
-    const { alpha } = await open(world, only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages"));
-    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
-    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
-    await drawn(() => {
-      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Phone']");
-      if (!tile) throw new Error("no Phone tile on Home");
-      tile.click();
-    });
-    await until(alpha, alpha.runtime, Phone, (s) => s.front);
-    await until(alpha, alpha.runtime, Canvas, (s) => !s.landscape);
-    const slides = watchSlides();
-    const trail = (shown: string) => until(alpha, alpha.runtime, Shell, (s) => s.trail.join(",") === shown);
+    const { alpha, slides, trail } = await stagedPhone(false);
 
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": with Ask Alpha at rest, Contacts and back swap at once.
     await tab("Contacts");

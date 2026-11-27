@@ -444,19 +444,23 @@ describe("The Browser on a phone", () => {
     expect(document.documentElement.dataset.alphaBrowserUnder).toBeUndefined();
   });
 
-  it("Measures Alpha's chrome again while it changes over a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
-    const { alpha, runtime, world } = await onBrowser(undefined, true);
+  async function openFindBelowHost(alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: Awaited<ReturnType<typeof onBrowser>>["runtime"], extra?: (node: Element) => DOMRect | undefined) {
     await until(alpha, runtime, Tabs, (s) => s.hydrated);
     layOutNativePage((node) => {
       if (node.hasAttribute("data-alpha-browser-page")) return new DOMRect(0, 104, 390, 650);
       if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
-      if (node.matches("[data-host-chrome]") && node.textContent === "Saved") return new DOMRect(95, 170, 200, 48);
-      return undefined;
+      return extra?.(node);
     });
     const { page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     await press("Menu");
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
+  }
+
+  it("Measures Alpha's chrome again while it changes over a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser(undefined, true);
+    await openFindBelowHost(alpha, runtime, (node) =>
+      node.matches("[data-host-chrome]") && node.textContent === "Saved" ? new DOMRect(95, 170, 200, 48) : undefined);
     const bar = { x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 };
     await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["below-host", [bar]])));
 
@@ -473,16 +477,7 @@ describe("The Browser on a phone", () => {
 
   it("Keeps Home hidden under a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
     const { alpha, runtime, world } = await onBrowser();
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
-    layOutNativePage((node) => {
-      if (node.hasAttribute("data-alpha-browser-page")) return new DOMRect(0, 104, 390, 650);
-      if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
-      return undefined;
-    });
-    const { page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
-    await press("Menu");
-    await press("Find in page");
-    await until(alpha, page, Page, (p) => p.finding);
+    await openFindBelowHost(alpha, runtime);
     await drawn(() => vi.waitFor(() => expect(world.browser.layer).toBe("below-host")));
     // spec/app/browser/address.md, "The find bar opens over a shown page": while the page is below, Home's layer is never drawn over it, even as the Browser rises over Home
     const home = document.querySelector("[data-alpha-home-layer]");

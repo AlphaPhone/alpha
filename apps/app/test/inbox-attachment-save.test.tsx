@@ -32,21 +32,26 @@ const withAgendaAttachment = (text: string) => {
   return world;
 };
 
-// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
-it("Save an attachment from inside its review, with one button per attachment", async () => {
-  const text = "Review agenda";
-  const world = withAgendaAttachment(text);
-  const { alpha } = await open(world, only("home", "view:Inbox"));
-  const runtime = inbox.runtime(alpha);
-  await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+async function openTermSheetMessage(world: ReturnType<typeof scene>) {
+  const opened = await open(world, only("home", "view:Inbox"));
+  const runtime = inbox.runtime(opened.alpha);
+  await until(opened.alpha, home.runtime(opened.alpha), Home, (s) => s.tiles.load.status === "Loaded");
   await drawn(() => {
     const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
     if (!tile) throw new Error("no Inbox tile on Home");
     tile.click();
   });
-  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
+  await until(opened.alpha, runtime, List, (s) => s.list.status === "Loaded");
   await openTermSheetRow();
-  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+  await until(opened.alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+  return { ...opened, runtime };
+}
+
+// spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time"; spec/app/inbox/message.md, "A review opened for opening also saves the same attachment, once, under the same rules"
+it("Save an attachment from inside its review, with one button per attachment", async () => {
+  const text = "Review agenda";
+  const world = withAgendaAttachment(text);
+  const { alpha, runtime } = await openTermSheetMessage(world);
 
   // spec/app/inbox/message.md, "An attachment is reviewed before it is opened or saved, and one use is in flight at a time": the attachment is one button, with no separate save beside it
   await drawn(() => expect([...document.querySelectorAll("button")].filter((one) => one.textContent?.includes("agenda.txt") || one.getAttribute("aria-label")?.includes("agenda.txt"))).toHaveLength(1));
@@ -79,18 +84,8 @@ it("Save an attachment from inside its review, with one button per attachment", 
 it("Migrates a pre-cancelled persisted reader record across restart without losing unsure saves", async () => {
   const kept = "alpha/app/inbox/message@1";
   const world = withAgendaAttachment("Review agenda");
-  const first = await open(world, only("home", "view:Inbox"));
-  const firstRuntime = inbox.runtime(first.alpha);
-  await until(first.alpha, home.runtime(first.alpha), Home, (s) => s.tiles.load.status === "Loaded");
-  await drawn(() => {
-    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-    if (!tile) throw new Error("no Inbox tile on Home");
-    tile.click();
-  });
-  await until(first.alpha, firstRuntime, List, (s) => s.list.status === "Loaded");
-  await openTermSheetRow();
-  await until(first.alpha, firstRuntime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
-  const openView = await firstRuntime.runPromise(Shown.use((machine) => machine.get()));
+  const first = await openTermSheetMessage(world);
+  const openView = await first.runtime.runPromise(Shown.use((machine) => machine.get()));
   const held = { account: openView.account, message: openView.message, attachment: 1 };
   await first.close();
 
@@ -98,7 +93,6 @@ it("Migrates a pre-cancelled persisted reader record across restart without losi
   if (!storedRaw) throw new Error("Missing persisted reader record");
   const preCancel = JSON.parse(storedRaw) as Record<string, unknown>;
   delete preCancel.cancelled;
-  // A record kept before an unsupported attachment's tap was remembered has no `unsupported` either.
   delete preCancel.unsupported;
   expect("pdf" in preCancel && "keep" in preCancel && !("cancelled" in preCancel) && !("unsupported" in preCancel)).toBe(true);
   localStorage.setItem(kept, JSON.stringify({ ...preCancel, unsure: [held] }));
@@ -122,17 +116,7 @@ it("An attachment Alpha can neither show nor save reads Unsupported type or size
   const termSheet = world.inbox.mail.find(({ card }) => card.id === "g1");
   if (!termSheet) throw new Error("Missing mailbox fixture");
   termSheet.files = [{ partId: "2", name: "archive.zip", mimeType: "application/zip", size: 6 * 1024 * 1024, supported: false }];
-  const { alpha } = await open(world, only("home", "view:Inbox"));
-  const runtime = inbox.runtime(alpha);
-  await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
-  await drawn(() => {
-    const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Inbox']");
-    if (!tile) throw new Error("no Inbox tile on Home");
-    tile.click();
-  });
-  await until(alpha, runtime, List, (s) => s.list.status === "Loaded");
-  await openTermSheetRow();
-  await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded" && s.revision > 0);
+  const { alpha, runtime } = await openTermSheetMessage(world);
 
   const notes = () => [...document.querySelectorAll("[role=note]")].map((one) => one.textContent);
   const tile = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((one) => one.textContent?.startsWith("archive.zip"));
@@ -141,11 +125,9 @@ it("An attachment Alpha can neither show nor save reads Unsupported type or size
   await drawn(() => tile()?.click());
   await until(alpha, runtime, Shown, (s) => s.unsupported === 1);
   await drawn(() => expect(notes()).toContain("Open in Gmail"));
-  // Nothing is fetched or put under review, and no review opens.
   const shown = await runtime.runPromise(Shown.use((machine) => machine.get()));
   expect([shown.attachment, shown.file.outcome, world.inbox.savedAttachments.size, document.querySelector("[role=dialog]")]).toEqual([0, "Planned", 0, null]);
 
-  // Leaving the message lets the notice go.
   await press("Back to the list");
   await until(alpha, runtime, Shown, (s) => s.message === 0 && s.unsupported === 0);
 });

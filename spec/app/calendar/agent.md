@@ -104,6 +104,8 @@ request is proposed while no change is under way. The card shows the
 change as the request holds it: the title, the day and times with their
 time zone, the place, the calendar, the people and that no invitations are
 sent unless the request says so, all day, and this occurrence or every one.
+Its heading names the change as Sunday's v119 did: Add event for a new
+event and Change event for a change.
 A request gone from the list is withdrawn; a new revision of the same
 request is a change of its event. A change the owner declined, the agent
 withdrew or Google refused reads the list again at once, so the next

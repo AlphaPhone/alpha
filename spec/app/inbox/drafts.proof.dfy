@@ -731,3 +731,58 @@ lemma copyRead_ensures(s: Composer, ticket: int, ok: bool, found: bool, held: in
     }
   }
 }
+
+lemma FoldTakeKeepsTheShelf(s: Composer, picks: seq<ShelfPick>)
+  requires alwaysTheShelfHoldsOtherDraftsOfThisSession(s) && alwaysAnUnsureDraftIsHandedToNothing(s)
+  ensures var sh := Std.Collections.Seq.FoldLeft((shelf: app__inbox__shelf_Shelf, pick: ShelfPick) => app__inbox__shelf_take(shelf, pick.draft), s.shelf, picks); alwaysTheShelfHoldsOtherDraftsOfThisSession(s.(shelf := sh)) && alwaysAnUnsureDraftIsHandedToNothing(s.(shelf := sh)) && (forall k :: k in sh.shelved ==> k in s.shelf.shelved) && (forall p :: p in picks ==> p.draft !in sh.shelved)
+  decreases |picks|
+{
+  if |picks| > 0 {
+    TakeKeepsTheShelf(s, picks[0].draft);
+    ShelfTaken(s.shelf, picks[0].draft);
+    var next := s.(shelf := app__inbox__shelf_take(s.shelf, picks[0].draft));
+    FoldTakeKeepsTheShelf(next, picks[1..]);
+  }
+}
+
+lemma FoldPickDrafts(acc: seq<int>, picks: seq<ShelfPick>)
+  ensures var ids := Std.Collections.Seq.FoldLeft((ids: seq<int>, pick: ShelfPick) => (ids + [pick.draft]), acc, picks); |ids| == |acc| + |picks| && (forall d :: d in ids ==> d in acc || exists p :: p in picks && p.draft == d)
+  decreases |picks|
+{
+  if |picks| > 0 {
+    FoldPickDrafts(acc + [picks[0].draft], picks[1..]);
+    var ids := Std.Collections.Seq.FoldLeft((ids: seq<int>, pick: ShelfPick) => (ids + [pick.draft]), acc, picks);
+    forall d | d in ids ensures d in acc || exists p :: p in picks && p.draft == d {
+      if d == picks[0].draft {
+        assert picks[0] in picks && picks[0].draft == d;
+      } else if d !in acc {
+        var p :| p in picks[1..] && p.draft == d;
+        assert p in picks && p.draft == d;
+      }
+    }
+  }
+}
+
+lemma discardShelfSelection_ensures(s: Composer, by_: app__inbox__access_Actor)
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAnOpenDraftIsWhole(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAWaitingEditHasItsDeadline(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysTheCopyIsTheDraft(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysOneCheckRunsAtATime(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysAnUnsureDraftIsHandedToNothing(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> alwaysTheShelfHoldsOtherDraftsOfThisSession(discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAWriteIsDueOnlyAfterItsPause(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepOneWriteAtATime(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAHandedDraftStaysPut(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepADraftIsForgottenOnlyWhenDiscardedOrGone(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepASentDraftIsForgottenOrMarked(s, "discardShelfSelection", discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepAnUnknownSendIsCheckedOnce(s, discardShelfSelection(s, by_).state, discardShelfSelection(s, by_).out))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepEditingASavedDraftReplacesNone(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+  ensures (inv(s) ==> canDiscardShelfSelection(s, by_) ==> stepADraftComesBackAsItWasSetAside(s, "discardShelfSelection", discardShelfSelection(s, by_).state))
+{
+  if inv(s) && canDiscardShelfSelection(s, by_) {
+    var picks := s.shelfSelection.picks;
+    var base := s.(shelfSelection := noShelfSelection);
+    FoldTakeKeepsTheShelf(base, picks);
+    FoldPickDrafts([], picks);
+  }
+}

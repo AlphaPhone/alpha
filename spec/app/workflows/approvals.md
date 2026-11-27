@@ -144,6 +144,8 @@ pure def expire(a: Approvals, now: int): Moved =
 pure def alwaysANoticeIsForAWaitingApproval(a: Approvals): bool = and {
   a.noticed implies a.approval == Waiting,
   a.approval != NoApproval implies (a.owner >= 1 and a.runId >= 1 and a.digest >= 1),
+  a.approval == Waiting implies (a.decided != a.digest or a.decision.outcome == A::Unknown),
+  a.check.status == R::Loading implies (a.owner >= 1 and a.tapRun >= 1 and a.tapDigest >= 1),
   a.asking.showing implies (a.sheet and a.approval == Waiting),
   (a.approval == Deciding) iff (a.decision.outcome == A::Sent),
   a.approval == Unsettled implies a.decision.outcome == A::Unknown,
@@ -222,7 +224,8 @@ pure def noticeOpened(a: Approvals, runId: int, digest: int): Moved =
 pure def opening(a: Approvals, ok: bool, owner: int, waiting: bool, expires: int, now: int): Opening =
   if (not(ok)) Unreadable
   else if (owner != a.owner) OtherAgent
-  else if (not(waiting) or a.tapDigest < a.digest or a.decision.outcome == A::Sent) Gone
+  else if (not(waiting) or a.tapDigest < a.digest or a.decision.outcome == A::Sent
+    or (a.tapDigest == a.decided and a.decision.outcome != A::Unknown)) Gone
   else if (expires <= now) Lapsed
   else Ready
 
@@ -362,7 +365,7 @@ pure def expireDevice(a: Approvals, number: int, now: int): Approvals =
   { ...retireDevice(a, number), now: now }
 
 pure def alwaysDeviceReviewNamesItsRun(a: Approvals): bool =
-  a.device.phase != DeviceIdle implies (a.device.number > 0 and a.device.runNumber > 0 and a.owner > 0)
+  a.device.number >= 0 and (a.device.phase != DeviceIdle implies (a.device.number > 0 and a.device.runNumber > 0 and a.owner > 0))
 
 pure def stepDeviceSendUsesTheExactReview(before: Approvals, via: str, after: Approvals): bool =
   (after.device.phase == DeviceSending and before.device.phase != DeviceSending) implies

@@ -76,7 +76,7 @@ const views: ReadonlyArray<{ layout: View.Layout; label: string }> = [
   { layout: "Agenda", label: "Schedule" },
 ];
 
-const changes: Readonly<Record<Changes.Change, string>> = { Create: "Create an event", Update: "Change an event", Delete: "Delete an event", Respond: "Answer an invitation" };
+const changes: Readonly<Record<Changes.Change, string>> = { Create: "Add event", Update: "Change event", Delete: "Delete an event", Respond: "Answer an invitation" };
 const replies: Readonly<Record<Changes.Reply, string>> = { NoReply: "", Going: "Going", Maybe: "Maybe", NotGoing: "Not going" };
 const results: Partial<Record<Changes.Result, string>> = {
   Done: "Done, and seen in your calendar.",

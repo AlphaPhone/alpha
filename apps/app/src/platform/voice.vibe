@@ -1147,6 +1147,21 @@ function phoneNativeCapture(
   return { current: () => nativeCapture, openLocal, stop, retire }
 }
 
+function dropEmptyGap(owner: CloudVoiceSession): void {
+  // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": words Mute finds waiting on the gap, or still being spoken, are still sent when the gap after them ends, as v119's setMuted finalized the speech, closed the capture and then still sent it (voice-assistant-session.ts:593-611).
+  if (owner.gap !== undefined && !owner.gap.waiting) {
+    owner.gap.cancel()
+    owner.gap = undefined
+  }
+}
+
+function abortCloudSession(owner: CloudVoiceSession): void {
+  // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": Stop drops words still waiting on the gap, as v119's stop did (voice-assistant-session.ts:574-575).
+  owner.gap?.cancel()
+  owner.gap = undefined
+  owner.abort.abort()
+}
+
 export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
   const lifetime = try Effect.scope
   const { probeStatus, warmDevice, invalidateStatus, awaitWarmup } = phoneSpeechStatus()
@@ -1215,11 +1230,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     clearCloudPreview(session)
     const owner = cloudSpeech
     if (owner?.session === session) {
-      // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": words Mute finds waiting on the gap, or still being spoken, are still sent when the gap after them ends, as v119's setMuted finalized the speech, closed the capture and then still sent it (voice-assistant-session.ts:593-611).
-      if (owner.gap !== undefined && !owner.gap.waiting) {
-        owner.gap.cancel()
-        owner.gap = undefined
-      }
+      dropEmptyGap(owner)
       if (owner.capture !== undefined) {
         const capture = owner.capture
         owner.capture = undefined
@@ -1253,10 +1264,7 @@ export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session === session) {
       cloudSpeech = undefined
-      // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": Stop drops words still waiting on the gap, as v119's stop did (voice-assistant-session.ts:574-575).
-      owner.gap?.cancel()
-      owner.gap = undefined
-      owner.abort.abort()
+      abortCloudSession(owner)
       const capture = owner.capture
       if (capture !== undefined) {
         confirmed = (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
@@ -1346,11 +1354,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     clearCloudPreview(session)
     const owner = cloudSpeech
     if (owner?.session !== session) return
-    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": words Mute finds waiting on the gap, or still being spoken, are still sent when the gap after them ends, as v119's setMuted finalized the speech, closed the capture and then still sent it (voice-assistant-session.ts:593-611).
-    if (owner.gap !== undefined && !owner.gap.waiting) {
-      owner.gap.cancel()
-      owner.gap = undefined
-    }
+    dropEmptyGap(owner)
     if (owner.capture === undefined) return
     const capture = owner.capture
     owner.capture = undefined
@@ -1390,10 +1394,7 @@ export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
     const owner = cloudSpeech
     if (owner?.session !== session) return true
     cloudSpeech = undefined
-    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": Stop drops words still waiting on the gap, as v119's stop did (voice-assistant-session.ts:574-575).
-    owner.gap?.cancel()
-    owner.gap = undefined
-    owner.abort.abort()
+    abortCloudSession(owner)
     const capture = owner.capture
     const cancelled = capture === undefined || (try (tryPromise(() => capture.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false)))
     return (try (tryPromise(() => owner.stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && cancelled

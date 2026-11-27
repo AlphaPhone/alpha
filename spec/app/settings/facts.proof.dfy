@@ -3,11 +3,14 @@ lemma requestHome_ensures(s: Facts, at: int)
   ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysShownIsFromTheNewestSettledAsking(requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysUnreadRolesAreNotHeld(requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysNoHomeRequestOverAStaleRole(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysVaultRowsStayInFront(requestHome(s, at).state))
+  ensures (inv(s) ==> canRequestHome(s, at) ==> alwaysVaultRemovalBelongsToAnUnlockedVisit(requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> stepReadOnlyWhenAsked(s, "requestHome", requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> stepFactsNeverGoBack(s, requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> stepOnlyAnAnswerChangesWhatIsShown(s, "requestHome", requestHome(s, at).state))
   ensures (inv(s) ==> canRequestHome(s, at) ==> stepEveryAskingIsSent(s, requestHome(s, at).state, requestHome(s, at).out))
   ensures (inv(s) ==> canRequestHome(s, at) ==> stepOneHomeRequestAtATime(s, "requestHome", requestHome(s, at).state, requestHome(s, at).out))
+
 {
   if inv(s) && canRequestHome(s, at) {
     var after := requestHome(s, at);

@@ -68,6 +68,17 @@ async function restore(alpha: Alpha, title: string) {
   await press(`Restore conversation: ${title}`);
 }
 
+async function openRestoredChat(world: ReturnType<typeof scene>) {
+  world.ask.opened = 1;
+  const { alpha } = await open(world, mounts);
+  const runtime = assistant.runtime(alpha);
+  await until(alpha, runtime, Composer, (s) => s.slot === "Open");
+  await until(alpha, runtime, Conversation, (s) => s.ready);
+  await restore(alpha, "Ask Alpha");
+  await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
+  return { alpha, runtime };
+}
+
 describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Story: Understand why a reply did not finish\")", () => {
   it("keeps no bubble for a reply stopped before any of its text settled, only a notice for a dropped one, and none empty for a send of only a reviewed email", async () => {
     const world = { ...scene(), phone: true };
@@ -81,13 +92,7 @@ describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Stor
       { id: "m7", role: "user", text: "Thanks" },
       { id: "m8", role: "assistant", text: "", failureKind: "aborted", abortCause: "runtime" },
     ] });
-    world.ask.opened = 1;
-    const { alpha } = await open(world, mounts);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
-    await until(alpha, runtime, Conversation, (s) => s.ready);
-    await restore(alpha, "Ask Alpha");
-    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
+    const { alpha, runtime } = await openRestoredChat(world);
     await until(alpha, runtime, Chats, (s) => s.chosen === 1 && s.page.status === "Loaded");
     await drawn(() => vi.waitFor(() => expect(bubbles().length).toBeGreaterThan(0)));
     // spec/app/assistant/reply.md, "Read again from history, a reply the owner stopped here before any text settled keeps no bubble, any other stopped or dropped one only says it did not finish, and text that settled before a Stop stays": with no Stop pressed here, a reply a Stop reached first and a dropped stream say only that they did not finish, never their stored text, and a reply the runtime ended still says why.
@@ -100,13 +105,7 @@ describe("Ask Alpha read again from history (spec/app/assistant/reply.md, \"Stor
   it("keeps no bubble for a reply the owner stopped before any of its text settled, and keeps text that settled before a Stop", async () => {
     const world = { ...scene(), phone: true };
     world.ask.kept.set("c1", { roomId: "r1", title: "Ask Alpha", messages: [] });
-    world.ask.opened = 1;
-    const { alpha } = await open(world, mounts);
-    const runtime = assistant.runtime(alpha);
-    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
-    await until(alpha, runtime, Conversation, (s) => s.ready);
-    await restore(alpha, "Ask Alpha");
-    await until(alpha, runtime, Composer, (s) => s.binding.conversation === 1 && s.slot === "Open");
+    const { alpha, runtime } = await openRestoredChat(world);
 
     world.ask.stalled = true;
     world.ask.nextReplyChunks = ["Once upon a"];
