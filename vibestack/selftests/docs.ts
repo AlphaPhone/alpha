@@ -263,7 +263,7 @@ describe("the documents name what exists", () => {
       }),
     }, {
       notWaiting: ["//#build", "//#lint:css", "//#selftest:docs", "//#selftest:examples", "@repo/cli#test", "@repo/cli#typecheck", "@repo/design-system#build", "@repo/ui#typecheck", "vibestack-studio#build", "vibestack-studio#dev", "vibestack-studio#test", "vibestack-studio#typecheck"],
-      analyzeWaitsFor: ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      analyzeWaitsFor: ["//#gen", "@repo/cloud#build", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       lintWaitsFor: vibeDeclared, devWaitsFor: tasks.get("vibestack-studio#build")!.dependencies.toSorted(), prose: [[], true, true], readme: [["//#selftest:docs", "//#selftest:tools:rest"], false], selftest: [[], false, true],
       fixture: { studio: ["vibestack-studio#test"], build: false, selftest: true },
       frameworkTest: { build: false, test: true },

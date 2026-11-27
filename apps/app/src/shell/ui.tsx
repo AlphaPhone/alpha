@@ -2,4 +2,4 @@
 export { AppBack, useFirstPageBack } from "./AppBack.tsx";
 export * from "./Layers.tsx";
 export * from "./launcherFrame.ts";
-export { SharePanel, type ShareDestination } from "./SharePanel.tsx";
+export { SharePanel } from "./SharePanel.tsx";
