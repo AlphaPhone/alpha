@@ -209,6 +209,8 @@ export interface SpokenReview {
 }
 
 interface DeviceActionReply {
+  /** The reply's own message, under which a review it offered shows how it ended. */
+  readonly messageId?: string
   readonly spoken?: SpokenReview
   readonly directFiles?: DirectFiles
   readonly outsideFiles?: OutsideFiles
@@ -399,6 +401,43 @@ export interface MediaCard {
   readonly recipientName?: string
   /** Why the card can only be declined here: a Files change waiting for Files to be opened. */
   readonly notice?: string
+  /** The typed reply that offered this card for review. */
+  readonly offeredBy?: OfferedBy
+}
+
+/** The reply that offered a review card, and whether offering that one review was all the reply did. */
+export interface OfferedBy { readonly reply: string; readonly only: boolean }
+
+/** How the owner's decision on a phone step ended; `offer` names the card and the reply it stands under once the card has gone. */
+export interface MediaNote {
+  readonly conversation: number
+  readonly text: string
+  readonly offer?: OfferedBy & { readonly card: string }
+}
+
+/** The notes that stand under the reply that offered their card. */
+export function standing(notes: ReadonlyArray<MediaNote>): ReadonlyArray<MediaNote> {
+  return notes.filter((note) => note.offer !== undefined)
+}
+
+/** The notes after `note`: every one standing under its reply, then `note` in place of any other. */
+export function noted(notes: ReadonlyArray<MediaNote>, note: MediaNote): ReadonlyArray<MediaNote> {
+  return [...standing(notes), note]
+}
+
+function offeredBy(reply: DeviceActionReply, actions: ReadonlyMap<string, ReplyAction>, proposal: string): OfferedBy | undefined {
+  if (reply.messageId === undefined || actions.get(proposal) !== "Review") return undefined
+  return { reply: reply.messageId, only: actions.size === 1 && reply.actionResults.every(({ action }) => action === "PROPOSE_DEVICE_ACTION") }
+}
+
+/** What a reviewed read found, in v119's words (Alpha 45f6bed30: `ui/telephony/telephony-receipt-text.ts:179-196`). */
+function readSaid(result: NonNullable<ReturnType<typeof latestSenderResult>> | { readonly kind: "messages-read" | "voicemail-read" }): string {
+  switch (result.kind) {
+    case "messages-read": return "Shared the open thread."
+    case "voicemail-read": return "Shared the open voicemail."
+    case "sms-latest-sender": return result.status !== "found" ? result.status === "empty" ? "No incoming SMS messages." : "The latest incoming SMS has no readable phone number."
+      : "address" in result ? result.address : `Latest incoming SMS sender ends in ${result.numberEnding}.`
+  }
 }
 
 const openFilesNotice = "Open Files to review this action."
@@ -1017,6 +1056,7 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
       if (phone !== undefined && (!isLatest(opened) || !(try reviewContext(revision, view)))) return undefined
       const contactName = op.type === "sms_send" && op.recipients.length === 1 ? try recipientName(op.recipients[0] ?? "") : undefined
+      const offer = offeredBy(reply, actions, proposal.id)
       const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
         ...(selected && bound !== undefined ? { target: bound } : {}),
         ...(voicemail === undefined ? {} : { voicemail }),
@@ -1028,7 +1068,8 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         ...(phone === undefined ? {} : { phone }),
         ...(contactName === undefined ? {} : { recipientName: contactName }),
         ...(files === undefined ? {} : { files, detail: filesDetail(op, files, labelled.detail) }),
-        ...(notice === undefined ? {} : { notice }) }
+        ...(notice === undefined ? {} : { notice }),
+        ...(spoken === undefined && offer !== undefined ? { offeredBy: offer } : {}) }
       return { card, fromTerminal: request === undefined && origin === undefined }
     }, { concurrency: 4 })
     if (spoken !== undefined && (!(try enrollmentIsCurrent(opened)) || !isLatest(opened) ||
@@ -1183,7 +1224,7 @@ const mediaReviewContext = effect {
       && decoded.agentId === identity.agentId && decoded.origin === identity.origin && decoded.installationId === identity.installationId
       && decoded.enrollmentId === identity.enrollmentId && decoded.agentAttemptId === proposal.execution.attemptId
   }
-  effect function readAttempt(opened: Session, card: MediaCard): (string | undefined)!! {
+  effect function readAttempt(opened: Session, card: MediaCard): ({ readonly attempt: string; readonly said: string } | undefined)!! {
     if (!reviewedRead(card.operation)) return undefined
     const entry = (tryPromise(() => journal().get(card.id)) |> flatMap(%, Schema.decodeUnknownEffect(readReceipt))) catch () => undefined
     if (entry === undefined || entry.proposalId !== card.id || entry.operationId !== card.id || entry.digest !== card.digest
@@ -1195,11 +1236,14 @@ const mediaReviewContext = effect {
     if (operation.type === "voicemail_read_selected") {
       const result = readResult<"voicemail_read_selected">(operation, entry.evidence.result)
       return card.voicemail !== undefined && result?.status === "read" && JSON.stringify(result) === JSON.stringify(card.voicemail.result)
-        ? entry.agentAttemptId : undefined
+        ? { attempt: entry.agentAttemptId, said: readSaid(result) } : undefined
     }
-    const verified = operation.type === "sms_latest_sender" ? latestSenderResult(operation, entry.evidence.result) !== undefined
-      : readResult<"messages_read_selected">(operation, entry.evidence.result)?.status === "read"
-    return verified ? entry.agentAttemptId : undefined
+    if (operation.type === "sms_latest_sender") {
+      const sender = latestSenderResult(operation, entry.evidence.result)
+      return sender === undefined ? undefined : { attempt: entry.agentAttemptId, said: readSaid(sender) }
+    }
+    const shared = readResult<"messages_read_selected">(operation, entry.evidence.result)
+    return shared?.status === "read" ? { attempt: entry.agentAttemptId, said: readSaid(shared) } : undefined
   }
   const readyToDecline = (proposal: Proposal, at: number) => proposal.state === "pending" && Date.parse(proposal.expiresAt) > at
   const toSettle = (proposal: Proposal) => proposal.state === "executing" || proposal.state === "reconciliation_required"
@@ -1450,20 +1494,20 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       effect function current(session: Session): boolean!! {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
       }
-      effect function completeRead(session: Session): boolean!! {
-        if (card.read === undefined) return false
-        const attemptId = try readAttempt(session, card)
-        if (attemptId === undefined || !(try current(session))) return false
+      effect function completeRead(session: Session): (string | undefined)!! {
+        if (card.read === undefined) return undefined
+        const read = try readAttempt(session, card)
+        if (read === undefined || !(try current(session))) return undefined
         const { origin, pageTicket } = card.read
-        const body = { ...origin, proposalId: card.id, digest: card.digest, attemptId }
+        const body = { ...origin, proposalId: card.id, digest: card.digest, attemptId: read.attempt }
         const response = (tryPromise(() => runtime.request(`${prefix}/proposals/${encodeURIComponent(card.id)}/read-completion`, body, session.headers))
           |> flatMap(%, Schema.decodeUnknownEffect(readReply))) catch () => undefined
-        if (response === undefined || !sameReadOrigin(response.reply, origin) || response.reply.messageId === origin.inReplyTo) return false
-        if (!(try current(session))) return true
+        if (response === undefined || !sameReadOrigin(response.reply, origin) || response.reply.messageId === origin.inReplyTo) return undefined
+        if (!(try current(session))) return read.said
         const { messageId, text } = response.reply
         board.messageNumber(messageId)
         board.append(pageTicket, card.conversation, { id: messageId, mine: false, text })
-        return true
+        return read.said
       }
       effect function canStage(session: Session): boolean!! {
         const context = (try conversation.get()).context
@@ -1489,7 +1533,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }
         if (!board.snapshot().media.includes(deciding ?? card)) return
         if (deciding === undefined) replace(card)
-        const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
+        const report = (text: string) => {
+          const { media, mediaNotes } = board.snapshot()
+          const offer = card.offeredBy === undefined || media.some((one) => one.id === card.id) ? undefined : { ...card.offeredBy, card: card.id }
+          board.change({ mediaNotes: noted(mediaNotes, { conversation: card.conversation, text, ...(offer === undefined ? {} : { offer }) }) })
+        }
         if (!live || held === undefined) {
           if (deciding !== undefined) replace(deciding)
           if (spoken === undefined || ((try spoken.current) && (try reviewContext(card.revision, conversation)))) {
@@ -1534,9 +1582,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         if (card.read !== undefined) {
-          const read = result?.kind === "settled" && result.result.tag === "Applied" && result.synced && (try completeRead(held))
-          if ((try finishDecision(held, result?.kind === "settled" && result.synced)) !== "Unavailable" && !read && (try current(held))) {
-            report("Alpha couldn’t complete that read.")
+          const said = result?.kind === "settled" && result.result.tag === "Applied" && result.synced ? try completeRead(held) : undefined
+          if ((try finishDecision(held, result?.kind === "settled" && result.synced)) !== "Unavailable" && (try current(held))) {
+            report(said ?? "Alpha couldn’t complete that read.")
           }
           return
         }

@@ -1038,6 +1038,8 @@ describe("on a phone", () => {
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
     expect(["Eliza Calendar", "Your agent's calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 headed a new event's card "Add event" (prototype/calendar-approval-fields.ts:46)
+    expect(["Add event", "Create an event"].map((text) => askedCard().includes(text))).toEqual([true, false]);
     expect(button("Approve")).toBeDefined();
     expect(world.calendar.writes).toEqual([]);
   });

@@ -14,6 +14,7 @@ import { useMachine as useAttachments } from "../../gen/app__assistant__attachme
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { loading as pageLoading } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
+import { offerShown } from "../../gen/app__assistant__cards.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
@@ -39,7 +40,7 @@ import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mai
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
 import { type Backs, home } from "../shell/shell.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import { type MediaCard, type MediaNote, MediaReview, namedReviewQuery } from "./media-review.vibe";
 import type { Agent } from "../platform/agent.vibe";
 import { native, type Device } from "../platform/device.vibe";
 import type { NoteStore } from "../platform/notes.vibe";
@@ -670,16 +671,23 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
       children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
   // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's; a filing reply that draws no row here keeps the outcome at the foot so it is never lost.
   const filer = calendar.shown === "ChangeEnded" ? filedBy(calendar, shown.chosen) : undefined;
-  const endedUnder = filer !== undefined && [...rows.messages, ...(rows.messagesAfterLater ?? [])].some((row) => row.id === filer) ? filer : undefined;
-  const under = (placed: typeof rows.messages) => endedUnder === undefined ? placed
-    : placed.flatMap((row) => row.id === endedUnder ? [row, ...calendarCard] : [row]);
+  const drawn = [...rows.messages, ...(rows.messagesAfterLater ?? [])];
+  const endedUnder = filer !== undefined && drawn.some((row) => row.id === filer) ? filer : undefined;
+  // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it"
+  const notes = talking.context.sensitive ? [] : seen.mediaNotes.filter((note) => note.conversation === shown.chosen);
+  const offerDrawn = (note: MediaNote) => note.offer !== undefined && drawn.some((row) => row.id === note.offer?.reply);
+  const receipt = (note: MediaNote) => ({ id: `media result ${note.offer?.card ?? "latest"}`, author: "alpha" as const, text: "", children: <AssistantDeviceReceipt text={note.text} /> });
+  const under = (placed: typeof rows.messages) => placed.flatMap((row) => {
+    const chips = notes.filter((note) => offerDrawn(note) && note.offer?.reply === row.id);
+    const offer = chips.every((note) => note.offer === undefined || offerShown(note.offer.only, seen.media.some((card) => card.id === note.offer?.card), true));
+    return [...(offer ? [row] : []), ...chips.map(receipt), ...(row.id === endedUnder ? calendarCard : [])];
+  });
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
     ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
       children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
-  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: "", children: <AssistantDeviceReceipt text={seen.mediaNote.text} /> }];
+  const mediaNote = notes.filter((note, at) => note.offer === undefined || (at === notes.length - 1 && !offerDrawn(note))).map(receipt);
   const failure = seen.failure;
   const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
   const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
