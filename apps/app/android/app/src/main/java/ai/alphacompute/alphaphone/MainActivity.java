@@ -6,6 +6,7 @@ import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
@@ -34,6 +35,7 @@ public class MainActivity extends BridgeActivity {
  private static int nextTextAsk;
  private static OfferedAsk offeringAsk;
  private static WeakReference<MainActivity> livePage = new WeakReference<>(null);
+ private static final NavigationOpenRequest navigationOpen = new NavigationOpenRequest();
  private static boolean handoffUnavailable;
  private static int unansweredFrontStarts;
  private boolean homeTask;
@@ -143,6 +145,7 @@ public class MainActivity extends BridgeActivity {
   if (receiveTextAsk(incoming) || receiveSmsDraft(incoming)) setIntent(new Intent(this, MainActivity.class));
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
   if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
+  captureNavigationOpen(getIntent());
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
@@ -162,6 +165,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMediaEnrollmentPlugin.class);
   registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
@@ -218,6 +222,7 @@ public class MainActivity extends BridgeActivity {
 
    @Override public void onPageLoaded(WebView page) {
     if (insets != null) insets.publish(page);
+    signalNavigationOpen();
    }
   });
   var decor = getWindow().getDecorView();
@@ -351,7 +356,9 @@ public class MainActivity extends BridgeActivity {
    SmsDraftOpenRequest.retire(this);
    SmsNoticeOpenRequest.clear();
   }
+  boolean openMaps = captureNavigationOpen(intent);
   super.onNewIntent(intent);
+  if (openMaps) signalNavigationOpen();
   var bridge = getBridge();
   WebView view = bridge == null ? null : bridge.getWebView();
   if (view != null && home) view.evaluateJavascript(HOME, null);
@@ -359,6 +366,26 @@ public class MainActivity extends BridgeActivity {
 
  private static boolean isHome(Intent intent) {
   return intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME);
+ }
+
+ private boolean captureNavigationOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || isFrontStart(intent)) return false;
+  if (AlphaNavigationService.ACTION_SHOW_MAPS.equals(intent.getAction())) {
+   navigationOpen.offer(SystemClock.elapsedRealtime());
+   intent.setAction(Intent.ACTION_MAIN);
+   return true;
+  }
+  if (isHome(intent)) navigationOpen.clear();
+  return false;
+ }
+
+ boolean consumeNavigationOpen() { return !isAssistantSurface() && navigationOpen.consume(SystemClock.elapsedRealtime()); }
+ void clearNavigationOpen() { if (!isAssistantSurface()) navigationOpen.clear(); }
+
+ private void signalNavigationOpen() {
+  if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface()) {
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
+  }
  }
 
  private static boolean isHomeTaskStart(Intent intent) {
