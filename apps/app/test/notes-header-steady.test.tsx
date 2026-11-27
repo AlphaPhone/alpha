@@ -277,7 +277,7 @@ const radiatorPinned = (world: Scene) =>
   (world.notes.notes.find((row) => row.title === "Radiator")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned === true;
 
 describe(`More keeps v119's Share, Pin and Delete in place while a save lands under it (${fixed}; ${waits})`, () => {
-  it("keeps the same Share, Pin and Delete rows, in order, as the autosave lands under the open menu, and the Share row then opens Share, not Pin", async () => {
+  async function withGatedRadiatorEdit(body: (ctx: { world: Scene; alpha: Awaited<ReturnType<typeof openRadiator>>["alpha"]; runtime: Awaited<ReturnType<typeof openRadiator>>["runtime"]; save: ReturnType<typeof gate> }) => Promise<void>) {
     const world = scene();
     const { alpha, runtime } = await openRadiator(world);
     const save = gate();
@@ -285,6 +285,16 @@ describe(`More keeps v119's Share, Pin and Delete in place while a save lands un
     try {
       await fill("Note", edited);
       await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Edited");
+      await body({ world, alpha, runtime, save });
+    } finally {
+      delete world.notes.interactGate;
+      save.open();
+    }
+    return { world, alpha, runtime };
+  }
+
+  it("keeps the same Share, Pin and Delete rows, in order, as the autosave lands under the open menu, and the Share row then opens Share, not Pin", async () => {
+    await withGatedRadiatorEdit(async ({ world, alpha, runtime, save }) => {
       await openMore();
       await rendered(() => expect(rows()).toEqual([["Share", true], ["Pin", true], ["Delete", true]]));
       const before = items();
@@ -299,31 +309,19 @@ describe(`More keeps v119's Share, Pin and Delete in place while a save lands un
       await drawn(() => before[0]?.click());
       await rendered(() => expect(button("Close share")).toBeDefined());
       expect(radiatorPinned(world)).toBe(false);
-    } finally {
-      delete world.notes.interactGate;
-      save.open();
-    }
+    });
   });
 
   it("Pin during an edit waits for the save to land, then pins the saved note, with the words saved", async () => {
-    const world = scene();
-    const { alpha, runtime } = await openRadiator(world);
-    const save = gate();
-    world.notes.interactGate = save.held;
-    try {
-      await fill("Note", edited);
-      await until(alpha, runtime, Editor, (state) => state.showing && state.draft.sync === "Edited");
+    const { world, alpha, runtime } = await withGatedRadiatorEdit(async ({ world: w, alpha: a, runtime: r }) => {
       await choose("Pin");
-      await until(alpha, runtime, Editor, (state) => state.pinning === "ToPin" && state.draft.sync === "Saving");
+      await until(a, r, Editor, (state) => state.pinning === "ToPin" && state.draft.sync === "Saving");
       await openMore();
       await rendered(() => expect(rows()).toEqual([["Share", true], ["Unpin", false], ["Delete", true]]));
       await drawn(() => menu()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
-      await later(alpha, 1_000);
-      expect(radiatorPinned(world)).toBe(false);
-    } finally {
-      delete world.notes.interactGate;
-      save.open();
-    }
+      await later(a, 1_000);
+      expect(radiatorPinned(w)).toBe(false);
+    });
     await until(alpha, runtime, Editor, (state) => state.showing && !waiting(state) && state.pinning === "Unasked");
     await rendered(() => expect(radiatorPinned(world)).toBe(true));
     expect(world.notes.notes.find((row) => row.title === "Radiator")?.body.trim()).toBe(edited);
