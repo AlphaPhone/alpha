@@ -22,7 +22,7 @@ import browser from "../src/browser/index.tsx";
 import home from "../src/home/index.tsx";
 import messages from "../src/messages/index.tsx";
 import { displayNumber } from "../src/phone/words.ts";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, input, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { alphaImage as image } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -694,7 +694,7 @@ describe("Messages on an Alpha image", () => {
     });
     await expect(alpha.runtime.runPromise(readAgentSms(sms, call))).resolves.toBeUndefined();
     const waitForRead = (count: number) => vi.waitFor(async () => {
-      await later(alpha, 500);
+      if (world.telephony.smsQueries.length < count) await later(alpha, 100);
       expect(world.telephony.smsQueries).toHaveLength(count);
     }, { timeout: 4_000 });
     await waitForRead(2);
@@ -1183,5 +1183,89 @@ describe("Messages on an Alpha image", () => {
     await press("Ben Ortiz");
     await ready(alpha.runtime, Messages, "Ben conversation", (s) => s.pane === "Conversation" && s.page.status === "Loaded");
     expect(document.body.textContent).not.toContain("The message was not deleted");
+  });
+});
+
+describe("Messages search", () => {
+  const searchField = () => input("Search conversations");
+
+  it(`On the launcher the search draws no Back, Android's Back closes it, and the next Back leaves Messages (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
+    const world = image();
+    world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
+    const { alpha } = await open(world, only("home", "view:Messages"));
+    const runtime = messages.runtime(alpha);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await drawn(() => {
+      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Messages']");
+      if (!tile) throw new Error("No Messages home tile");
+      tile.click();
+    });
+    await until(alpha, runtime, Messages, (state) => state.front && state.pane === "Threads" && state.list.status === "Loaded");
+    await vi.waitFor(() => expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(true));
+
+    await press("Search messages");
+    await until(alpha, runtime, Messages, (state) => state.searching);
+    await vi.waitFor(() => expect(searchField()).not.toBeNull());
+    expect(button("Back to messages")).toBeUndefined();
+    await fill("Search conversations", "Maya");
+    await until(alpha, runtime, Messages, (state) => state.sought);
+
+    await hardware("back");
+    await until(alpha, runtime, Messages, (state) => !state.searching && !state.sought && state.front && state.pane === "Threads");
+    await vi.waitFor(() => expect(searchField()).toBeNull());
+    expect(button("Search messages")).toBeDefined();
+    expect((await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()))).trail.at(-1)).toBe("Messages");
+
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+  });
+
+  async function openMessagesView(withAssistant: boolean) {
+    const { alpha } = await open(image(), withAssistant ? only("home", "assistant", "view:Messages") : only("home", "view:Messages"));
+    const runtime = messages.runtime(alpha);
+    await until(alpha, alpha.runtime, Shell, (state) => state.image);
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Messages" }))));
+    await until(alpha, runtime, Messages, (state) => state.front && state.pane === "Threads" && state.list.status === "Loaded");
+    return { alpha, runtime };
+  }
+
+  it(`Off the launcher the search keeps its Back, which closes the search and stays in Messages (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
+    const { alpha, runtime } = await openMessagesView(false);
+    expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(false);
+
+    await press("Search messages");
+    await vi.waitFor(() => expect(button("Back to messages")).toBeDefined());
+    await fill("Search conversations", "Maya");
+    await until(alpha, runtime, Messages, (state) => state.sought);
+    await press("Back to messages");
+    await until(alpha, runtime, Messages, (state) => !state.searching && !state.sought && state.front && state.pane === "Threads");
+    await vi.waitFor(() => expect(searchField()).toBeNull());
+  });
+
+  it(`The search opens empty, and a conversation opened from its results returns to them before Back closes the search (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
+    const { alpha, runtime } = await openMessagesView(true);
+    const everyone = (await runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()))).threads;
+    const words = document.querySelector("ul[aria-label='Conversations'] button")?.getAttribute("aria-label")?.split(" ")[0] ?? "";
+
+    await fill("Search or ask", "Nobody by this name");
+    await until(alpha, runtime, Messages, (state) => state.sought && !state.searching && state.list.status === "Loaded" && state.threads === 0);
+    await press("Search messages");
+    await until(alpha, runtime, Messages, (state) => state.searching && !state.sought && state.list.status === "Loaded" && everyone > 0 && state.threads === everyone);
+    await vi.waitFor(() => expect(searchField()?.value).toBe(""));
+
+    await fill("Search conversations", words);
+    await until(alpha, runtime, Messages, (state) => state.sought && state.list.status === "Loaded" && state.threads > 0);
+    const found = (await runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()))).threads;
+    await drawn(() => document.querySelector<HTMLButtonElement>("ul[aria-label='Conversations'] button")?.click());
+    await until(alpha, runtime, Messages, (state) => state.pane === "Conversation");
+
+    await hardware("back");
+    await until(alpha, runtime, Messages, (state) => state.pane === "Threads" && state.searching && state.sought && state.list.status === "Loaded" && state.threads === found);
+    await vi.waitFor(() => expect(searchField()?.value).toBe(words));
+
+    await hardware("back");
+    await until(alpha, runtime, Messages, (state) => state.pane === "Threads" && !state.searching && !state.sought);
+    await vi.waitFor(() => expect(searchField()).toBeNull());
+    expect((await alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.get()))).trail.at(-1)).toBe("Messages");
   });
 });

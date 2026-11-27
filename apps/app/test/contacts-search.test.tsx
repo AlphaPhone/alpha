@@ -7,13 +7,13 @@ import { Machine as Phone } from "../gen/app__phone.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import home from "../src/home/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, input, only, open, press, underAct, until } from "./alpha.tsx";
 import { alphaImage } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
 
-const searchField = () => document.querySelector<HTMLInputElement>("input[aria-label='Search contacts']");
+const searchField = () => input("Search contacts");
 const mounts = only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages");
 
 /** Alpha as the phone's launcher, with Home loaded. */

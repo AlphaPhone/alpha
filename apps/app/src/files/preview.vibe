@@ -23,7 +23,7 @@ import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vi
 import { type Said, say } from "../notices/index.vibe"
 import { earlierCleared } from "../../gen/app__platform__adoption.effect.vibe"
 import { Documents, type Files, adopt, called, keptAt, previewUrl } from "../platform/index.vibe"
-import { type Job, type Shelf, answer, createShelf, filledStore, following, reacting, run, started, stop, together } from "../runtime/index.vibe"
+import { type Job, type Shelf, answer, createShelf, filledStore, following, reacting, run, started, together } from "../runtime/index.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
 /** What a grant of Recent names: the selection the phone gave for the document, its number in Files, its name, type and revision. */

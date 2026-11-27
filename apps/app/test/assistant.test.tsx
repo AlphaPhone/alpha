@@ -1256,10 +1256,7 @@ it("Let my agent know where I am indoors: a turn with no position looks it up on
   const world = { ...scene(), phone: true };
   world.maps.here = undefined;
   world.maps.network = { latitude: 43.7311, longitude: 7.4222, accuracy: 900 };
-  const { alpha } = await open(world, mounts);
-  const runtime = assistant.runtime(alpha);
-  await until(alpha, runtime, Composer, (s) => s.slot === "Open");
-  await until(alpha, runtime, Conversation, (s) => s.ready);
+  const { alpha, runtime } = await openAssistant(world);
   world.ask.metadata = [];
   // spec/app/assistant/context.md, "The network is looked up only when GPS has nothing current, and its answer is reused before it is asked again": the first turn has no position, so it goes without one and starts one lookup behind it, which the network answers.
   write("Where am I?");
