@@ -135,6 +135,39 @@ export function isHexKey(value: string): boolean {
 }
 
 /**
+ * Decodes an exact 43-character unpadded base64url encoding of 32 bytes (the output shape
+ * of `randomKey()`), rejecting any non-canonical trailing bits or malformed characters.
+ * @throws {never}
+ */
+function unpaddedBase64url32(value: string): Buffer | undefined {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(value)) return undefined;
+  const bytes = Buffer.from(value, "base64url");
+  return bytes.length === 32 && bytes.toString("base64url") === value ? bytes : undefined;
+}
+
+/**
+ * Canonical 44-character standard base64 encoding for an earlier 43-character unpadded base64url
+ * 32-byte sealing key, preserving the exact 32 bytes; returns undefined if already canonical or invalid.
+ * @throws {never}
+ */
+export function canonicalUnpaddedSealingKey(value: string): string | undefined {
+  if (sealingKeyBytes(value) === 32) return undefined;
+  const bytes = unpaddedBase64url32(value);
+  return bytes === undefined ? undefined : bytes.toString("base64");
+}
+
+/**
+ * Canonical 64-character lowercase hex encoding for an earlier 43-character unpadded base64url
+ * 32-byte Google connect token key, preserving the exact 32 bytes; returns undefined if already canonical or invalid.
+ * @throws {never}
+ */
+export function canonicalUnpaddedHexKey(value: string): string | undefined {
+  if (isHexKey(value)) return undefined;
+  const bytes = unpaddedBase64url32(value);
+  return bytes === undefined ? undefined : bytes.toString("hex");
+}
+
+/**
  * Whether a JWK is a usable public P-256 key.
  * @throws {never}
  */

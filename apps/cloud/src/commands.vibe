@@ -5,7 +5,7 @@ import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import { Machine, machine, paymentKeyFits, type Rejected } from "../gen/cloud__rollout.effect.vibe"
 import { ownCloudName } from "../gen/cloud.effect.vibe"
 import type { ResourcesRefused } from "./cloudflare.vibe"
-import { OperatorFailed, deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type CandidateRefused, type Component } from "./operator.vibe"
+import { OperatorFailed, deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, stagingCompatibleSecrets, workerSecrets, wrangler, type CandidateRefused, type Component } from "./operator.vibe"
 import { hostedClouds, type HostedCloudUnknown } from "./hosted.vibe"
 import { smoke } from "./smoke.vibe"
 import { resourceId, type RenderRefused } from "./wrangler.vibe"
@@ -112,7 +112,7 @@ effect function resources(found: Flags, creating: boolean) {
 
 effect function database(found: Flags, command: "migrate" | "register" | "prices") {
   const environment = try environmentOf(found)
-  const values = try readSecrets(try required(found, "env-file"))
+  const values = stagingCompatibleSecrets(try readSecrets(try required(found, "env-file")), environment)
   const { profile } = try profiled(try required(found, "profile"))
   const store = values.DATABASE_URL
   if (!store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })

@@ -1,0 +1,294 @@
+// spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, describe, it } from "@effect/vitest"
+import { prepared } from "@repo/eliza-harness"
+import { Machine as Rollout, machine as rollout } from "../gen/cloud__rollout.effect.vibe"
+import { operate } from "../src/commands.vibe"
+import { base64Bytes, canonicalUnpaddedHexKey, canonicalUnpaddedSealingKey, entitlementKey, hexBytes, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "../src/keys.ts"
+import { secretProblems, settledSecrets, stagingCompatibleSecrets, workerSecrets } from "../src/operator.vibe"
+
+module node {
+  import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto"
+  import path from "node:path"
+  import { pathToFileURL } from "node:url"
+
+  export interface CloudWorkerSealing {
+    readonly sealWith: (key: string, purpose: string, plaintext: string) => { iv: string; tag: string; data: string }
+    readonly unsealWith: (key: string, purpose: string, iv: string, tag: string, data: string) => string
+  }
+
+  export interface KeyVector {
+    readonly label: string
+    readonly unpaddedBase64url: string
+    readonly canonicalBase64: string
+    readonly canonicalHex: string
+    readonly flippedCanonicalBase64: string
+  }
+
+  /** Loads the compiled `sealWith` and `unsealWith` from the pinned `@elizaos/cloud-worker` checkout. */
+  export async function loadCloudWorkerSealing(cloudRoot: string): Promise<CloudWorkerSealing> {
+    const target = pathToFileURL(path.join(cloudRoot, "dist/src/shared/sealing.js")).href
+    const loaded = await import(target) as Partial<CloudWorkerSealing>
+    if (typeof loaded.sealWith !== "function" || typeof loaded.unsealWith !== "function") {
+      throw new Error(`expected sealWith and unsealWith in ${target}`)
+    }
+    return { sealWith: loaded.sealWith, unsealWith: loaded.unsealWith }
+  }
+
+  /** Builds a synthetic 32-byte key vector with its expected canonical base64, hex, and 1-bit-flipped encodings. @throws {never} */
+  function toVector(label: string, raw: Buffer): KeyVector {
+    const flipped = Buffer.from(raw)
+    flipped[0] = (flipped[0] ?? 0) ^ 0x01
+    return {
+      label,
+      unpaddedBase64url: raw.toString("base64url"),
+      canonicalBase64: raw.toString("base64"),
+      canonicalHex: raw.toString("hex"),
+      flippedCanonicalBase64: flipped.toString("base64"),
+    }
+  }
+
+  /** Synthetic 32-byte key vectors covering all-zero, all-ones, forced `-`/`_`, ascending, and random bytes. @throws {never} */
+  export function syntheticKeyVectors(): ReadonlyArray<KeyVector> {
+    return [
+      toVector("zeros", Buffer.alloc(32, 0x00)),
+      toVector("ones", Buffer.alloc(32, 0xff)),
+      toVector("url-special-sealing", Buffer.from("fbfefefbfbfefefbfbfefefbfbfefefbfbfefefbfbfefefbfbfefefbfbfefeff", "hex")),
+      toVector("url-special-google", Buffer.from("feff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1dfb", "hex")),
+      toVector("ascending", Buffer.from(Array.from({ length: 32 }, (_, index) => index))),
+      ...Array.from({ length: 8 }, (_, index) => toVector(`random-${index}`, randomBytes(32))),
+    ]
+  }
+
+  /** Whether `base64Value` decodes to the exact same 32 bytes as `Buffer.from(unpaddedBase64url, "base64")` and `Buffer.from(unpaddedBase64url, "base64url")`. @throws {never} */
+  export function base64MatchesUnpaddedBytes(base64Value: string, unpaddedBase64url: string): boolean {
+    const canonical = Buffer.from(base64Value, "base64")
+    const fromBase64 = Buffer.from(unpaddedBase64url, "base64")
+    const fromBase64url = Buffer.from(unpaddedBase64url, "base64url")
+    return canonical.length === 32 && canonical.equals(fromBase64) && canonical.equals(fromBase64url)
+  }
+
+  /** Whether `hexValue` decodes to the exact same 32 bytes as `Buffer.from(unpaddedBase64url, "base64url")`. @throws {never} */
+  export function hexMatchesUnpaddedBytes(hexValue: string, unpaddedBase64url: string): boolean {
+    const decodedHex = Buffer.from(hexValue, "hex")
+    const fromBase64url = Buffer.from(unpaddedBase64url, "base64url")
+    return decodedHex.length === 32 && decodedHex.equals(fromBase64url)
+  }
+
+  /** Encrypts `plaintext` with the raw 32 bytes of `unpaddedBase64url` and decrypts with `hexEncodedKey` under AES-256-GCM. @throws {Error} */
+  export function roundTripAes256GcmWithHexKey(unpaddedBase64url: string, hexEncodedKey: string, plaintext: string): string {
+    const iv = randomBytes(12)
+    const rawKey = Buffer.from(unpaddedBase64url, "base64url")
+    const cipher = createCipheriv("aes-256-gcm", rawKey, iv)
+    const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
+    const tag = cipher.getAuthTag()
+    const decipher = createDecipheriv("aes-256-gcm", Buffer.from(hexEncodedKey, "hex"), iv)
+    decipher.setAuthTag(tag)
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8")
+  }
+
+  /** Oversized 64-byte base64 key, invalid for 32-byte secrets. @throws {never} */
+  export function oversizedBase64Key(): string {
+    return Buffer.alloc(64, 1).toString("base64")
+  }
+}
+import { base64MatchesUnpaddedBytes, hexMatchesUnpaddedBytes, loadCloudWorkerSealing, oversizedBase64Key, roundTripAes256GcmWithHexKey, syntheticKeyVectors } from node
+
+const holds = (assertion: () => void) => Effect.try(assertion)
+
+const syntheticProvided = {
+  DATABASE_URL: "postgres://synthetic-user:synthetic-pass@db.example:5432/alpha_staging",
+  GOOGLE_CLIENT_SECRET: "synthetic-google-client-secret",
+  GOOGLE_CONNECT_CLIENT_SECRET: "synthetic-google-connect-secret",
+  STRIPE_SECRET_KEY: "sk_test_synthetic_staging_key",
+  STRIPE_WEBHOOK_SECRET: "whsec_synthetic_staging_webhook",
+  CEREBRAS_API_KEY: "synthetic-cerebras-key",
+  CARTESIA_API_KEY: "synthetic-cartesia-key",
+  GOOGLE_MAPS_API_KEY: "synthetic-maps-key",
+} as const
+
+describe(`Staging unpadded base64url key compatibility (spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment")`, () => {
+  it.effect("canonically converts 43-char unpadded base64url sealing and Google token keys while preserving the exact 32 raw bytes", () => effect {
+    for (const vector of syntheticKeyVectors()) {
+      const convertedSealing = canonicalUnpaddedSealingKey(vector.unpaddedBase64url)
+      const convertedHex = canonicalUnpaddedHexKey(vector.unpaddedBase64url)
+      try holds(() => {
+        assert.strictEqual(vector.unpaddedBase64url.length, 43, vector.label)
+        assert.strictEqual(convertedSealing, vector.canonicalBase64, vector.label)
+        assert.strictEqual(convertedSealing?.length, 44, vector.label)
+        assert.match(convertedSealing ?? "", /^[A-Za-z0-9+/]{43}=$/, vector.label)
+        assert.strictEqual(sealingKeyBytes(convertedSealing ?? ""), 32, vector.label)
+        assert.strictEqual(base64Bytes(convertedSealing ?? ""), 32, vector.label)
+        assert.strictEqual(base64MatchesUnpaddedBytes(convertedSealing ?? "", vector.unpaddedBase64url), true, vector.label)
+        assert.strictEqual(canonicalUnpaddedSealingKey(convertedSealing ?? ""), undefined, vector.label)
+
+        assert.strictEqual(convertedHex, vector.canonicalHex, vector.label)
+        assert.strictEqual(convertedHex?.length, 64, vector.label)
+        assert.match(convertedHex ?? "", /^[0-9a-f]{64}$/, vector.label)
+        assert.strictEqual(isHexKey(convertedHex ?? ""), true, vector.label)
+        assert.strictEqual(hexBytes(convertedHex ?? ""), 32, vector.label)
+        assert.strictEqual(hexMatchesUnpaddedBytes(convertedHex ?? "", vector.unpaddedBase64url), true, vector.label)
+        assert.strictEqual(canonicalUnpaddedHexKey(convertedHex ?? ""), undefined, vector.label)
+        assert.strictEqual(canonicalUnpaddedHexKey((convertedHex ?? "").toUpperCase()), undefined, vector.label)
+      })
+      const decrypted = try Effect.try(() => roundTripAes256GcmWithHexKey(vector.unpaddedBase64url, convertedHex ?? "", `synthetic-google-refresh-${vector.label}`))
+      try holds(() => assert.strictEqual(decrypted, `synthetic-google-refresh-${vector.label}`, vector.label))
+    }
+  })
+
+  it.effect("keeps existing data sealed under 43-char unpadded base64url keys readable with canonical 44-char base64 keys in pinned eliza sealing", () => effect {
+    const cloud = try Effect.try(() => prepared().cloud)
+    const { sealWith, unsealWith } = try tryPromise(() => loadCloudWorkerSealing(cloud))
+    const purposes = ["device-key", "google-tokens", "gmail-arrival", "totp-secret", "provider-secret"] as const
+    const vectors = syntheticKeyVectors().slice(0, 5)
+    for (const vector of vectors) {
+      const canonical = canonicalUnpaddedSealingKey(vector.unpaddedBase64url)
+      try holds(() => assert.strictEqual(canonical, vector.canonicalBase64, vector.label))
+      for (const purpose of purposes) {
+        const plaintext = `synthetic-${purpose}-payload-${vector.label}`
+        const sealedByPrior = try Effect.try(() => sealWith(vector.unpaddedBase64url, purpose, plaintext))
+        const openedByCanonical = try Effect.try(() => unsealWith(canonical ?? "", purpose, sealedByPrior.iv, sealedByPrior.tag, sealedByPrior.data))
+        const sealedByCanonical = try Effect.try(() => sealWith(canonical ?? "", purpose, plaintext))
+        const openedByPrior = try Effect.try(() => unsealWith(vector.unpaddedBase64url, purpose, sealedByCanonical.iv, sealedByCanonical.tag, sealedByCanonical.data))
+        const wrongKeyFailed = Effect.try(() => unsealWith(vector.flippedCanonicalBase64, purpose, sealedByPrior.iv, sealedByPrior.tag, sealedByPrior.data)) catch () => "rejected"
+        try holds(() => {
+          assert.strictEqual(openedByCanonical, plaintext)
+          assert.strictEqual(openedByPrior, plaintext)
+          assert.strictEqual(wrongKeyFailed, "rejected")
+        })
+      }
+    }
+  })
+
+  it.effect("applies conversion to staging alone, leaves every other input and production behavior unchanged, rejects malformed keys, and leaks no secret values", () => effect {
+    const files = try FileSystem.FileSystem
+    const path = try Path.Path
+    const directory = try files.makeTempDirectoryScoped({ prefix: "alpha-staging-compat-" })
+
+    const vectors = syntheticKeyVectors()
+    const sealingVector = vectors[2]
+    const googleVector = vectors[3]
+    try holds(() => {
+      assert.ok(sealingVector !== undefined && googleVector !== undefined)
+      assert.ok(sealingVector.unpaddedBase64url.includes("-") && sealingVector.unpaddedBase64url.includes("_"))
+      assert.ok(googleVector.unpaddedBase64url.includes("-") || googleVector.unpaddedBase64url.includes("_"))
+    })
+
+    const priorSealing = sealingVector?.unpaddedBase64url ?? ""
+    const priorGoogle = googleVector?.unpaddedBase64url ?? ""
+    const digestKey = randomKey()
+    const emailCodeSecret = randomKey()
+    const entitlement = entitlementKey()
+    const extraSentinel = randomKey()
+
+    const priorStaging: Record<string, string> = {
+      ...syntheticProvided,
+      CLOUD_DIGEST_KEY: digestKey,
+      CLOUD_SEALING_KEY: priorSealing,
+      CLOUD_ENTITLEMENT_KEY: entitlement,
+      EMAIL_CODE_SECRET: emailCodeSecret,
+      GOOGLE_CONNECT_TOKEN_KEY: priorGoogle,
+      EXTRA_SYNTHETIC_KEY: extraSentinel,
+    }
+
+    const rawProblems = secretProblems(priorStaging, "staging")
+    const convertedStaging = stagingCompatibleSecrets(priorStaging, "staging")
+    const uppercaseHex = (googleVector?.canonicalHex ?? "").toUpperCase()
+    const canonicalStaging = { ...priorStaging, CLOUD_SEALING_KEY: sealingKey(), GOOGLE_CONNECT_TOKEN_KEY: uppercaseHex }
+
+    try holds(() => {
+      assert.ok(rawProblems.some((problem) => problem.includes("CLOUD_SEALING_KEY")))
+      assert.ok(rawProblems.some((problem) => problem.includes("GOOGLE_CONNECT_TOKEN_KEY")))
+      assert.deepStrictEqual(secretProblems(convertedStaging, "staging"), [])
+      assert.strictEqual(convertedStaging.CLOUD_SEALING_KEY, sealingVector?.canonicalBase64)
+      assert.strictEqual(convertedStaging.GOOGLE_CONNECT_TOKEN_KEY, googleVector?.canonicalHex)
+      for (const [name, value] of Object.entries(priorStaging)) {
+        if (name === "CLOUD_SEALING_KEY" || name === "GOOGLE_CONNECT_TOKEN_KEY") continue
+        assert.strictEqual(convertedStaging[name], value, `${name} must remain unchanged`)
+      }
+      assert.deepStrictEqual(stagingCompatibleSecrets(canonicalStaging, "staging"), canonicalStaging)
+    })
+
+    const stagingFile = path.join(directory, "staging-prior.env")
+    const stagingText = Object.entries(priorStaging).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
+    try files.writeFileString(stagingFile, stagingText, { mode: 0o600 })
+
+    const frozenStaging = try effect {
+      provide rollout() {
+        const machine = try Rollout
+        try machine.send({ type: "freeze" })
+        const settled = try settledSecrets(stagingFile, "staging")
+        return { settled, state: try machine.get() }
+      }
+    }
+    const stagingFileAfter = try files.readFileString(stagingFile)
+    const commandOutput = try operate("secrets", ["--environment", "staging", "--env-file", stagingFile, "--frozen"])
+    const commandJson = JSON.stringify(commandOutput)
+
+    try holds(() => {
+      assert.strictEqual(frozenStaging.state.vault, "Complete")
+      assert.strictEqual(frozenStaging.state.generated, false)
+      assert.strictEqual(stagingFileAfter, stagingText)
+      const deployed = workerSecrets(frozenStaging.settled.values)
+      assert.strictEqual(deployed.CLOUD_SEALING_KEY, sealingVector?.canonicalBase64)
+      assert.strictEqual(deployed.GOOGLE_CONNECT_TOKEN_KEY, googleVector?.canonicalHex)
+      assert.strictEqual(deployed.CLOUD_DIGEST_KEY, digestKey)
+      assert.strictEqual(deployed.EMAIL_CODE_SECRET, emailCodeSecret)
+      assert.strictEqual(deployed.CARTESIA_API_KEY, syntheticProvided.CARTESIA_API_KEY)
+      for (const secretValue of Object.values(priorStaging)) {
+        assert.ok(!commandJson.includes(secretValue), "command output must never contain a secret value")
+      }
+      assert.ok(!commandJson.includes(sealingVector?.canonicalBase64 ?? ""))
+      assert.ok(!commandJson.includes(googleVector?.canonicalHex ?? ""))
+    })
+
+    const priorProduction = { ...priorStaging, STRIPE_SECRET_KEY: "sk_live_synthetic_production_key" }
+    const productionFile = path.join(directory, "production-prior.env")
+    try files.writeFileString(productionFile, Object.entries(priorProduction).map(([name, value]) => `${name}=${value}`).join("\n") + "\n", { mode: 0o600 })
+
+    const frozenProduction = try effect {
+      provide rollout() {
+        const machine = try Rollout
+        try machine.send({ type: "freeze" })
+        const failure = (settledSecrets(productionFile, "production") catch (error) => error._tag === "OperatorFailed" ? error.problem : error._tag)
+        return { failure, vault: (try machine.get()).vault }
+      }
+    }
+    const productionCommandFailure = operate("secrets", ["--environment", "production", "--env-file", productionFile, "--frozen"]) catch (error) => error._tag === "OperatorFailed" ? error.problem : error._tag
+    const canonicalProductionFile = path.join(directory, "production-canonical.env")
+    const canonicalProduction = { ...canonicalStaging, STRIPE_SECRET_KEY: "sk_live_synthetic_production_key" }
+    try files.writeFileString(canonicalProductionFile, Object.entries(canonicalProduction).map(([name, value]) => `${name}=${value}`).join("\n") + "\n", { mode: 0o600 })
+    const canonicalProductionResult = try operate("secrets", ["--environment", "production", "--env-file", canonicalProductionFile, "--frozen"])
+
+    try holds(() => {
+      assert.deepStrictEqual(stagingCompatibleSecrets(priorProduction, "production"), priorProduction)
+      assert.strictEqual(frozenProduction.vault, "Incomplete")
+      assert.ok(typeof frozenProduction.failure === "string" && frozenProduction.failure.includes("CLOUD_SEALING_KEY") && frozenProduction.failure.includes("GOOGLE_CONNECT_TOKEN_KEY"))
+      assert.ok(typeof productionCommandFailure === "string" && productionCommandFailure.includes("CLOUD_SEALING_KEY") && productionCommandFailure.includes("GOOGLE_CONNECT_TOKEN_KEY"))
+      assert.strictEqual((canonicalProductionResult as { readonly complete?: boolean }).complete, true)
+    })
+
+    const malformed = [
+      "",
+      "A".repeat(42),
+      "A".repeat(42) + "B",
+      `${priorSealing}=`,
+      `${priorSealing.slice(0, 40)}+/${priorSealing.slice(42)}`,
+      ` ${priorSealing}`,
+      `${priorSealing} `,
+      oversizedBase64Key(),
+      "0".repeat(63),
+      "g".repeat(64),
+    ]
+    for (const bad of malformed) {
+      try holds(() => {
+        assert.strictEqual(canonicalUnpaddedSealingKey(bad), undefined, `malformed sealing input must not convert: ${JSON.stringify(bad)}`)
+        assert.strictEqual(canonicalUnpaddedHexKey(bad), undefined, `malformed hex input must not convert: ${JSON.stringify(bad)}`)
+        const badStaging = stagingCompatibleSecrets({ ...canonicalStaging, CLOUD_SEALING_KEY: bad, GOOGLE_CONNECT_TOKEN_KEY: bad }, "staging")
+        const problems = secretProblems(badStaging, "staging")
+        assert.ok(problems.some((problem) => problem.includes("CLOUD_SEALING_KEY")), `malformed sealing must still fail: ${JSON.stringify(bad)}`)
+        assert.ok(problems.some((problem) => problem.includes("GOOGLE_CONNECT_TOKEN_KEY")), `malformed hex must still fail: ${JSON.stringify(bad)}`)
+      })
+    }
+  } |> scoped(%) |> Effect.provide(%, [NodeServices.layer, FetchHttpClient.layer]))
+})

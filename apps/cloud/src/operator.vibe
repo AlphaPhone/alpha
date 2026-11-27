@@ -9,7 +9,7 @@ import edgeTemplate from "../wrangler/edge.template.json" with { type: "json" }
 import { entryOf, registrationAt } from "./alpha.vibe"
 import { hostedClouds, hostedProfileProblems, type HostedCloudUnknown } from "./hosted.vibe"
 import { reconcileResources } from "./cloudflare.vibe"
-import { base64urlBytes, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
+import { base64urlBytes, canonicalUnpaddedHexKey, canonicalUnpaddedSealingKey, entitlementKey, entitlementPublicKey, entitlementPublicKeyMatches, hexKey, isEntitlementKey, isExampleEntitlementPublicKey, isHexKey, randomKey, sealingKey, sealingKeyBytes } from "./keys.ts"
 import { PROFILE_ASSET } from "./profile-asset.ts"
 import { assetsDirectory, leakedElizaHost, renderEnvironment, type CloudResources } from "./wrangler.vibe"
 
@@ -26,7 +26,7 @@ schema ResourcesFileSchema {
 }
 
 /** A step of the operator's command could not be carried out; the message says which and why, and holds no secret. */
-export error OperatorFailed { problem: string }
+export error OperatorFailed { problem: string, message?: string }
 
 /** The secrets each environment's operator supplies. */
 const providedSecrets = ["DATABASE_URL", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "CEREBRAS_API_KEY", "CARTESIA_API_KEY", "GOOGLE_MAPS_API_KEY"]
@@ -143,16 +143,34 @@ export function workerSecrets(values: Readonly<Record<string, string>>): Record<
   return Object.fromEntries(Object.entries(workerSecretSource).map(([name, source]) => [name, values[source] ?? ""]).filter(([, value]) => value !== ""))
 }
 
+/**
+ * Converts the two earlier 43-character unpadded base64url internal keys created before the
+ * strict base64 and 64-hex checks into their canonical encodings for staging alone, preserving
+ * the exact 32 key bytes. Production and every other secret pass through unchanged.
+ */
+export function stagingCompatibleSecrets(values: Readonly<Record<string, string>>, environment: CloudEnvironment): Record<string, string> {
+  if (environment !== "staging") return { ...values }
+  const next = { ...values }
+  const convertedSealing = next.CLOUD_SEALING_KEY ? canonicalUnpaddedSealingKey(next.CLOUD_SEALING_KEY) : undefined
+  if (convertedSealing !== undefined) next.CLOUD_SEALING_KEY = convertedSealing
+  const convertedGoogle = next.GOOGLE_CONNECT_TOKEN_KEY ? canonicalUnpaddedHexKey(next.GOOGLE_CONNECT_TOKEN_KEY) : undefined
+  if (convertedGoogle !== undefined) next.GOOGLE_CONNECT_TOKEN_KEY = convertedGoogle
+  return next
+}
+
 /** The secrets of `file` read under the rollout's rules: generated once unless frozen, written back, and refused unless complete. */
 export effect function settledSecrets(file: string, environment: CloudEnvironment) {
   const rollout = try Machine
-  const values = try readSecrets(file)
+  const values = stagingCompatibleSecrets(try readSecrets(file), environment)
   const internalMissing = internalSecrets.some((name) => !values[name])
   const provided = secretProblems(generated(values), environment)
   const read = try rollout.send({ type: "readSecrets", internalMissing, providedFit: provided.length === 0 })
   const settled = read.generated ? generated(values) : values
   if (read.generated) try writeSecrets(file, settled)
-  if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  if (read.vault !== "Complete") {
+    const problem = secretProblems(settled, environment).join("\n")
+    throw new OperatorFailed({ problem, message: problem })
+  }
   const signingKey = settled.CLOUD_ENTITLEMENT_KEY ?? ""
   const publicKey = Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }
   return { values: settled, entitlementPublicKey: publicKey }
@@ -197,14 +215,14 @@ effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSy
 }
 
 /** The profile disagrees with Alpha Cloud's hosts or another rule of its deployment. */
-export error CandidateRefused { problems: ReadonlyArray<string> }
+export error CandidateRefused { problems: ReadonlyArray<string>, message: string }
 
 /** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping its deployment rules. */
 export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
   const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
   const hosts = try hostedClouds()
   const problems = hostedProfileProblems(profile, hosts)
-  if (problems.length > 0) throw new CandidateRefused({ problems })
+  if (problems.length > 0) throw new CandidateRefused({ problems, message: problems.join("\n") })
   return { profile, hosts }
 }
 
