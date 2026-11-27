@@ -774,6 +774,35 @@ async function onComposer(world: Scene, ...otherMounts: Mount[]) {
   return { alpha, area: assistant.runtime(alpha) };
 }
 
+const listening = (state: Voice.Voice) => state.phase === "Listening" && state.mic === "On";
+
+/** Ask Alpha alone on `world`, with Talk tapped from its composer and listening. */
+async function talkingOnComposer(world: Scene) {
+  const { alpha, area } = await onComposer(world);
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+  await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, listening);
+  return { alpha, area };
+}
+
+/** Talk on `world`, stopped from its conversation once `meanwhile` has changed the phone, and quiet again. */
+async function stoppedOnComposer(world: Scene, meanwhile: () => void) {
+  const { alpha, area } = await talkingOnComposer(world);
+  meanwhile();
+  await press("Open conversation");
+  await press("Stop voice conversation");
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+  return { alpha, area };
+}
+
+/** With the microphone off, Talk is offered and enabled, and a tap on it listens again. */
+async function talksAgain(world: Scene, alpha: Alpha, area: ReturnType<typeof assistant.runtime>) {
+  expect([world.voice.activeMicSession, button("Talk")?.disabled]).toEqual([undefined, false]);
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, listening);
+}
+
 /** Raise Ask Alpha to its sheet. */
 const raiseSheet = (alpha: Alpha) => drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (machine) => machine.send({ type: "raise", detent: "Sheet" }))));
 
@@ -1001,11 +1030,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("offers Stop and no keyboard control in Talk, as the Sunday demo build did, and Stop releases the microphone and speaker", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha, area } = await onComposer(world);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
-    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open");
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.speaker === "SpeakerOn");
+    const { alpha, area } = await talkingOnComposer(world);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.speaker === "SpeakerOn");
     await press("Open conversation");
     const row = document.querySelector<HTMLElement>('section[aria-label="Voice conversation"]');
     expect(row).not.toBeNull();
@@ -1019,6 +1045,44 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
     expect(world.voice.activeMicSession).toBeUndefined();
     expect(document.querySelector('section[aria-label="Voice conversation"]')).toBeNull();
+  });
+
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
+  it("offers Talk again after a stop whose speech session the agent could not close, once the microphone and speech are off", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.agentClosesLiveCapture = false; });
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("keeps Talk and the microphone closed while the microphone is still held, and offers Talk again once a later ask confirms it off", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    expect(Voice.canStartTalking(await area.runPromise(Effect.flatMap(Voice.Machine, (voice) => voice.get())), 0)).toBe(false);
+    const starts = world.voice.startLiveCaptureCalls;
+    expect(button("Talk")).toBeUndefined();
+
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    expect([button("Talk"), world.voice.startLiveCaptureCalls]).toEqual([undefined, starts]);
+
+    world.voice.liveCaptureReleaseFails = false;
+    await seen(false);
+    await seen(true);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    await talksAgain(world, alpha, area);
+  });
+
+  // spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("offers Talk again a moment after a stop whose microphone let go late", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await stoppedOnComposer(world, () => { world.voice.liveCaptureReleaseFails = true; });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    world.voice.liveCaptureReleaseFails = false;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    await talksAgain(world, alpha, area);
   });
 
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {

@@ -40,6 +40,10 @@ export interface VoiceScene {
   /** Whether each live capture asked the phone's recognizer to hear the owner over Alpha's own voice. */
   readonly liveCaptureBargeIn: boolean[];
   stopLiveCaptureCalls: number;
+  /** Whether the agent acknowledges closing a live capture's speech session, as it cannot once the phone lost its connection. */
+  agentClosesLiveCapture: boolean;
+  /** Whether stopping the microphone itself fails, so `LiveCaptureController.java` keeps holding it. */
+  liveCaptureReleaseFails: boolean;
   startCloudSpeechCalls: number;
   cloudStartGate?: () => Promise<void>;
   /** Held while the relay is asked to unmute its microphone, as a slow phone answers it. */
@@ -97,6 +101,8 @@ export function voiceScene(): VoiceScene {
     startLiveCaptureCalls: 0,
     liveCaptureBargeIn: [],
     stopLiveCaptureCalls: 0,
+    agentClosesLiveCapture: true,
+    liveCaptureReleaseFails: false,
     startCloudSpeechCalls: 0,
     cloudStarts: [],
     relayWarmups: [],
@@ -124,6 +130,7 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
     let pagePlaybackId: string | undefined;
     const texts = new Map<string, string>();
     let recordingSeq = 0;
+    const agentSessions = new Set<string>();
     let activeRecording: string | undefined;
     let finishedRecording: string | undefined;
     const finish = () => {
@@ -167,14 +174,18 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
       },
       startLiveCapture: ({ captureId, nativeAsr, bargeIn }: { captureId: string; nativeAsr: boolean; bargeIn?: boolean }) => {
         voice.startLiveCaptureCalls += 1;
+        if (voice.activeMicSession !== undefined && voice.liveCaptureReleaseFails) return Promise.reject(rejection("Microphone release is unconfirmed", "capture"));
         voice.liveCaptureBargeIn.push(bargeIn === true);
         voice.activeMicSession = captureId;
+        if (nativeAsr) agentSessions.add(captureId);
         return Promise.resolve({ captureId, nativeAsr, echoCancelled: true });
       },
       stopLiveCapture: ({ captureId }: { captureId: string }) => {
         voice.stopLiveCaptureCalls += 1;
-        if (voice.activeMicSession === captureId) voice.activeMicSession = undefined;
-        return Promise.resolve({ captureId, serverClosed: true });
+        const held = voice.activeMicSession === captureId && voice.liveCaptureReleaseFails;
+        if (voice.activeMicSession === captureId && !held) voice.activeMicSession = undefined;
+        const piped = agentSessions.delete(captureId);
+        return Promise.resolve({ captureId, durationMs: 0, serverClosed: !held && (!piped || voice.agentClosesLiveCapture) });
       },
       synthesizeLocal: async ({ text, append, replace }: { requestId: string; text: string; append?: boolean; replace?: boolean }) => {
         voice.spoken.push({ text, append: append === true, replace: replace !== false, channel: "local" });
