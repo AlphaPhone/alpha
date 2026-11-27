@@ -876,7 +876,7 @@ function cloudMicController(config: CloudMicConfig) {
         owner.abort.abort()
       }),
     ) catch effect (failure) => {
-      unopened()
+      gap.cancel()
       if (config.getPreview() === previewOwner) clearPreview(session)
       if (config.getSpeech() === owner) {
         config.setSpeech(undefined)
