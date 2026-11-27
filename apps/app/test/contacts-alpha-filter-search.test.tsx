@@ -10,7 +10,6 @@ import { alphaImage } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const rule = "spec/app/contacts/index.md, \"Back from the search field clears the query and returns to Contacts\"";
 const searchField = () => document.querySelector<HTMLInputElement>("form[role=search] input[aria-label='Search contacts']");
 const listed = () => [...document.querySelectorAll<HTMLButtonElement>("[aria-label='Contacts'] button[aria-label]")].map((row) => row.getAttribute("aria-label")).filter((name) => name === "Maya Chen" || name === "Ben Ortiz");
 
@@ -22,7 +21,7 @@ async function contacts() {
   return alpha;
 }
 
-describe(`Search contacts over a filter (${rule})`, () => {
+describe('Search contacts over a filter (spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts")', () => {
   it("opens empty over All contacts when Alpha's filter chip shows, as v119's openSearch cleared the chip first", async () => {
     const alpha = await contacts();
     expect(await alpha.runtime.runPromise(answerReading({ type: "contact_show", query: "Ben" }))).toEqual({ kind: "contact-show", status: "shown" });

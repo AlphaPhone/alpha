@@ -1,5 +1,5 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/assistant/dock.md, "While voice owns Ask Alpha nothing drags it, a drag under way is let go, and it is dragged again once voice ends"
-import type { Layer } from "effect";
+import { Effect, type Layer } from "effect";
 import { useMemo } from "react";
 import { Machine as Dock } from "../../gen/app__assistant__dock.effect.vibe";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
@@ -12,8 +12,7 @@ import { quiet } from "../../gen/app__voice.ts";
 import { useMachine as useSpeaker } from "../../gen/app__voice__output.react.ts";
 import { reading } from "../../gen/app__voice__output.ts";
 import { voiceArea } from "../messages/dictation.vibe";
-import { registered } from "../platform/index.vibe";
-import { VoiceBridge } from "../platform/index.vibe";
+import { VoiceBridge, registered } from "../platform/index.vibe";
 import { VoiceEnd } from "../comms/ui.tsx";
 import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { applying, following, together, untimed } from "../runtime/index.vibe";
@@ -72,9 +71,11 @@ function LiveAssistant({ runtime, alpha }: Shown<Layer.Success<typeof screens> |
       useInEmail: emailAction,
       reading: speaker?.text === "Message" && reading(speaker)
         ? { message: speaker.item, stop: () => void runtime.runPromise(stopMessage(speaker.ticket)) } : undefined,
-      openLink: registered("AlphaBrowser") ? (href) => void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
-        .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha")))
-        .catch(() => false) : undefined,
+      openLink: registered("AlphaBrowser") ? (href) => void runtime.runPromiseExit(Effect.tryPromise(async (signal) => {
+        const [{ default: browser }, { openMessageLink }] = await Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")]);
+        if (signal.aborted) return false;
+        return browser.runtime(alpha).runPromise(openMessageLink(href, "Ask Alpha"), { signal });
+      })) : undefined,
     };
   }, [alpha, drafts, inbox, runtime, speaker]);
   return <Assistant

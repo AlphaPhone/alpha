@@ -75,6 +75,7 @@ lemma ListedFirstMembers(row: Row, rows: seq<Row>)
   ensures |listedFirst(row, rows)| > 0 && listedFirst(row, rows)[0] == row
   ensures row in listedFirst(row, rows)
   ensures |rows| <= limit ==> |listedFirst(row, rows)| <= limit
+  ensures |listedFirst(row, rows)| >= 1 && listedFirst(row, rows)[0] == row
 {
   var l := [row] + ProofLib.Filter((old_: Row) => !(((old_.origin == row.origin) && (old_.key == row.key))), rows);
   FilterLength((old_: Row) => !(((old_.origin == row.origin) && (old_.key == row.key))), rows);
@@ -123,7 +124,6 @@ lemma FoldGivenPreserves(s: Recent, kept: seq<string>)
     FoldGivenPreserves(next, kept[1..]);
   }
 }
-
 lemma remember_ensures(s: Recent, key: int, by_: Actor)
   ensures (inv(s) ==> canRemember(s, key, by_) ==> alwaysHeldAccessWasGiven(remember(s, key, by_).state))
   ensures (inv(s) ==> canRemember(s, key, by_) ==> alwaysRecentIsBounded(remember(s, key, by_).state))
@@ -422,7 +422,7 @@ lemma pickerClosed_ensures(s: Recent, ticket: int, chose: bool, keep: bool, by_:
     }
     ProofLib.FilterMember((t: int) => (t != ticket), s.pickers, s.live);
     if delivers && s.replacing != 0 {
-      assert cleared.rows == ProofLib.Filter((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows);
+      FilterLength((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows);
       forall r | r in cleared.rows ensures r in s.rows && !(r.key == s.replacing && r.grant == 0) {
         ProofLib.FilterMember((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows, r);
       }

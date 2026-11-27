@@ -19,6 +19,9 @@ Maps and comes back to it.
 - [Deletions](./deletions.md): a deletion held for Undo before it is sent
 - [Reminder reopen](./reminderReopen.md): reopening a completed reminder from
   Calendar after the owner confirms
+- [The agent's actions on the phone](./actions.md): what the agent creates,
+  reads, changes or deletes on the phone, only through the owner's card and
+  the phone's own review
 
 Reminders belong to the [reminders](../reminders/) area: Calendar shows them
 among the events, as many as it is told of. Which app is showing, and Back
@@ -34,40 +37,48 @@ blank screen or a spinner.
 > agent's Google Calendar, as an agenda, a day, or several days side by side,
 > so that I see what is coming wherever it was written.
 
-### The calendar holds its layout, today and the day it is anchored to, what each source last read and whether the phone's read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event, one overlay, and whether it is in front or a write is under way
+### The calendar holds its layout, today and the day it is anchored to, what each source last read and whether that read was cut short, the owner it reads for and the calendars hidden, the reminders it was told of, an open event and the phone's inspection of it, one overlay, the editor's form and the delete review over it, and whether it is in front, covered or a write is under way
 
 Days are civil dates, counted in whole days: the shell passes today in, and
 nothing in Calendar keeps an offset from it. The phone's calendar needs
 Android's permission; the agent's Google Calendar needs a connected account
 of the owner signed in (0 is no owner). Each source's rows are counted, with
-the day they were read for. A hidden calendar is named by its number: 0 is
+the day they were read for, and whether the source gave only part of them. A hidden calendar is named by its number: 0 is
 the agent's, any other one of the phone's. At most one overlay shows: the
 month dialog, the layout menu, search or the Calendars sheet. An open event
 says whether it is on the phone, and whether it is a Google event with a
-plain HTTPS page. Times are milliseconds, passed in by the shell.
+plain HTTPS page; one of the phone's is inspected by the phone, which says
+the revision it holds now. The editor says whether a new or a changed
+event's form shows, and the deletions whether a delete review does; both
+cover the days. Calendar is in front while the shell shows it and the page
+is visible and unlocked; the shade or another layer of the shell can cover
+it. Times are milliseconds, passed in by the shell.
 
 ```quint
 import read as R from "../../kit/read"
 import permission as P from "../../kit/permission"
+import presentation as Panel from "./presentation"
 
 type Layout = Agenda | Timeline | Columns
 type Overlay = NoOverlay | MonthDialog | LayoutMenu | Search | CalendarsSheet
-type Detail = Showing | InMaps | Rereading
+type Detail = Showing | InMaps | InAndroid | Rereading
 type Source = Phone | Google
 type Handoff = Maps | AndroidCalendar | VideoCall | GoogleCalendar
+type FormShown = NoFormShown | NewFormShown | EditFormShown
 
 type Calendar = {
   layout: Layout, wide: bool, today: int, anchor: int,
   access: P::Permission, phone: R::Read, phoneDay: int, phoneRows: int, phoneLimited: bool,
-  owner: int, connected: bool, google: R::Read, googleDay: int, googleRows: int, hidden: Set[int],
+  owner: int, connected: bool, google: R::Read, googleDay: int, googleRows: int, googleLimited: bool, hidden: Set[int],
   reminders: int, remindersDay: int, reminder: int, overlay: Overlay,
-  open: int, local: bool, web: bool, place: bool, video: bool, detail: Detail, event: R::Read,
-  front: bool, readAt: int, writing: bool, again: bool,
+  open: int, local: bool, web: bool, place: bool, video: bool, detail: Detail, event: R::Read, inspection: R::Read,
+  form: FormShown, review: bool, front: bool, covered: bool, readAt: int, writing: bool, again: bool,
 }
 
 type Effect =
   | ReadDay({ source: Source, ticket: int, day: int })
   | ReadEvent({ ticket: int, id: int })
+  | Inspect({ ticket: int, id: int })
   | Hand({ id: int, to: Handoff })
   | AskAccess
   | OpenCalendarSettings
@@ -78,10 +89,10 @@ type Viewed = { state: Calendar, out: List[Effect] }
 pure val initial: Calendar = {
   layout: Timeline, wide: false, today: 0, anchor: 0,
   access: P::unasked, phone: R::unread, phoneDay: 0, phoneRows: 0, phoneLimited: false,
-  owner: 0, connected: false, google: R::unread, googleDay: 0, googleRows: 0, hidden: Set(),
+  owner: 0, connected: false, google: R::unread, googleDay: 0, googleRows: 0, googleLimited: false, hidden: Set(),
   reminders: 0, remindersDay: 0, reminder: 0, overlay: NoOverlay,
-  open: 0, local: false, web: false, place: false, video: false, detail: Showing, event: R::unread,
-  front: false, readAt: 0, writing: false, again: false,
+  open: 0, local: false, web: false, place: false, video: false, detail: Showing, event: R::unread, inspection: R::unread,
+  form: NoFormShown, review: false, front: false, covered: false, readAt: 0, writing: false, again: false,
 }
 
 pure val dayValues = Set(0, 1, 2, 3)
@@ -114,6 +125,7 @@ pure def readFor(day: int, s: Calendar): Viewed =
     phoneLimited: phone and s.phoneDay == day and s.phoneLimited,
     google: googleRead, googleDay: if (google) day else s.googleDay,
     googleRows: if (google and s.googleDay == day) s.googleRows else 0,
+    googleLimited: google and s.googleDay == day and s.googleLimited,
     reminders: if (s.remindersDay == day) s.reminders else 0,
   }
   val out = (if (phone) List(ReadDay({ source: Phone, ticket: phoneRead.ticket, day: day })) else List())
@@ -136,7 +148,8 @@ pure def refresh(s: Calendar): Viewed = readFor(s.anchor, s)
 
 An answer the phone sends after its permission was withdrawn, or Google
 after the account was disconnected, is refused. A failed read shows no rows,
-never older ones.
+never older ones. A feed the agent gives for another window or for another
+agent than the one asked is no answer: the read failed.
 
 ```quint
 pure def canPhoneAnswered(s: Calendar, ticket: int): bool = P::allows(s.access) and R::canAnswer(s.phone, ticket)
@@ -146,20 +159,25 @@ pure def phoneAnswered(s: Calendar, ticket: int, ok: bool, rows: int, limited: b
 
 pure def canGoogleAnswered(s: Calendar, ticket: int): bool = s.connected and R::canAnswer(s.google, ticket)
 
-pure def googleAnswered(s: Calendar, ticket: int, ok: bool, rows: int): Calendar =
-  { ...s, google: R::answer(s.google, ok), googleRows: if (ok and rows > 0) rows else 0 }
+pure def googleAnswered(s: Calendar, ticket: int, ok: bool, rows: int, limited: bool): Calendar =
+  { ...s, google: R::answer(s.google, ok), googleRows: if (ok and rows > 0) rows else 0, googleLimited: ok and limited }
 ```
 
-### A read the phone cut short is shown as limited, never as complete
+### A read the phone cut short, or Google gave only in part, is shown as limited, never as complete
 
 Android gives at most two thousand events to one read and says when it
-stopped there. The rows it gave are shown with that said; a day shown as
-limited is never shown as empty.
+stopped there; the agent says when Google gave only part of its window. The
+rows given are shown with that said; a day shown as limited is never shown
+as empty, even where Google's part held none of it.
 
 ```quint
-pure def alwaysOnlyRowsShownAreLimited(s: Calendar): bool = s.phoneLimited implies s.phoneRows > 0
+pure def alwaysOnlyRowsShownAreLimited(s: Calendar): bool =
+  (s.phoneLimited implies s.phoneRows > 0)
+    and (s.googleLimited implies (s.connected and s.googleDay == s.anchor and (s.google.status == R::Loaded or s.google.status == R::Loading)))
 
 pure def sometimesLimited(s: Calendar): bool = s.phoneLimited and s.googleRows > 0
+
+pure def sometimesGoogleLimitedWithoutRows(s: Calendar): bool = s.googleLimited and s.googleRows == 0
 ```
 
 ### Rows shown are for the day the calendar is anchored to, from a source it may read
@@ -229,14 +247,16 @@ pure def alwaysTheAgendaStartsToday(s: Calendar): bool = s.layout == Agenda impl
 pure def alwaysColumnsOnlyOnAWideScreen(s: Calendar): bool = s.layout == Columns implies s.wide
 ```
 
-### The layout menu and the month dialog open over the days, never over an open event
+### The layout menu and the month dialog open over the days, never over an open event, a form or a delete review
 
 ```quint
-pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
+pure def uncovered(s: Calendar): bool = s.form == NoFormShown and not(s.review)
+
+pure def canOpenLayoutMenu(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front and uncovered(s)
 
 pure def openLayoutMenu(s: Calendar): Calendar = { ...s, overlay: LayoutMenu }
 
-pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
+pure def canOpenMonth(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front and uncovered(s)
 
 pure def openMonth(s: Calendar): Calendar = { ...s, overlay: MonthDialog }
 
@@ -245,15 +265,18 @@ pure def canCloseOverlay(s: Calendar): bool = s.overlay != NoOverlay
 pure def closeOverlay(s: Calendar): Calendar = { ...s, overlay: NoOverlay }
 
 pure def alwaysNoOverlayOverAnOpenEvent(s: Calendar): bool = s.open != 0 implies s.overlay == NoOverlay
+
+pure def alwaysNoOverlayUnderAFormOrAReview(s: Calendar): bool = s.overlay != NoOverlay implies uncovered(s)
 ```
 
 ### Choosing a layout closes the menu, and the agenda goes back to today
 
-Several days side by side are offered only on a wide screen.
+Several days side by side are offered only on a wide screen, and no
+layout is chosen while a form or a delete review is open.
 
 ```quint
 pure def canChooseLayout(s: Calendar, layout: Layout): bool =
-  s.overlay == LayoutMenu and layout != s.layout and (layout != Columns or s.wide)
+  s.overlay == LayoutMenu and uncovered(s) and layout != s.layout and (layout != Columns or s.wide)
 
 pure def chooseLayout(s: Calendar, layout: Layout): Viewed =
   val chosen = { ...s, layout: layout, overlay: NoOverlay }
@@ -265,7 +288,7 @@ pure def chooseLayout(s: Calendar, layout: Layout): Viewed =
 The month dialog closes; from the agenda, the timeline shows the day picked.
 
 ```quint
-pure def canPickDay(s: Calendar, day: int): bool = s.open == 0 and s.reminder == 0 and s.overlay != LayoutMenu and day != s.anchor
+pure def canPickDay(s: Calendar, day: int): bool = s.open == 0 and s.reminder == 0 and s.overlay != LayoutMenu and uncovered(s) and day != s.anchor
 
 pure def pickDay(s: Calendar, day: int): Viewed =
   readFor(day, { ...s, overlay: NoOverlay, layout: if (s.layout == Agenda) Timeline else s.layout })
@@ -274,7 +297,7 @@ pure def pickDay(s: Calendar, day: int): Viewed =
 ### Today comes back to today
 
 ```quint
-pure def canGoToday(s: Calendar): bool = s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and s.anchor != s.today
+pure def canGoToday(s: Calendar): bool = s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and uncovered(s) and s.anchor != s.today
 
 pure def goToday(s: Calendar): Viewed = readFor(s.today, s)
 ```
@@ -342,6 +365,19 @@ pure def workflowReadAllowed(granted: bool, inFront: bool, inApprovedRange: bool
 pure def lawWorkflowReadNeedsGrantAndScope(granted: bool, inFront: bool, inApprovedRange: bool, selectedCalendar: bool): bool =
   workflowReadAllowed(granted, inFront, inApprovedRange, selectedCalendar)
     implies (granted and inFront and inApprovedRange and selectedCalendar)
+
+pure def workflowPhoneReadAdmitted(
+  grantBefore: bool, grantAfter: bool, frontBefore: bool, frontAfter: bool,
+  reviewCurrent: bool, inApprovedScope: bool
+): bool =
+  grantBefore and grantAfter and frontBefore and frontAfter and reviewCurrent and inApprovedScope
+
+pure def lawStaleOrOutOfScopeWorkflowReadReturnsNoData(
+  grantBefore: bool, grantAfter: bool, frontBefore: bool, frontAfter: bool,
+  reviewCurrent: bool, inApprovedScope: bool
+): bool =
+  (not(grantBefore) or not(grantAfter) or not(frontBefore) or not(frontAfter) or not(reviewCurrent) or not(inApprovedScope))
+    implies not(workflowPhoneReadAdmitted(grantBefore, grantAfter, frontBefore, frontAfter, reviewCurrent, inApprovedScope))
 ```
 
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
@@ -380,7 +416,9 @@ an open phone event.
 
 ```quint
 pure def accessAnswered(s: Calendar, grant: P::Grant): Viewed =
-  val seen = { ...s, access: P::observe(s.access, grant) }
+  val observed = P::observe(s.access, grant)
+  val seen = { ...s, access: observed,
+    inspection: if (P::allows(observed) == P::allows(s.access)) s.inspection else retiredInspection(s.inspection) }
   val told = if (not(P::allows(seen.access)) and s.local) closeEvent(seen) else seen
   if (P::allows(told.access) and not(P::allows(s.access))) readFor(s.anchor, told)
   else { state: { ...told, phoneRows: if (P::allows(told.access)) s.phoneRows else 0, phoneLimited: P::allows(told.access) and s.phoneLimited }, out: List() }
@@ -408,14 +446,16 @@ pure def sometimesSettingsWhileGoogleShows(s: Calendar): bool = P::needsSettings
 ### Connecting an account reads the day from Google; disconnecting takes its rows away at once
 
 The account belongs to the accounts area, which says when it changes; only
-an owner who is signed in has one.
+an owner who is signed in has one. The agent saying it has no Google
+account, or refusing access to it, is a disconnect: the copy Calendar kept
+of that account's events is dropped with its rows.
 
 ```quint
 pure def canGoogleChanged(s: Calendar, connected: bool): bool = connected != s.connected and (not(connected) or s.owner > 0)
 
 pure def googleChanged(s: Calendar, connected: bool): Viewed =
   val told = { ...s, connected: connected }
-  if (connected) readFor(s.anchor, told) else { state: { ...told, googleRows: 0 }, out: List() }
+  if (connected) readFor(s.anchor, told) else { state: { ...told, googleRows: 0, googleLimited: false }, out: List() }
 ```
 
 ### Without an account the phone's calendar still shows
@@ -448,7 +488,7 @@ pure def remindersChanged(s: Calendar, day: int, count: int): Calendar = { ...s,
 pure def alwaysRemindersAreForTheAnchoredDay(s: Calendar): bool = s.reminders > 0 implies s.remindersDay == s.anchor
 ```
 
-### A day is empty only when every source it may read answered with nothing, no calendar is hidden, and there are no reminders
+### A day is empty only when every source it may read answered whole with nothing, no calendar is hidden, and there are no reminders
 
 A source Calendar may not read, such as the phone's calendar in a browser,
 does not keep a day from being empty; a calendar with no source to read has
@@ -458,7 +498,7 @@ no empty day, only one to connect.
 pure def empty(s: Calendar): bool =
   canRefresh(s)
     and (P::allows(s.access) implies (s.phone.status == R::Loaded and s.phoneRows == 0))
-    and (s.connected implies (s.google.status == R::Loaded and s.googleRows == 0))
+    and (s.connected implies (s.google.status == R::Loaded and s.googleRows == 0 and not(s.googleLimited)))
     and s.hidden.size() == 0
     and s.reminders == 0
 ```
@@ -485,7 +525,7 @@ events to Ask Alpha. Back and leaving Calendar retire the selection.
 
 ```quint
 pure def canOpenReminder(s: Calendar, id: int): bool =
-  id > 0 and s.front and s.open == 0 and s.reminder == 0 and (s.overlay == NoOverlay or s.overlay == Search)
+  id > 0 and s.front and s.open == 0 and s.reminder == 0 and uncovered(s) and (s.overlay == NoOverlay or s.overlay == Search)
 
 pure def openReminder(s: Calendar, id: int): Calendar = { ...s, reminder: id, overlay: NoOverlay }
 
@@ -514,25 +554,125 @@ words.
 
 ```quint
 pure def canOpenEvent(s: Calendar, id: int, local: bool, web: bool): bool =
-  s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and id > 0 and s.phoneRows + s.googleRows > 0
+  s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and uncovered(s) and id > 0 and s.phoneRows + s.googleRows > 0
     and not(local and web) and (if (local) s.phoneRows > 0 else s.googleRows > 0)
 
-pure def openEvent(s: Calendar, id: int, place: bool, video: bool, local: bool, web: bool): Calendar =
-  { ...s, open: id, place: place, video: video, local: local, web: web, detail: Showing }
+pure def openEvent(s: Calendar, id: int, place: bool, video: bool, local: bool, web: bool): Viewed =
+  val opened = { ...s, open: id, place: place, video: video, local: local, web: web, detail: Showing }
+  inspectFor(shownInspection(opened), opened)
 ```
 
-### Back closes the event
+### An event in a loaded neighboring column opens without changing the selected day
+
+On a wide timeline Calendar lets the owner open a row from a neighboring
+column in the source's current read window. This works when the selected
+day has no events. Calendar checks that the row still exists in that
+column and can be read, then opens it without moving the selected day or
+reading the window again.
 
 ```quint
-pure def canCloseEvent(s: Calendar): bool = s.open != 0 and s.detail != InMaps
+pure def canOpenColumnEvent(s: Calendar, id: int, local: bool, web: bool, day: int, columns: int): bool =
+  s.front and s.wide and s.layout != Agenda and s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and uncovered(s)
+    and id > 0 and not(local and web) and columns >= 2 and columns <= 7 and day != s.anchor
+    and day >= Panel::firstColumnDay(s.anchor, columns) and day < Panel::firstColumnDay(s.anchor, columns) + columns
+    and (if (local) P::allows(s.access) and s.phoneDay == s.anchor and s.phone.status == R::Loaded
+         else s.connected and s.googleDay == s.anchor and s.google.status == R::Loaded)
 
-pure def closeEvent(s: Calendar): Calendar = { ...s, open: 0, local: false, web: false, detail: Showing }
+pure def openColumnEvent(s: Calendar, id: int, place: bool, video: bool, local: bool, web: bool, day: int, columns: int): Viewed =
+  openEvent(s, id, place, video, local, web)
+
+pure def stepAColumnPickKeepsTheSelectedDay(before: Calendar, via: str, after: Calendar): bool =
+  via == "openColumnEvent" implies (after.anchor == before.anchor and after.phone == before.phone and after.google == before.google)
+```
+
+### Each detail of the phone's shown is inspected by the phone, and only the newest inspection counts
+
+The phone says the revision it holds now of the event shown, which is the
+one the assistant is given, never the one Calendar showed. Opening an event,
+seeing it again after it was away or read again, and a read that shows it
+changed each start a new inspection; an inspection answered after another
+began, or after the detail closed, is dropped. A new event's form asks the
+phone, while Alpha may read its calendar, to name its own calendar, which
+the form saves to.
+
+```quint
+pure def retiredInspection(r: R::Read): R::Read = { ...r, status: R::Idle }
+
+pure def shownInspection(s: Calendar): int =
+  if (s.form == NewFormShown and P::allows(s.access)) 0
+  else if (s.form == NoFormShown and s.open != 0 and s.local and s.detail == Showing) s.open
+  else -1
+
+pure def inspectFor(target: int, s: Calendar): Viewed =
+  val asked = R::ask(s.inspection)
+  if (target < 0) { state: { ...s, inspection: retiredInspection(s.inspection) }, out: List() }
+  else { state: { ...s, inspection: asked }, out: List(Inspect({ ticket: asked.ticket, id: target })) }
+
+pure def canDetailChanged(s: Calendar): bool = s.open != 0 and s.local and s.detail == Showing and s.form == NoFormShown
+
+pure def detailChanged(s: Calendar): Viewed = inspectFor(s.open, s)
+
+pure def canInspected(s: Calendar, ticket: int): bool = R::canAnswer(s.inspection, ticket) and shownInspection(s) >= 0
+
+pure def inspected(s: Calendar, ticket: int, ok: bool): Calendar = { ...s, inspection: R::answer(s.inspection, ok) }
+
+pure def alwaysAnInspectionAwaitedIsForWhatShows(s: Calendar): bool = s.inspection.status == R::Loading implies shownInspection(s) >= 0
+```
+
+### An inspection can be awaited after an earlier one was dropped, and a new event's calendar named
+
+```quint
+pure def sometimesAnInspectionAwaited(s: Calendar): bool = s.open != 0 and s.local and s.inspection.status == R::Loading and s.inspection.ticket >= 2
+
+pure def sometimesTheFormsCalendarNamed(s: Calendar): bool = sourceGiven(s)
+```
+
+### Back closes one layer at a time: the form, the delete review, the event, then the overlay
+
+The editor's form and the delete review are closed by their own machines;
+the event and the overlay never show together.
+
+```quint
+type BackLayer = BackForm | BackReview | BackEvent | BackReminder | BackOverlay | BackOut
+
+pure def backCloses(s: Calendar): BackLayer =
+  if (s.form != NoFormShown) BackForm
+  else if (s.review) BackReview
+  else if (s.open != 0) (if (s.detail == InMaps or s.detail == InAndroid) BackOut else BackEvent)
+  else if (s.reminder > 0) BackReminder
+  else if (s.overlay != NoOverlay) BackOverlay
+  else BackOut
+
+pure def canCloseEvent(s: Calendar): bool = s.open != 0 and s.detail != InMaps and s.detail != InAndroid
+
+pure def closeEvent(s: Calendar): Calendar =
+  { ...s, open: 0, local: false, web: false, detail: Showing, inspection: retiredInspection(s.inspection) }
+
+pure def alwaysBackClosesWhatIsOnTop(s: Calendar): bool =
+  (backCloses(s) == BackEvent implies canCloseEvent(s))
+    and (backCloses(s) == BackReminder implies canCloseReminder(s))
+    and (backCloses(s) == BackOverlay implies canCloseOverlay(s))
+```
+
+### The editor and the deletions say when a form or a delete review opens over the days, which closes the overlay
+
+```quint
+pure def canFormChanged(s: Calendar, form: FormShown): bool = form != s.form
+
+pure def formChanged(s: Calendar, form: FormShown): Viewed =
+  val told = { ...s, form: form, overlay: if (form != NoFormShown) NoOverlay else s.overlay }
+  inspectFor(shownInspection(told), told)
+
+pure def canReviewChanged(s: Calendar, review: bool): bool = review != s.review
+
+pure def reviewChanged(s: Calendar, review: bool): Calendar = { ...s, review: review, overlay: if (review) NoOverlay else s.overlay }
 ```
 
 ### The video call is joined, and the event opened in Android Calendar, only from the event shown
 
-Android Calendar opens only an event of the phone; a Google event opens its
-own page in Google Calendar, and only where it has a plain HTTPS one.
+Android Calendar opens only an event of the phone, which is then away there
+until Calendar is in front again; a Google event opens its own page in
+Google Calendar, and only where it has a plain HTTPS one.
 
 ```quint
 pure def canJoinVideo(s: Calendar): bool = s.open != 0 and s.detail == Showing and s.video
@@ -541,7 +681,8 @@ pure def joinVideo(s: Calendar): Viewed = { state: s, out: List(Hand({ id: s.ope
 
 pure def canOpenInAndroidCalendar(s: Calendar): bool = s.open != 0 and s.detail == Showing and s.local
 
-pure def openInAndroidCalendar(s: Calendar): Viewed = { state: s, out: List(Hand({ id: s.open, to: AndroidCalendar })) }
+pure def openInAndroidCalendar(s: Calendar): Viewed =
+  { state: { ...s, detail: InAndroid, inspection: retiredInspection(s.inspection) }, out: List(Hand({ id: s.open, to: AndroidCalendar })) }
 
 pure def canOpenInGoogle(s: Calendar): bool = s.open != 0 and s.detail == Showing and s.web
 
@@ -556,26 +697,35 @@ pure def alwaysAnOpenEventHasOneSource(s: Calendar): bool = not(s.local and s.we
 pure def sometimesOpenedInGoogle(s: Calendar): bool = s.open != 0 and s.web and s.detail == Showing
 ```
 
-### The event's place opens in Maps, and coming back reads the event again
+### The event's place opens in Maps, and coming back from Maps or Android Calendar reads the event again
 
 ```quint
 pure def canOpenPlace(s: Calendar): bool = s.open != 0 and s.detail == Showing and s.place
 
-pure def openPlace(s: Calendar): Viewed = { state: { ...s, detail: InMaps }, out: List(Hand({ id: s.open, to: Maps })) }
+pure def openPlace(s: Calendar): Viewed =
+  { state: { ...s, detail: InMaps, inspection: retiredInspection(s.inspection) }, out: List(Hand({ id: s.open, to: Maps })) }
 
-pure def canComeBack(s: Calendar): bool = s.detail == InMaps
+pure def canComeBack(s: Calendar): bool = s.detail == InMaps or s.detail == InAndroid
 
 pure def comeBack(s: Calendar): Viewed =
   val asked = R::ask(s.event)
   { state: { ...s, detail: Rereading, event: asked }, out: List(ReadEvent({ ticket: asked.ticket, id: s.open })) }
 ```
 
-### An event comes back only if the read finds it; otherwise it closes
+### An event comes back only if an exact read finds it as it was left; otherwise it closes
+
+The read is of the event's own source, for the owner it was opened for,
+whole and for the window around the event's own day; it finds the event
+with the version it had when it was left. A read the phone cut short, a
+feed Google gave only in part or for another window, or an event found at
+another version, closes it, and the owner opens it again as it now is.
 
 ```quint
-pure def canEventFound(s: Calendar, ticket: int): bool = s.detail == Rereading and R::canAnswer(s.event, ticket)
+pure def canEventFound(s: Calendar, ticket: int, exact: bool): bool = s.detail == Rereading and R::canAnswer(s.event, ticket) and exact
 
-pure def eventFound(s: Calendar, ticket: int): Calendar = { ...s, detail: Showing, event: R::answer(s.event, true) }
+pure def eventFound(s: Calendar, ticket: int, exact: bool): Viewed =
+  val shown = { ...s, detail: Showing, event: R::answer(s.event, true) }
+  inspectFor(shownInspection(shown), shown)
 
 pure def canEventGone(s: Calendar, ticket: int): bool = s.detail == Rereading and R::canAnswer(s.event, ticket)
 
@@ -596,10 +746,12 @@ pure def stepAnEventComesBackOnlyWhenFound(before: Calendar, via: str, after: Ca
   (before.detail != Showing and after.detail == Showing and after.open != 0) implies via == "eventFound"
 ```
 
-### Coming back from Maps can find the event
+### Coming back from Maps can find the event, and an event can be away in Android Calendar
 
 ```quint
 pure def sometimesBackFromMaps(s: Calendar): bool = s.open != 0 and s.detail == Showing and s.event.status == R::Loaded
+
+pure def sometimesAwayInAndroidCalendar(s: Calendar): bool = s.detail == InAndroid and s.local
 ```
 
 ### An event can be gone when the owner comes back
@@ -626,11 +778,11 @@ the Calendars sheet: on a phone, Calendar's header holds the month, Today and Ne
 event, and the month dialog only its days.
 
 ```quint
-pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
+pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front and uncovered(s)
 
 pure def openSearch(s: Calendar): Calendar = { ...s, overlay: Search }
 
-pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front
+pure def canOpenCalendars(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front and uncovered(s)
 
 pure def openCalendars(s: Calendar): Calendar = { ...s, overlay: CalendarsSheet }
 ```
@@ -677,8 +829,8 @@ the owner before is refused.
 pure def canOwnerChanged(s: Calendar, owner: int, hidden: Set[int]): bool = owner != s.owner and owner >= 0
 
 pure def ownerChanged(s: Calendar, owner: int, hidden: Set[int]): Calendar =
-  { ...s, owner: owner, hidden: hidden, connected: false, googleRows: 0,
-    open: 0, reminder: 0, local: false, web: false, place: false, video: false, detail: Showing,
+  { ...s, owner: owner, hidden: hidden, connected: false, googleRows: 0, googleLimited: false,
+    open: 0, reminder: 0, local: false, web: false, place: false, video: false, detail: Showing, inspection: retiredInspection(s.inspection),
     overlay: if (s.overlay == CalendarsSheet) NoOverlay else s.overlay }
 ```
 
@@ -709,6 +861,10 @@ pure def openAccountSettings(s: Calendar): Viewed = { state: s, out: List(OpenAc
 
 ### Calendar says when it comes in front and when it leaves; coming in front reads again
 
+Calendar leaves when the shell shows another app, and when the page is
+hidden or the screen locks; the shade or another layer of the shell only
+covers it.
+
 ```quint
 pure def readOrWait(day: int, s: Calendar): Viewed =
   if (not(canRefresh(s))) { state: s, out: List() }
@@ -723,8 +879,15 @@ pure def frontChanged(s: Calendar, front: bool, now: int): Viewed =
 
 ### Leaving Calendar closes its search, its sheets and its dialogs
 
+The editor's form and the delete review close too, each by its own
+machine, told by the shell.
+
 ```quint
 pure def alwaysAnOverlayIsInFront(s: Calendar): bool = s.overlay != NoOverlay implies s.front
+
+pure def canCoverChanged(s: Calendar, covered: bool): bool = covered != s.covered
+
+pure def coverChanged(s: Calendar, covered: bool): Calendar = { ...s, covered: covered }
 ```
 
 ### While Calendar is in front it reads again once a minute, never during a read and never under an open event
@@ -788,11 +951,14 @@ pure def sometimesReadAfterAMinute(s: Calendar): bool = s.front and s.readAt == 
 
 ### Calendar opened on a day shows that day's timeline, with nothing open over it
 
+The shell says the day a tap on Home's agenda or on an event's notice
+named, as Calendar opens.
+
 ```quint
 pure def canOpenOn(s: Calendar, day: int): bool = day >= 0 and s.detail == Showing
 
 pure def openOn(s: Calendar, day: int): Viewed =
-  val cleared = { ...s, overlay: NoOverlay, open: 0, reminder: 0, local: false, web: false, place: false, video: false,
+  val cleared = { ...s, overlay: NoOverlay, open: 0, reminder: 0, local: false, web: false, place: false, video: false, inspection: retiredInspection(s.inspection),
     layout: if (s.layout == Agenda and day != s.today) Timeline else s.layout }
   readFor(day, cleared)
 ```
@@ -805,18 +971,35 @@ pure def openOn(s: Calendar, day: int): Viewed =
 
 ### The assistant is given the open event only while it shows, and the day shown only on a plain, current day
 
-The event is given while its detail shows, never while it is away in Maps
-or read again; closing it, or another owner signing in, retires it. The day
-is given only with nothing open over it, no write under way, and an owner
-signed in.
+The event is given while its detail shows with no form over it, never
+while it is away in Maps or Android Calendar or read again; one of the
+phone's only once the phone's newest inspection answered, at the revision
+it said. Closing it, another owner signing in, or a read that shows it
+changed retires it, so a change committed to another event keeps it only
+when the open event came back unchanged. A new event's form gives the
+phone's own calendar, as the phone named it, while the form shows. The day
+is given only while Calendar is in front and uncovered, every source it may
+read answered for that day, nothing is open over it (an event, a reminder,
+a form, a delete review, the month dialog, search or a sheet), no write is
+under way, and an owner is signed in.
 
 ```quint
-pure def selectedEvent(s: Calendar): int = if (s.open != 0 and s.detail == Showing) s.open else 0
+pure def selectedEvent(s: Calendar): int =
+  if (s.open != 0 and s.detail == Showing and s.form == NoFormShown and (not(s.local) or s.inspection.status == R::Loaded)) s.open else 0
 
-pure def dayGiven(s: Calendar): bool = s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and not(s.writing) and s.owner > 0
+pure def sourceGiven(s: Calendar): bool = s.form == NewFormShown and P::allows(s.access) and s.inspection.status == R::Loaded
+
+pure def ready(s: Calendar): bool =
+  canRefresh(s) and not(reading(s))
+    and (P::allows(s.access) implies s.phone.status == R::Loaded) and (s.connected implies s.google.status == R::Loaded)
+
+pure def dayGiven(s: Calendar): bool =
+  s.front and not(s.covered) and uncovered(s) and s.open == 0 and s.reminder == 0 and s.overlay == NoOverlay and not(s.writing) and s.owner > 0 and ready(s)
 
 pure def alwaysTheSelectionIsWhatShows(s: Calendar): bool =
-  (selectedEvent(s) != 0 implies (s.open == selectedEvent(s) and s.detail == Showing)) and not(dayGiven(s) and selectedEvent(s) != 0)
+  (selectedEvent(s) != 0 implies (s.open == selectedEvent(s) and s.detail == Showing and s.form == NoFormShown))
+    and not(dayGiven(s) and (selectedEvent(s) != 0 or sourceGiven(s)))
+    and not(sourceGiven(s) and selectedEvent(s) != 0)
 ```
 
 ### The day can be given as context, and an event selected
@@ -825,4 +1008,6 @@ pure def alwaysTheSelectionIsWhatShows(s: Calendar): bool =
 pure def sometimesDayGiven(s: Calendar): bool = dayGiven(s) and s.phoneRows > 0
 
 pure def sometimesEventSelected(s: Calendar): bool = selectedEvent(s) != 0 and s.local
+
+pure def sometimesNoDayWhileCovered(s: Calendar): bool = s.covered and s.front and s.open == 0 and ready(s) and not(dayGiven(s))
 ```

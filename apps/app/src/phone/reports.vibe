@@ -78,7 +78,7 @@ const reporting = started(effect {
   })
 }, "the phone's counts for Home")
 
-// spec/app/home/tiles.md, "Only Phone, Messages and Inbox carry a badge, only when something waits there, and no tile does while Home is being edited"
+// spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited"
 const messageBadge = applying(Messages, (state) => state.unread, (unread) => sync(() => waiting.tell("Messages", unread > 0 ? `${unread} unread` : undefined)))
 
 const phoneBadge = started(effect {

@@ -130,6 +130,32 @@ describe("the toasts", () => {
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "confirm" })));
     dialog.remove();
   });
+
+  it('Concurrent raises keep every toast message and focus holds a toast after pointer leave (spec/app/notices/toasts.md, "Every toast raised is shown at once, or waits"; spec/app/notices/toasts.md, "A plain toast the owner is reading is held, and its whole time starts again when they let go")', async () => {
+    const { alpha } = await open(scene(), only("home", "notice"));
+    await alpha.runtime.runPromise(Effect.all([
+      offer("Deleted note", "notes", 1, Effect.void),
+      say("Second notice"),
+    ], { concurrency: "unbounded" }));
+    await until(alpha, alpha.runtime, Toasts, (t) => t.showing && t.current.undo);
+    expect(toast()).toContain("Deleted note");
+    await press("Undo");
+    await until(alpha, alpha.runtime, Toasts, (t) => t.showing && !t.current.undo);
+    expect(toast()).toBe("Second notice");
+
+    const card = document.querySelector<HTMLElement>("[data-alpha-toast-region] > div");
+    if (!card) throw new Error("no toast card");
+    card.tabIndex = 0;
+    await drawn(() => {
+      card.focus();
+      card.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await until(alpha, alpha.runtime, Toasts, (t) => t.held);
+    await drawn(() => { card.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })); });
+    await later(alpha, 5_000);
+    expect((await alpha.runtime.runPromise(Toasts.use((m) => m.get()))).showing).toBe(true);
+    expect(toast()).toBe("Second notice");
+  });
 });
 
 describe("notices shade, taps, deletions, posting, and reminders", () => {

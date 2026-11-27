@@ -870,13 +870,13 @@ pure def sometimesAllSetForALateError(s: Access): bool = panel(s) == AllSet and 
 
 ### What the simulator tries
 
-Every access, two readings of each, times a step's first twenty seconds
+Every access, up to twelve tickets for readings and saves, times a step's first twenty seconds
 apart, and a clock that has run on long after. Answers, stalls and passing a step are tried often enough
 to reach the end in a short run.
 
 ```quint
 pure val keyValues = S::everyKey
-pure val ticketValues = Set(1, 2)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 pure val nowValues = Set(0, 25000, 50000)
 pure val clockValues = Set(25000, 1000000)
 pure val upToValues = Set(4, 7)

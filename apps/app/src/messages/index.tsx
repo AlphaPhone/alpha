@@ -1,4 +1,4 @@
-import type { Layer } from "effect";
+import { Effect, type Layer } from "effect";
 import { say } from "../notices/index.vibe";
 import { registered } from "../platform/index.vibe";
 import { messagesBack } from "../comms/index.vibe";
@@ -12,10 +12,14 @@ import { Messages } from "./Messages.tsx";
 function MessagesView({ runtime, alpha }: Shown<Resident | Layer.Success<typeof voiceArea>>) {
   const firstPageBack = useFirstPageBack(alpha);
   const openLink = registered("AlphaBrowser") ? (href: string) => {
-    void Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")])
-      .then(([{ default: browser }, { openMessageLink }]) => browser.runtime(alpha).runPromise(openMessageLink(href)))
-      .catch(() => false)
-      .then((opened) => opened ? undefined : alpha.runtime.runPromise(say("Browser could not open that link", true)));
+    void runtime.runPromiseExit(Effect.gen(function* () {
+      const opened = yield* Effect.tryPromise(async (signal) => {
+        const [{ default: browser }, { openMessageLink }] = await Promise.all([import("../browser/index.tsx"), import("../browser/browser.vibe")]);
+        if (signal.aborted) return false;
+        return browser.runtime(alpha).runPromise(openMessageLink(href), { signal });
+      }).pipe(Effect.orElseSucceed(() => false));
+      if (!opened) yield* say("Browser could not open that link", true);
+    }));
   } : undefined;
   return <Messages runtime={runtime} onBack={firstPageBack ? () => void alpha.back() : undefined} onOpenLink={openLink} />;
 }

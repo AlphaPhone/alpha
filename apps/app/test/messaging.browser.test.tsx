@@ -42,7 +42,7 @@ async function controlJson(origin: string, route: string, body?: unknown): Promi
 
 /**
  * Alpha with Telegram and Slack kept on Home after its default tiles, as the owner adds them from Add to Home:
- * they are in Home's catalog, not its defaults (spec/app/home/tiles.md, "Home's defaults use the product's Home order").
+ * they are in Home's catalog, not its defaults (spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles").
  */
 /** Stage `draft` as the agent does, raise Ask Alpha in full, and send it from there once it shows. */
 async function sendStagedDraft(alpha: Alpha, draft: MessagingDraftProposal) {

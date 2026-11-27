@@ -1,0 +1,52 @@
+// spec/app/calendar/index.md, "The assistant is given the open event only while it shows, and the day shown only on a plain, current day"; spec/app/calendar/index.md, "Each detail of the phone's shown is inspected by the phone, and only the newest inspection counts"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import type { Calendar, Event } from "../../gen/app__calendar.effect.vibe"
+import { dayGiven, selectedEvent, sourceGiven } from "../../gen/app__calendar.effect.vibe"
+import { PhoneCalendar } from "../platform/index.vibe"
+import { started } from "../runtime/index.vibe"
+import { type CalendarObject, type CalendarSubject, admitted, giveSubject, inspectionOf, keepInspection, noSubject } from "./selection.ts"
+import { shown } from "./shown.ts"
+
+/** What the phone names for `id`: the revisions it holds now of the phone's event `id`, or for 0 its own calendar a new form saves to. */
+effect function inspectionFor(id: number): (CalendarObject | undefined)!!PhoneCalendar {
+  const phone = try PhoneCalendar
+  if (id === 0) {
+    const source = phone.prepareSource() catch () => undefined
+    return source === undefined ? undefined : { kind: "calendar-source", id: source.sourceId, revision: source.sourceRevision, accountId: source.sourceId, sourceRevision: source.sourceRevision }
+  }
+  const row = shown.find(id)
+  if (row === undefined || row.source !== "Phone") return undefined
+  const expected = { title: row.title, body: row.notes, location: row.place, begin: row.begin, end: row.end }
+  const inspected = phone.inspect({ id: row.key, calendarId: row.calendarId, expected }) catch () => undefined
+  return inspected === undefined ? undefined
+    : { kind: "calendar-event", id: row.key, revision: inspected.revision, accountId: row.calendarId, sourceRevision: inspected.sourceRevision }
+}
+
+/** The phone's answer to the inspection numbered `ticket`: what it named is kept, under that number, while it is one the agent admits. */
+export effect function inspectShown(ticket: number, id: number): Event!!PhoneCalendar {
+  const object = try inspectionFor(id)
+  if (object === undefined || !admitted(object)) return { type: "inspected", ticket, ok: false }
+  keepInspection(ticket, object)
+  return { type: "inspected", ticket, ok: true }
+}
+
+/** The open event of the agent's calendar as Ask Alpha names it: by its id and the version the feed gave. */
+function googleObject(id: number): CalendarObject | undefined {
+  const row = shown.find(id)
+  if (row === undefined || row.source !== "Google" || row.version === "") return undefined
+  const event: CalendarObject = { kind: "canonical-calendar-event", id: row.key, revision: row.version }
+  return admitted(event) ? event : undefined
+}
+
+/** What Calendar gives Ask Alpha in `s`: the day shown, the open event at the phone's newest inspection, or the form's calendar. */
+function subjectOf(s: Calendar): CalendarSubject {
+  const open = selectedEvent(s)
+  const event = open !== 0 ? (s.local ? inspectionOf(s.inspection.ticket) : googleObject(open)) : sourceGiven(s) ? inspectionOf(s.inspection.ticket) : undefined
+  return { day: dayGiven(s) ? s.anchor : 0, event }
+}
+
+/** What Calendar gives Ask Alpha each time its view changes; nothing once Calendar's view ends. */
+export const selecting = started(effect {
+  const view = try View.Machine
+  try Effect.ensuring(Stream.runForEach(view.changes, (s) => sync(() => giveSubject(subjectOf(s)))), sync(() => giveSubject(noSubject)))
+}, "telling Ask Alpha what Calendar shows")

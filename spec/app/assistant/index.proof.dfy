@@ -42,7 +42,6 @@ lemma lawABrowserPreviewNamesNoMessages_ensures(contacts: bool)
   lawAViewIsNamedExactlyWhenTheShellHasIt_ensures(false, contacts, app__shell_View.Messages);
   lawAViewIsNamedExactlyWhenTheShellHasIt_ensures(false, contacts, app__shell_View.Phone);
 }
-
 lemma lawAnImageNamesMessages_ensures(contacts: bool)
   ensures (lawAnImageNamesMessages(contacts) == true)
 {

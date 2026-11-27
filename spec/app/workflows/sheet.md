@@ -85,6 +85,8 @@ pure def runsRead(s: Sheet, ticket: int, ok: bool, count: int, more: bool): Shee
 
 ### Each page adds to the runs shown, and more are offered only after a full page
 
+Discovered by the proof: runs are shown only while an owner is signed in.
+
 ```quint
 pure def alwaysTheHistoryIsPaged(s: Sheet): bool = and {
   s.shown >= 0, s.owner >= 0,
@@ -202,6 +204,10 @@ pure def closeRun(s: Sheet): Moved =
 
 ### Speech is heard only for the open run's output, once it ended, and never without some to read
 
+Output stays visible only after a read was asked for that open run, including
+while a running run refreshes its reading. Discovered by the proof: an
+in-flight output read always has a positive ticket.
+
 ```quint
 pure def alwaysSpeechIsOfTheOpenRun(s: Sheet): bool = and {
   s.speech.outcome == A::Sent implies (s.runId >= 1 and U::ended(s.status) and (s.text == Text or s.text == Truncated) and s.output.status != R::Loading),
@@ -276,4 +282,17 @@ owner can review.
 ```quint
 pure def alwaysOpenedRunBelongsToOwner(s: Sheet): bool =
   s.runId >= 1 implies (s.owner >= 1 and s.version >= 1 and s.newest >= s.version)
+
+pure def noticeRunAdmitted(
+  rereadOk: bool, finishedRun: bool, sameNoticeOwner: bool, sameNoticeRun: bool, sameNoticeVersion: bool
+): bool =
+  rereadOk and finishedRun and sameNoticeOwner and sameNoticeRun and sameNoticeVersion
+
+pure def noticeTapConsumed(exactRunShown: bool): bool = exactRunShown
+
+pure def lawNoticeOpensOnlyExactFinishedRun(
+  rereadOk: bool, finishedRun: bool, sameNoticeOwner: bool, sameNoticeRun: bool, sameNoticeVersion: bool
+): bool =
+  (not(rereadOk) or not(finishedRun) or not(sameNoticeOwner) or not(sameNoticeRun) or not(sameNoticeVersion))
+    implies not(noticeRunAdmitted(rereadOk, finishedRun, sameNoticeOwner, sameNoticeRun, sameNoticeVersion))
 ```

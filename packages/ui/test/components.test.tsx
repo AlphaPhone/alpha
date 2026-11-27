@@ -51,6 +51,7 @@ vi.mock("maplibre-gl", () => {
     Marker,
     LngLatBounds,
     setWorkerUrl() {},
+    setWorkerCount() {},
     addProtocol() {},
     removeProtocol() {},
   };

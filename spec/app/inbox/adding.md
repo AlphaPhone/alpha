@@ -131,10 +131,9 @@ pure def canWantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Per
   draft != 0 and not(admitted and P::allows(contacts))
 
 pure def wantContacts(s: Adding, draft: int, admitted: bool, contacts: P::Permission): Added =
-  val gone = clearPeople(s)
-  if (not(admitted)) { state: { ...gone, contacts: NotOnThisPhone }, out: List() }
-  else if (P::canAsk(contacts)) { state: { ...gone, contacts: Asked, contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
-  else { state: { ...gone, contacts: InSettings, contactDraft: draft }, out: List(OpenContactsSettings) }
+  if (not(admitted)) { state: clearPeople(NotOnThisPhone, s), out: List() }
+  else if (P::canAsk(contacts)) { state: { ...clearPeople(Asked, s), contactDraft: draft }, out: List(AskForContacts({ draft: draft })) }
+  else { state: { ...clearPeople(InSettings, s), contactDraft: draft }, out: List(OpenContactsSettings) }
 
 pure def lawNoContactsWhereThePhoneHasNone(draft: int, contacts: P::Permission): bool =
   not(canPickContact(initial, draft, false, contacts)) and wantContacts(initial, draft, false, contacts).out.length() == 0
@@ -169,12 +168,12 @@ pure def canChooseContact(s: Adding, draft: int, ticket: int, address: int): boo
 pure def chooseContact(s: Adding, draft: int, ticket: int, address: int): Added =
   { state: s, out: List(AddContact({ draft: draft, ticket: ticket, address: address })) }
 
-pure def clearPeople(s: Adding): Adding =
-  { ...s, contactDraft: 0, people: { ...s.people, status: R::Idle }, query: "", addresses: 0, morePeople: false }
+pure def clearPeople(status: Contacts, s: Adding): Adding =
+  { ...s, contacts: status, contactDraft: 0, people: { ...s.people, status: R::Idle }, query: "", addresses: 0, morePeople: false }
 
 pure def canClosePeople(s: Adding): bool = s.contactDraft != 0
 
-pure def closePeople(s: Adding): Adding = clearPeople(s)
+pure def closePeople(s: Adding): Adding = clearPeople(s.contacts, s)
 
 pure def canContactsReported(s: Adding, draft: int): bool =
   draft != 0 and draft == s.contactDraft and s.contacts == Asked
@@ -206,7 +205,7 @@ pure def stepNothingJoinsUnseen(before: Adding, via: str, after: Adding, out: Li
 
 ```quint
 pure def draftClosed(s: Adding, draft: int): Adding =
-  val cleared = if (draft == s.contactDraft) clearPeople(s) else s
+  val cleared = if (draft == s.contactDraft) clearPeople(s.contacts, s) else s
   if (draft == s.draft or draft == s.into) {
     ...cleared, picker: { ...cleared.picker, status: R::Idle }, refused: Accepted, thing: 0, mib: 0, into: 0, account: 0, contacts: Usable,
   } else cleared

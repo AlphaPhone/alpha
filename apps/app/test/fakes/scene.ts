@@ -105,6 +105,7 @@ export function services(world: Scene) {
     agent: answering([
       ...updateRoutes(world.update, () => world.now),
       () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
+      ...updateRoutes(world.update, () => world.now),
       health,
       ...sampleRoutes(world.sample),
       ...askRoutes(world.ask),

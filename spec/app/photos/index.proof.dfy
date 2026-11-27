@@ -80,6 +80,58 @@ lemma sendNext_ensures(s: Photos, items: seq<int>, by_: app__photos__actor_Actor
   }
 }
 
+lemma AccessRevoked(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canAccessIs(s, by_)
+  requires !kit__permission_allows(kit__permission_observe(s.access, grant))
+  ensures alwaysVideosNeedTheirAccess(accessIs(s, grant, videos, by_).state)
+  ensures alwaysOnlyOwnWithoutAccess(accessIs(s, grant, videos, by_).state)
+  ensures alwaysTheAlbumShowingIsListed(accessIs(s, grant, videos, by_).state)
+  ensures alwaysNothingShownWhileHidden(accessIs(s, grant, videos, by_).state)
+  ensures alwaysTheLockScreenListsOnlyItsSession(accessIs(s, grant, videos, by_).state)
+  ensures alwaysSelectionIsListed(accessIs(s, grant, videos, by_).state)
+  ensures alwaysRunsAreTheOwners(accessIs(s, grant, videos, by_).state)
+  ensures alwaysDialogNamesItsSubject(accessIs(s, grant, videos, by_).state)
+  ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepNothingChangesWithoutAccess(s, accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepAPageKeepsWhatWasListed(s, "accessIs", accessIs(s, grant, videos, by_).state)
+  ensures stepChangesAreTheOwners(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepAFavouriteToggles(s, "accessIs", accessIs(s, grant, videos, by_).state)
+  ensures stepAlbumChangesCarryTheSelection(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+{
+  app__photos__changes_cancel_ensures(s.job);
+  app__photos__albums_closeDialog_ensures(s.shelf);
+  var d := accessIs(s, grant, videos, by_);
+  assert d.out[0].Revoke?;
+  assert d.out[0] in d.out;
+  assert forall e :: e in d.out ==> e.Revoke? || e.Fetch? || e.DropCamera?;
+}
+
+lemma AccessAllowed(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canAccessIs(s, by_)
+  requires kit__permission_allows(kit__permission_observe(s.access, grant))
+  ensures alwaysVideosNeedTheirAccess(accessIs(s, grant, videos, by_).state)
+  ensures alwaysOnlyOwnWithoutAccess(accessIs(s, grant, videos, by_).state)
+  ensures alwaysTheAlbumShowingIsListed(accessIs(s, grant, videos, by_).state)
+  ensures alwaysNothingShownWhileHidden(accessIs(s, grant, videos, by_).state)
+  ensures alwaysTheLockScreenListsOnlyItsSession(accessIs(s, grant, videos, by_).state)
+  ensures alwaysSelectionIsListed(accessIs(s, grant, videos, by_).state)
+  ensures alwaysRunsAreTheOwners(accessIs(s, grant, videos, by_).state)
+  ensures alwaysDialogNamesItsSubject(accessIs(s, grant, videos, by_).state)
+  ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepNothingChangesWithoutAccess(s, accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepAPageKeepsWhatWasListed(s, "accessIs", accessIs(s, grant, videos, by_).state)
+  ensures stepChangesAreTheOwners(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+  ensures stepAFavouriteToggles(s, "accessIs", accessIs(s, grant, videos, by_).state)
+  ensures stepAlbumChangesCarryTheSelection(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
+{
+  app__photos__albums_closeDialog_ensures(s.shelf);
+  var d := accessIs(s, grant, videos, by_);
+  assert d.state.rows == s.rows && d.state.mine == s.mine && d.state.starred == s.starred;
+  assert d.state.albums == s.albums && d.state.album == s.album && d.state.tab == s.tab;
+  assert d.state.selecting == s.selecting && d.state.selected == s.selected && d.state.job == s.job;
+  assert forall e :: e in d.out ==> e.Fetch? || e.DropCamera?;
+}
+
 lemma accessIs_ensures(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canAccessIs(s, by_) ==> alwaysVideosNeedTheirAccess(accessIs(s, grant, videos, by_).state))
   ensures (inv(s) ==> canAccessIs(s, by_) ==> alwaysOnlyOwnWithoutAccess(accessIs(s, grant, videos, by_).state))
@@ -142,6 +194,106 @@ lemma PageStep(before: Photos, via: string, after: Photos)
 {
 }
 
+lemma ListedFailed(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: seq<int>, starred: seq<int>, cameraItem: int, revision: int, more: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canListed(s, ticket, by_) && !ok
+  ensures alwaysVideosNeedTheirAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysOnlyOwnWithoutAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheAlbumShowingIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysNothingShownWhileHidden(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheLockScreenListsOnlyItsSession(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysSelectionIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysRunsAreTheOwners(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysDialogNamesItsSubject(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepNothingChangesWithoutAccess(s, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAPageKeepsWhatWasListed(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepChangesAreTheOwners(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAFavouriteToggles(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+{
+  assert s.cameraAlbum == 0;
+  var d := listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
+  assert forall e :: e in d.out ==> e.DropCamera?;
+}
+
+lemma ListedRestarted(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: seq<int>, starred: seq<int>, cameraItem: int, revision: int, more: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canListed(s, ticket, by_) && ok && s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows)))
+  ensures alwaysVideosNeedTheirAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysOnlyOwnWithoutAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheAlbumShowingIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysNothingShownWhileHidden(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheLockScreenListsOnlyItsSession(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysSelectionIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysRunsAreTheOwners(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysDialogNamesItsSubject(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepNothingChangesWithoutAccess(s, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAPageKeepsWhatWasListed(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepChangesAreTheOwners(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAFavouriteToggles(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+{
+  assert s.cameraAlbum == 0;
+  var d := listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
+  assert forall e :: e in d.out ==> e.Fetch? || e.DropCamera?;
+}
+
+lemma ListedLoaded(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: seq<int>, starred: seq<int>, cameraItem: int, revision: int, more: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canListed(s, ticket, by_) && ok && !(s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows))))
+  ensures alwaysVideosNeedTheirAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysOnlyOwnWithoutAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheAlbumShowingIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysNothingShownWhileHidden(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysTheLockScreenListsOnlyItsSession(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysSelectionIsListed(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysRunsAreTheOwners(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures alwaysDialogNamesItsSubject(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepNothingChangesWithoutAccess(s, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAPageKeepsWhatWasListed(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepChangesAreTheOwners(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+  ensures stepAFavouriteToggles(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state)
+  ensures stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out)
+{
+  assert s.cameraAlbum == 0;
+  var d := listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
+  var after := d.state;
+  assert forall e :: e in d.out ==> e.DropCamera?;
+  var sess := if s.secure then ProofLib.Filter((set_x: int) => (set_x in s.only), rows) else rows;
+  var shown := if kit__permission_allows(s.access) then sess else ProofLib.Filter((set_x: int) => (set_x in owned), sess);
+  var whole := if !showsItems(s) then [] else (if s.paging then (s.rows + ProofLib.Filter((set_x: int) => !((set_x in s.rows)), shown)) else shown);
+  var ownedAll := if s.paging then (s.mine + ProofLib.Filter((set_x: int) => !((set_x in s.mine)), owned)) else owned;
+  assert after.rows == whole;
+  assert after.mine == ProofLib.Filter((set_x: int) => (set_x in whole), ownedAll);
+  Kept(rows, s.only);
+  Kept(sess, owned);
+  Joined(s.rows, shown);
+  Joined(s.mine, owned);
+  Kept(ownedAll, whole);
+  forall x | x in whole ensures x in shown || (s.paging && x in s.rows) {
+  }
+  forall x | x in shown ensures x in rows && (s.secure ==> x in s.only) && (!kit__permission_allows(s.access) ==> x in owned) {
+  }
+  if !kit__permission_allows(s.access) {
+    forall x | x in whole ensures x in after.mine {
+      if s.paging && x in s.rows {
+        assert x in s.mine;
+      }
+    }
+  }
+  if s.secure {
+    forall x | x in whole ensures x in s.only {
+    }
+  }
+  if s.paging {
+    PageStep(s, "listed", after);
+    Dropped(whole, s.rows);
+    forall x | x in ProofLib.Filter((set_x: int) => !((set_x in s.rows)), after.rows) ensures x in rows {
+    }
+    assert allOlder(ProofLib.Filter((set_x: int) => !((set_x in s.rows)), after.rows), s.rows);
+  }
+}
+
 lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: seq<int>, starred: seq<int>, cameraItem: int, revision: int, more: bool, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysVideosNeedTheirAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> alwaysOnlyOwnWithoutAccess(listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state))
@@ -159,41 +311,39 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
 
 {
-  if inv(s) && canListed(s, ticket, by_) && ok && !(s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows)))) {
-    assert s.cameraAlbum == 0;
-    var after := listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state;
-    var sess := if s.secure then ProofLib.Filter((set_x: int) => (set_x in s.only), rows) else rows;
-    var shown := if kit__permission_allows(s.access) then sess else ProofLib.Filter((set_x: int) => (set_x in owned), sess);
-    var whole := if !showsItems(s) then [] else (if s.paging then (s.rows + ProofLib.Filter((set_x: int) => !((set_x in s.rows)), shown)) else shown);
-    var ownedAll := if s.paging then (s.mine + ProofLib.Filter((set_x: int) => !((set_x in s.mine)), owned)) else owned;
-    assert after.rows == whole;
-    assert after.mine == ProofLib.Filter((set_x: int) => (set_x in whole), ownedAll);
-    Kept(rows, s.only);
-    Kept(sess, owned);
-    Joined(s.rows, shown);
-    Joined(s.mine, owned);
-    Kept(ownedAll, whole);
-    forall x | x in whole ensures x in shown || (s.paging && x in s.rows) {
+  if inv(s) && canListed(s, ticket, by_) {
+    if !ok {
+      ListedFailed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
+    } else if s.paging && ((revision != s.revision) || !(allOlder(rows, s.rows))) {
+      ListedRestarted(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
+    } else {
+      ListedLoaded(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_);
     }
-    forall x | x in shown ensures x in rows && (s.secure ==> x in s.only) && (!kit__permission_allows(s.access) ==> x in owned) {
-    }
-    if !kit__permission_allows(s.access) {
-      forall x | x in whole ensures x in after.mine {
-        if s.paging && x in s.rows {
-          assert x in s.mine;
-        }
-      }
-    }
-    if s.secure {
-      forall x | x in whole ensures x in s.only {
-      }
-    }
-    if s.paging {
-      PageStep(s, "listed", after);
-      Dropped(whole, s.rows);
-      forall x | x in ProofLib.Filter((set_x: int) => !((set_x in s.rows)), after.rows) ensures x in rows {
-      }
-      assert allOlder(ProofLib.Filter((set_x: int) => !((set_x in s.rows)), after.rows), s.rows);
+  }
+}
+
+lemma cameraAlbumsLoaded_ensures(s: Photos, photo: int, ticket: int, choices: seq<int>, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysVideosNeedTheirAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysOnlyOwnWithoutAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheAlbumShowingIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysNothingShownWhileHidden(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheLockScreenListsOnlyItsSession(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysSelectionIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysRunsAreTheOwners(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysDialogNamesItsSubject(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepNothingChangesWithoutAccess(s, cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAPageKeepsWhatWasListed(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepChangesAreTheOwners(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAFavouriteToggles(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+{
+  if inv(s) && canCameraAlbumsLoaded(s, photo, ticket, by_) {
+    var after := cameraAlbumsLoaded(s, photo, ticket, choices, by_);
+    if s.album != 0 {
+      assert after.albums == choices + ProofLib.Filter((set_x: int) => !((set_x in choices)), [s.album]);
+      Joined(choices, [s.album]);
+      assert s.album in after.albums;
     }
   }
 }
@@ -220,27 +370,5 @@ lemma changed_ensures(s: Photos, attempt: int, done: seq<int>, stale: seq<int>, 
     var res := if (known && s.job.change.Trash? && (s.cameraItem in done)) then clearCameraVisit(s) else s;
     assert res.rows == s.rows && res.mine == s.mine && res.selected == s.selected && res.starred == s.starred;
     assert s.secure ==> |r.left| == 0;
-  }
-}
-
-lemma cameraAlbumsLoaded_ensures(s: Photos, photo: int, ticket: int, choices: seq<int>, by_: app__photos__actor_Actor)
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysVideosNeedTheirAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysOnlyOwnWithoutAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheAlbumShowingIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysNothingShownWhileHidden(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheLockScreenListsOnlyItsSession(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysSelectionIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysRunsAreTheOwners(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysDialogNamesItsSubject(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepNothingChangesWithoutAccess(s, cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAPageKeepsWhatWasListed(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepChangesAreTheOwners(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAFavouriteToggles(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
-  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
-{
-  if inv(s) && canCameraAlbumsLoaded(s, photo, ticket, by_) && s.album != 0 {
-    Joined(choices, [s.album]);
-    assert s.album in [s.album];
   }
 }

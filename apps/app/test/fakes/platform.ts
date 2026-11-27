@@ -16,10 +16,16 @@ export interface PlatformScene {
   readonly hanging: Set<object>;
   /** When true, `ElizaAgent.abort` rejects, simulating a bridge failure during stream teardown. */
   abortFails?: boolean;
+  /**
+   * What `AlphaNetworkLocation` finds: the fingerprint of the networks it sees ("" where too few are seen, and the
+   * service answers from the address alone), the position the service gives, whether lookups fail, and what each
+   * lookup asked.
+   */
+  readonly network: { seen: string; lat: number; lng: number; accuracy: number; failing: boolean; readonly asked: Array<string | undefined> };
 }
 
 export function platformScene(): PlatformScene {
-  return { listening: new Set(), earlier: new Map(), unreadable: new Set(), dripping: new Set(), hanging: new Set() };
+  return { listening: new Set(), earlier: new Map(), unreadable: new Set(), dripping: new Set(), hanging: new Set(), network: { seen: "cafe", lat: 51.5, lng: -0.12, accuracy: 40, failing: false, asked: [] } };
 }
 
 const digest = "[a-f0-9]{64}";
@@ -51,6 +57,22 @@ export function alphaConnection(scene: PlatformScene): Faked {
   });
 }
 
+/**
+ * `AlphaNetworkLocationPlugin.java`: one lookup per call. The same networks the caller names as `unchangedFrom` send
+ * nothing and answer `unchanged`; an address-only answer has no fingerprint.
+ */
+export function alphaNetworkLocation(scene: PlatformScene, now: () => number): Faked {
+  return () => ({
+    locate({ unchangedFrom }: { unchangedFrom?: string }) {
+      const { network } = scene;
+      network.asked.push(unchangedFrom);
+      if (network.failing) return Promise.reject(rejection("the lookup failed", "unavailable"));
+      if (network.seen !== "" && unchangedFrom === network.seen) return Promise.resolve({ unchanged: true, fingerprint: network.seen });
+      return Promise.resolve({ latitude: network.lat, longitude: network.lng, accuracy: network.accuracy, timestamp: now(), fingerprint: network.seen });
+    },
+  });
+}
+
 /** The agent publishes `event` on `topic` to every feed of it. */
 export function publish(scene: PlatformScene, topic: string, event: unknown) {
   for (const one of scene.listening) if (one.topic === topic) one.send(event);
@@ -58,6 +80,9 @@ export function publish(scene: PlatformScene, topic: string, event: unknown) {
 
 /** A refusal of `status` that asks for a wait of 30 seconds, in its header and in its body as eliza's agent writes it. */
 export const busy = (status: number) => Response.json({ error: "busy", retryAfter: 30 }, { status, headers: { "retry-after": "30" } });
+
+/** A refusal of an allowance spent until `resetAt`, named in the body as eliza's cloud writes it: under `error`, as an ISO instant. */
+export const spent = (resetAt: number) => Response.json({ error: { code: "allowance-exhausted", resetAt: new Date(resetAt).toISOString() } }, { status: 429 });
 
 /** A body of `size` bytes, streamed as one event of that length. */
 const flood = (size: number) => new Response(`data: "${"a".repeat(size)}"\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -67,6 +92,7 @@ export function platformRoutes(scene: PlatformScene): Route[] {
     (request, url) => (request.method === "GET" && url.pathname === "/api/platform/heard"
       ? Response.json(Object.fromEntries([...request.headers].filter(([name]) => name.startsWith("x-eliza")))) : undefined),
     (request, url) => (request.method === "GET" && url.pathname === "/api/platform/busy" ? busy(Number(url.searchParams.get("status"))) : undefined),
+    (request, url) => (request.method === "GET" && url.pathname === "/api/platform/spent" ? spent(Number(url.searchParams.get("until"))) : undefined),
     (request, url) => (request.method === "POST" && url.pathname === "/api/platform/flood" ? flood(Number(url.searchParams.get("size"))) : undefined),
     (request, url) => (request.method === "POST" && url.pathname === "/api/platform/drip" ? feed((send) => {
       const one = {};

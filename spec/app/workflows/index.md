@@ -314,6 +314,16 @@ workflow never read, naming no version the agent could check.
 pure def alwaysAReviewIsOnTheOpenWorkflow(w: Workflows): bool = w.review.showing implies (w.open and w.version >= 1)
 ```
 
+### An open workflow belongs to the signed-in owner
+
+Discovered by the proof: without stating that an open workflow always has a
+signed-in owner, confirming a reviewed change or flipping a workflow could
+keep a change with no owner.
+
+```quint
+pure def alwaysAnOpenWorkflowBelongsToTheOwner(w: Workflows): bool = w.open implies w.owner >= 1
+```
+
 ### Only the owner's tap records a change, and all but a plain on or off only after a confirmed review of what it names
 
 ```quint

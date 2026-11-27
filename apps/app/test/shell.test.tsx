@@ -47,7 +47,7 @@ describe("the shell", () => {
     expect((await alpha.runtime.runPromise(Layers.use((l) => l.get()))).open).toEqual([]);
   });
 
-  it("Open text Ask Alpha from Android (spec/app/shell/index.md, \"Story: Open text Ask Alpha from Android\")", async () => {
+  it('Open text Ask Alpha from Android (spec/app/shell/index.md, "Story: Open text Ask Alpha from Android")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const visit = { ticket: 0, canReturn: false, returned: [] as number[] };
     world.settings.textAsk = visit;
@@ -116,7 +116,7 @@ describe("the shell", () => {
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(false);
   });
 
-  it("Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, \"A layer that closes gives focus back to the control that opened it, never over a control that took it\")", async () => {
+  it('Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it")', async () => {
     const { alpha } = await open({ ...scene(), phone: true }, only("home"));
     const send = (event: LayerEvent) => alpha.runtime.runPromise(Effect.flatMap(Layers, (layers) => layers.send(event)));
     const opener = document.body.appendChild(document.createElement("button"));
@@ -158,7 +158,7 @@ describe("the shell", () => {
       page.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: to.x, clientY: to.y }));
     });
 
-    // spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
+    // spec/app/shell/gestures.md, "A swipe travels more than 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
     await swiped({ x: 5, y: 300 }, { x: 40, y: 300 });
     await swiped({ x: 200, y: 300 }, { x: 300, y: 300 });
     expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
@@ -203,7 +203,8 @@ describe("the shell", () => {
     expect([home()?.classList.contains("contents"), document.querySelectorAll("h1").length]).toEqual([true, 1]);
   });
 
-  it("Let Phone's own bar stand in for Ask Alpha at rest (spec/app/shell/index.md, \"On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises\")", async () => {
+  // spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"
+  it("Let Phone's own bar stand in for Ask Alpha at rest", async () => {
     const { alpha } = await open({ ...scene(), phone: true, image: true });
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
     const assistant = () => document.querySelector<HTMLElement>("main > div:nth-of-type(2)");
@@ -254,5 +255,40 @@ describe("the shell", () => {
     await seen(true);
     host.remove();
     document.documentElement.style.fontSize = "";
+  });
+
+  // spec/app/shell/keyboard.md, "Story: Type without the page turning sideways"
+  it("Type without the page turning sideways and take host keyboard reports (spec/app/shell/keyboard.md, \"Story: Type without the page turning sideways\")", async () => {
+    const sized = (width: number, height: number) => drawn(() => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+      window.dispatchEvent(new Event("resize"));
+    });
+    const marks = () => ["landscape", "agenda", "split"].filter((name) => document.documentElement.hasAttribute(`data-alpha-${name}`));
+    await sized(412, 915);
+    const { alpha } = await open({ ...scene(), phone: true });
+    await until(alpha, alpha.runtime, Canvas, (c) => c.mounted && c.base.h === 915);
+
+    // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured": the keyboard keeps the portrait canvas, a rotation while typing turns it.
+    const input = document.body.appendChild(document.createElement("input"));
+    await drawn(() => input.focus());
+    await until(alpha, alpha.runtime, Canvas, (c) => c.field === "OtherField");
+    await sized(412, 500);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.height === 500);
+    expect([(await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).base, marks()]).toEqual([{ w: 412, h: 915 }, []]);
+    await sized(915, 380);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.width === 915);
+    expect([(await alpha.runtime.runPromise(Canvas.use((c) => c.get()))).base, marks()]).toEqual([{ w: 915, h: 412 }, ["landscape"]]);
+
+    // spec/app/shell/keyboard.md, "Where Android reports the keyboard, the keyboard hiding puts the composer away, unless it hid to hand the composer to voice": the host's report is taken as it comes.
+    const reported = (keyboard: boolean) => drawn(() => window.dispatchEvent(new CustomEvent("alpha-insets", { detail: { keyboard } })));
+    await reported(true);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.keyboard === "Shown");
+    await reported(false);
+    await until(alpha, alpha.runtime, Canvas, (c) => c.keyboard === "Hidden");
+    await drawn(() => input.blur());
+    input.remove();
+    await sized(412, 915);
+    await until(alpha, alpha.runtime, Canvas, (c) => !c.landscape);
   });
 });

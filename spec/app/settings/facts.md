@@ -183,6 +183,18 @@ pure def lawAnUnreportedAccessIsNeverAllowed(access: Access, ticket: int): bool 
   accessWord(failed, access) == AccessUnavailable
 ```
 
+### Storage is shown only as the used and total space Android reported, used never above total
+
+The source is the primary volume Files reads; with no such volume, or a
+total, used or free space that does not add up, storage is unavailable.
+
+```quint
+pure def storageKnown(used: int, total: int): bool = total > 0 and used >= 0 and used <= total
+
+pure def lawStorageNeverExceedsItsTotal(used: int, total: int): bool =
+  storageKnown(used, total) implies (used <= total and total > 0)
+```
+
 ### Nothing is shown as a fact before an answer, after a read failed, or once Settings was left
 
 ```quint

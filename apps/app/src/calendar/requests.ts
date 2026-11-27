@@ -1,6 +1,6 @@
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "A card is complete only with known fields, a valid time and, for a change, a verified target"
 import { Option, Schema } from "effect";
-import type { Change, Reply, Result } from "../../gen/app__calendar__agent.ts";
+import type { Change, Reply, RequestState, Result } from "../../gen/app__calendar__agent.ts";
 import { cardComplete, targetVerified } from "../../gen/app__calendar__agent.ts";
 import { createShelf } from "../runtime/store.ts";
 import type { Row } from "./shown.ts";
@@ -43,6 +43,8 @@ export interface Request {
   /** Whether every key of the request is one Alpha knows how to show. */
   readonly known: boolean;
   readonly expiresAt: string;
+  /** Where the request stands in the agent's approvals list, an expired one included, as the card's status reads it. */
+  readonly state: RequestState;
 }
 
 const RequestFieldsSchema = Schema.Struct({
@@ -73,6 +75,7 @@ export const RequestSchema = Schema.Struct({
   notify: Schema.Boolean,
   known: Schema.Boolean,
   expiresAt: Schema.String,
+  state: Schema.optionalKey(Schema.Literals(["RequestPending", "RequestExpired", "RequestRetryable", "RequestRejected", "RequestDone", "RequestFailed"])),
 });
 
 const decodeStored = Schema.decodeUnknownOption(Schema.fromJsonString(RequestSchema));
@@ -82,8 +85,13 @@ export function decodeRequest(raw: string): Request | undefined {
   const decoded = decodeStored(raw);
   if (Option.isNone(decoded)) return undefined;
   const value = decoded.value;
-  return { ...value, fields: value.fields, targetStartAt: value.targetStartAt ?? "" };
+  return { ...value, fields: value.fields, targetStartAt: value.targetStartAt ?? "", state: value.state ?? "RequestPending" };
 }
+
+const states: Readonly<Record<string, RequestState>> = {
+  pending: "RequestPending", expired: "RequestExpired", retryable: "RequestRetryable", rejected: "RequestRejected",
+  approved: "RequestDone", done: "RequestDone", executed: "RequestDone", failed: "RequestFailed",
+};
 
 const kinds: Readonly<Record<string, Change>> = { schedule_event: "Create", modify_event: "Update", cancel_event: "Delete", respond_invitation: "Respond" };
 const answers: Readonly<Record<string, Reply>> = { accepted: "Going", tentative: "Maybe", declined: "NotGoing" };
@@ -131,16 +139,20 @@ function matchesStart(matched: Row, expectedStartAt: string): boolean {
   return Number.isFinite(parsed) && matched.begin === parsed;
 }
 
-/** Whether the card may be approved: known fields, a valid time and, for a change, exactly one event of one calendar at the start and version asked. @throws {never} */
-export function complete(request: Request, rows: ReadonlyArray<Row>): boolean {
+/** Whether exactly one event of one calendar, the one the request names, holds the start and version it was made against. @throws {never} */
+export function verified(request: Request, rows: ReadonlyArray<Row>): boolean {
   const byId = rows.filter((row) => row.key === request.eventId);
   const matchingCalendar = request.calendarId === "" ? byId : byId.filter((row) => row.calendarId === request.calendarId);
   const calendars = new Set(byId.map((row) => row.calendarId));
   const matched = matchingCalendar.length === 1 ? matchingCalendar[0] : undefined;
   const startMatches = matched !== undefined && matchesStart(matched, request.targetStartAt);
   const versionMatches = matched !== undefined && matched.version === request.expectedVersion;
-  const verified = targetVerified(calendars.size, matchingCalendar.length, startMatches, versionMatches);
-  return cardComplete(request.change, request.known, verified, timeValid(request));
+  return targetVerified(calendars.size, matchingCalendar.length, startMatches, versionMatches);
+}
+
+/** Whether the card may be approved: pending state, known fields, a valid time and, for a change, a verified target. @throws {never} */
+export function complete(request: Request, rows: ReadonlyArray<Row>): boolean {
+  return request.state === "RequestPending" && cardComplete(request.change, request.known, verified(request, rows), timeValid(request));
 }
 
 /** Scoped per-runtime store of agent Calendar requests, expiry flags, and reported outcomes. */
@@ -150,7 +162,7 @@ export interface RequestsStore {
   /** @throws {never} */
   readonly subscribe: (listener: () => void) => () => void;
   /** Parse an untrusted wire approval row into a numbered `Request` within this runtime's store. @throws {never} */
-  readonly fromWire: (row: unknown, floor: number) => Request | undefined;
+  readonly fromWire: (row: unknown, floor: number, now?: number) => Request | undefined;
   /** @throws {never} */
   readonly keep: (request: Request) => void;
   /** @throws {never} */
@@ -186,7 +198,7 @@ export function createRequestsStore(): RequestsStore {
   return {
     snapshot: version.snapshot,
     subscribe: version.subscribe,
-    fromWire(row, floor) {
+    fromWire(row, floor, now) {
       const wire = record(row);
       const payload = record(wire?.payload);
       const change = record(payload?.change);
@@ -205,6 +217,8 @@ export function createRequestsStore(): RequestsStore {
       const source = record(target?.source ?? change.source);
       const { fields, known } = fieldsOf(change.fields);
       const scope = text(change.scope);
+      const expiresAt = text(wire.expiresAt);
+      const expiredAt = now !== undefined && Date.parse(expiresAt) <= now;
       return {
         filing: counted.filing, id, revision, changes: counted.changes, change: kind,
         reply: kind === "Respond" ? (answers[text(change.response)] ?? "NoReply") : "NoReply",
@@ -212,7 +226,8 @@ export function createRequestsStore(): RequestsStore {
         eventId: text(target?.eventId), calendarId: text(source?.calendarId), targetStartAt: text(target?.startAt),
         expectedVersion: text(target?.expectedVersion),
         notify: change.notifyAttendees === true, known: known && Object.keys(change).every((key) => changeKeys.has(key)),
-        expiresAt: text(wire.expiresAt),
+        expiresAt,
+        state: expiredAt ? "RequestExpired" : (states[text(wire.state)] ?? "RequestFailed"),
       };
     },
     keep(request) {

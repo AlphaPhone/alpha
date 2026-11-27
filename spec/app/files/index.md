@@ -678,7 +678,14 @@ pure def clearFilter(s: Files, by: Actor): Moved =
 
 pure def alwaysResultsMatchTheFilter(s: Files): bool =
   S::alwaysResultsAreOfTheFiltersKind(s.search) and s.search.hits.every(i => containsText(i.name, s.search.filter.text))
+```
 
+### Filter results and an in-flight filter belong to the place showing
+
+Discovered by the proof: an in-flight search whose target place differed from
+the place showing could otherwise deliver results for the wrong place.
+
+```quint
 pure def alwaysResultsBelongToThePlaceShowing(s: Files): bool =
   (s.search.hits.length() > 0 or s.search.query.status == R::Loading) implies s.search.within == where(s)
 ```
@@ -960,7 +967,9 @@ pure def lawAnOpenLatestRequestAwayFromFilesShowsTheNotice(reviewable: bool): bo
 Holding a listed row still for half a second selects it. Dragging, leaving
 its row or releasing early cancels the hold, and a hold that selects never
 also opens the item or toggles it off when the owner lifts their finger.
-Each row also has a keyboard-accessible way to select it.
+Each row also has a keyboard-accessible way to select it. Staging a previewed
+file from an idle, unselected folder may open the Move to sheet for that file
+in the same step.
 
 ```quint
 pure def selected(picked: List[int], s: Files): Files =
@@ -984,7 +993,8 @@ pure def cancelSelection(s: Files, by: Actor): Files = selected(List(), s)
 pure def alwaysTheSelectionIsListed(s: Files): bool = s.picked.every(id => has(s.items, id))
 
 pure def stepAChangedSelectionClosesTheSheets(before: Files, via: str, after: Files): bool =
-  after.picked != before.picked implies (after.change.panel == 0 and (not(after.sheet.open) or (via == "stagePreviewFile" and not(before.sheet.open))))
+  after.picked != before.picked implies (after.change.panel == 0
+    and (not(after.sheet.open) or (via == "stagePreviewFile" and not(before.sheet.open) and before.picked.length() == 0)))
 ```
 
 ### Deleting shows what goes to the Trash, and only a confirmation of the selection as shown hands it over

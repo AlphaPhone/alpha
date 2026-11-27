@@ -1,4 +1,4 @@
 // spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/index.md, "Story: Operate Alpha's own cloud"
 export { elizaCloudRoutes, tableProblems } from "./routes.vibe"
-export { assetLinks, entryOf, profileNamed, profiles, registrationAt } from "./alpha.vibe"
+export { assetLinks, entryOf, hostedDeployments, profileNamed, profiles, registrationAt } from "./alpha.vibe"
 export { hostedClouds, hostedProfileProblems } from "./hosted.vibe"

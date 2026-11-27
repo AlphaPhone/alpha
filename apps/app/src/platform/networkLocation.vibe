@@ -1,0 +1,116 @@
+// spec/app/platform/index.md, "Story: Know roughly where my phone is without GPS"; spec/app/platform/index.md, "A network position is asked only when one is needed now, reused for fifteen minutes, and kept for an hour while the same networks are seen"; spec/app/platform/index.md, "With too few networks seen, the plugin asks for the position of the phone's address alone, and that answer is never confirmed unchanged"; spec/app/platform/index.md, "A network position is taken only where it lies on the globe, has an accuracy, and is neither from the future nor over an hour old"
+import { confirmedUnchanged, lookupOf, positionTaken, retryAfter, stands } from "../../gen/app__platform.effect.vibe"
+import { Time } from "../runtime/index.vibe"
+
+module held {
+  import { Capacitor, registerPlugin } from "@capacitor/core"
+
+  /** What `AlphaNetworkLocation.locate` answers: a position and the fingerprint of the networks it was found from, or that those networks are unchanged. */
+  export type Located =
+    | { latitude: number; longitude: number; accuracy: number; timestamp: number; fingerprint: string }
+    | { unchanged: true; fingerprint: string }
+  /** Alpha's own plugin: one Wi-Fi and cell lookup, only when asked. */
+  export interface NetworkLocationPlugin {
+    locate(options: { unchangedFrom?: string }): Promise<Located>
+  }
+
+  let made: NetworkLocationPlugin | undefined
+  /** The plugin, registered once for the life of the page. @throws {never} */
+  export function plugin(): NetworkLocationPlugin {
+    return (made ??= registerPlugin<NetworkLocationPlugin>("AlphaNetworkLocation"))
+  }
+  /** Whether the phone's host registered the plugin. @throws {never} */
+  export function registered(): boolean {
+    return Capacitor.isPluginAvailable("AlphaNetworkLocation")
+  }
+}
+import { type Located, type NetworkLocationPlugin, plugin, registered } from held
+
+/** A position the networks around the phone gave, in whole millionths of a degree and meters, with the time it was found. */
+export interface NetworkFix {
+  readonly lat: number
+  readonly lng: number
+  readonly accuracy: number
+  readonly found: number
+}
+
+/** The phone's rough position from the networks it sees, for when GPS has none: looked up only when asked, and seldom. */
+export service NetworkLocation {
+  /** A position now, where one stands: the last one while it may be reused, else one lookup, shared with any lookup already under way. */
+  locate(): Option.Option<NetworkFix>!!
+  /** Forget every position, and the answer of any lookup under way. */
+  clear(): void!!
+}
+
+/** What the service remembers between lookups. */
+interface Memory {
+  fix: NetworkFix | undefined
+  fingerprint: string
+  checked: number
+  retryFrom: number
+  generation: number
+  pending: Fiber.Fiber<Option.Option<NetworkFix>> | undefined
+}
+
+const forgotten = (generation: number): Memory => ({ fix: undefined, fingerprint: "", checked: Number.MIN_SAFE_INTEGER, retryFrom: Number.MIN_SAFE_INTEGER, generation, pending: undefined })
+
+/** The position `answer` gives at `now`, where the platform's rule takes it. */
+export function fixOf(answer: Located, now: number): NetworkFix | undefined {
+  if ("unchanged" in answer) return undefined
+  const fix = { lat: Math.round(answer.latitude * 1e6), lng: Math.round(answer.longitude * 1e6), accuracy: Math.round(answer.accuracy), found: Math.round(answer.timestamp) }
+  return [answer.latitude, answer.longitude, answer.accuracy, answer.timestamp].every(Number.isFinite) && positionTaken(fix.lat, fix.lng, fix.accuracy, fix.found, now) ? fix : undefined
+}
+
+/** The service over `native`, where the host registered it, telling time by `time`. */
+export function networkLocationOver(native: NetworkLocationPlugin | undefined, time: Time.Shape) {
+  let memory = forgotten(0)
+  const standing = (now: number) => (memory.fix !== undefined && stands(true, now, memory.fix.found) ? Option.some(memory.fix) : Option.none<NetworkFix>())
+  effect function asked(now: number): Option.Option<NetworkFix>!! {
+    if (native === undefined) return Option.none()
+    const generation = memory.generation
+    const unchangedFrom = Option.isSome(standing(now)) && memory.fingerprint !== "" ? { unchangedFrom: memory.fingerprint } : {}
+    const answer = try Effect.option(tryPromise(() => native.locate(unchangedFrom)))
+    const at = try time.now()
+    if (generation !== memory.generation) return Option.none()
+    if (Option.isNone(answer)) {
+      memory = { ...memory, retryFrom: at + retryAfter }
+      return standing(at)
+    }
+    memory = { ...memory, checked: at }
+    if ("unchanged" in answer.value) return confirmedUnchanged(memory.fingerprint, answer.value.fingerprint) ? standing(at) : Option.none<NetworkFix>()
+    const fix = fixOf(answer.value, at)
+    if (fix === undefined) {
+      memory = { ...memory, retryFrom: at + retryAfter }
+      return standing(at)
+    }
+    memory = { ...memory, fix, fingerprint: answer.value.fingerprint }
+    return Option.some(fix)
+  }
+  const service: NetworkLocation.Shape = {
+    locate: () => effect {
+      const now = try time.now()
+      const fix = memory.fix
+      const lookup = lookupOf(native !== undefined, fix !== undefined, memory.fingerprint !== "", now, fix?.found ?? 0, memory.checked, memory.retryFrom)
+      if (lookup === "NoLookup") return Option.none<NetworkFix>()
+      if (lookup === "Reused" || lookup === "Waited") return standing(now)
+      const shared = memory.pending ?? (try fork.detached asked(now))
+      memory = { ...memory, pending: shared }
+      const found = try join shared
+      if (memory.pending === shared) memory = { ...memory, pending: undefined }
+      return found
+    },
+    clear: () => sync(() => { memory = forgotten(memory.generation + 1) }),
+  }
+  return service
+}
+
+/** On the phone: Alpha's `AlphaNetworkLocation` plugin, where its host registered it. */
+export const phoneNetworkLocation = Layer.effect(NetworkLocation, effect {
+  return networkLocationOver(registered() ? plugin() : undefined, try Time)
+})
+
+/** In a browser: no network position is looked up. */
+export const browserNetworkLocation = Layer.succeed(NetworkLocation, {
+  locate: () => succeed(Option.none<NetworkFix>()),
+  clear: () => Effect.void,
+})

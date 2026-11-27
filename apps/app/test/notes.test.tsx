@@ -196,7 +196,7 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.rows.length === 6);
   });
 
-  it("On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+  it(`On the launcher the notes list draws no Back, a note keeps its own and Android's Back still leaves (spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it")`, async () => {
     const world = { ...scene(), phone: true };
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha, runtime } = await openNotesFromHome(world);
@@ -271,7 +271,7 @@ describe("Notes", () => {
       .toEqual([version + 1, [deleted.id], [{ id: deleted.id, expectedRevision: version }]]);
   });
 
-  it("Keeps editor changes in the resident agent (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+  it('Keeps editor changes in the resident agent (spec/app/notes/editor.md, "Story: Write a note")', async () => {
     const world = scene();
     const { alpha, runtime } = await startFreshNote(world);
     await fill("Title", "Studio invoice");
@@ -287,7 +287,7 @@ describe("Notes", () => {
     expect(world.notes.notes.filter((row) => row.title === "Studio invoice").map((row) => row.body.trim())).toEqual(["Send by Monday"]);
   });
 
-  it("A new note's editor stays as it is typed and saved, and the list under it is not drawn again (spec/app/notes/editor.md, \"Story: Write a note\")", async () => {
+  it(`A new note's editor stays as it is typed and saved, and the list under it is not drawn again (spec/app/notes/editor.md, "Story: Write a note")`, async () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
@@ -327,7 +327,7 @@ describe("Notes", () => {
     await until(alpha, runtime, List, (s) => s.read.status === "Loaded" && s.version === world.notes.revision + 1);
   });
 
-  it("Pins the exact saved voice note from More (spec/app/notes/voice.md, \"Pinning writes the chosen flag over the revision shown\")", async () => {
+  it('Pins the exact saved voice note from More (spec/app/notes/voice.md, "Pinning writes the chosen flag over the revision shown")', async () => {
     const world = scene();
     const { alpha, runtime } = await openSavedVoiceNote(world);
     const saved = () => world.notes.notes.find((row) => row.id === "sync");
@@ -366,7 +366,7 @@ describe("Notes", () => {
     await rendered(() => expect(pinned()).toBe(false));
   });
 
-  it("Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, \"Story: Share the text of a saved voice note\")", async () => {
+  it('Copies only the exact saved voice note after choosing Copy text (spec/app/notes/voice.md, "Story: Share the text of a saved voice note")', async () => {
     const world = scene();
     await openSavedVoiceNote(world);
     const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
@@ -392,7 +392,7 @@ describe("Notes", () => {
     } finally { copy.mockRestore(); }
   });
 
-  it("Reviews the saved editor note before handing its text off (spec/app/notes/actions.md, \"Share reviews the saved note before an explicit destination receives its text\")", async () => {
+  it('Reviews the saved editor note before handing its text off (spec/app/notes/actions.md, "Share reviews the saved note before an explicit destination receives its text")', async () => {
     const world = scene();
     const { alpha, runtime } = await openNotesFromHome(world);
     await until(alpha, runtime, List, (state) => state.read.status === "Loaded");
@@ -431,7 +431,7 @@ describe("Notes", () => {
     } finally { copy.mockRestore(); }
   });
 
-  it("Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, \"Story: Select and delete notes\")", async () => {
+  it('Selects notes and only moves the reviewed notes after confirmation (spec/app/notes/index.md, "Story: Select and delete notes")', async () => {
     const world = scene();
     world.now = Date.now();
     const { alpha, runtime } = await selectingNotes(world);
@@ -472,7 +472,7 @@ describe("Notes", () => {
     await control("Open Groceries");
   });
 
-  it("Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, \"Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown\")", async () => {
+  it('Stops the reviewed selection on refusal and keeps the remaining notes selected (spec/app/notes/index.md, "Confirmation moves only the reviewed notes to Recently deleted and stops if a deletion is refused or unknown")', async () => {
     const world = scene();
     const { alpha, runtime } = await selectingNotes(world);
     await press("Select Enclave launch");
@@ -879,7 +879,7 @@ describe("Notes", () => {
     ]);
   });
 
-  it("The agent opens the note I named aloud (spec/app/assistant/context.md, \"A spoken turn carries what a typed turn sent at that moment would, the view claim included\"; spec/app/notes/index.md, \"The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened\")", async () => {
+  it(`The agent opens the note I named aloud (spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/notes/index.md, "The agent opens the one note the owner named, as the list last read it, once for the owner's current request, and is told whether it opened")`, async () => {
     const { world, alpha } = await startSpokenShoppingNote();
     world.ask.metadata = [];
     world.ask.nextReplyChunks = ["Here it is."];
@@ -897,7 +897,7 @@ describe("Notes", () => {
     });
   });
 
-  it("Keeps editor input mounted across first autosave, deletes a voice note from More, and closes open views when leaving Notes (spec/app/notes/editor.md, \"Story: Write a note\"; spec/app/notes/voice.md, \"Story: Leave a voice note\")", async () => {
+  it('Keeps editor input mounted across first autosave, deletes a voice note from More, and closes open views when leaving Notes (spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/voice.md, "Story: Leave a voice note")', async () => {
     const world = scene();
     const { alpha, runtime } = await startFreshNote(world);
     const titleInput = document.querySelector<HTMLInputElement>("input[aria-label='Title']");
@@ -922,7 +922,7 @@ describe("Notes", () => {
     await until(alpha, runtime, Voice, (state) => !state.showing);
   });
 
-  it("Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, \"Story: See my notes\")", () => {
+  it('Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, "Story: See my notes")', () => {
     expect(clock(Number.NaN)).toBe("0:00");
     expect(clock(-5)).toBe("0:00");
     expect(clock(65)).toBe("1:05");
@@ -931,7 +931,7 @@ describe("Notes", () => {
     expect(preview(bad)).toBe("");
   });
 
-  it("Empties all notes in Recently deleted when confirmed (spec/app/notes/trash.md, \"Story: Delete a note and get it back\")", async () => {
+  it('Empties all notes in Recently deleted when confirmed (spec/app/notes/trash.md, "Story: Delete a note and get it back")', async () => {
     const world = scene();
     world.now = Date.now();
     const first = world.notes.notes.pop();
@@ -981,7 +981,7 @@ describe("Notes", () => {
     expect(world.notes.trash).toEqual([]);
   });
 
-  it("Closes the Note Actions menu on hardware Back before closing the editor (spec/app/notes/actions.md, \"Back and leaving Notes close the menu, and so do a restart and another owner taking the phone\")", async () => {
+  it('Closes the Note Actions menu on hardware Back before closing the editor (spec/app/notes/actions.md, "Back and leaving Notes close the menu, and so do a restart and another owner taking the phone")', async () => {
     const world = scene();
     const { alpha, runtime } = await openLoadedNotes(world);
     await control("Open Enclave launch");

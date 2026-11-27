@@ -9,7 +9,7 @@ name: release
 # the spec does not allow.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
     inputs:
       candidate:

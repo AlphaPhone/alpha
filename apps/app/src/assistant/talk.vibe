@@ -4,7 +4,7 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
 import type { MediaCard, MediaNote } from "./media-review.vibe"
-import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
+import type { CutOff, Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/index.vibe"
 import type { CommsPrompt } from "../comms/index.vibe"
@@ -67,6 +67,9 @@ export interface TranscriptAttachment {
   readonly binding: Binding
 }
 
+/** A system notice the agent stored in a conversation's history, recognised from its fixed text. */
+export type StoredNotice = "model-unavailable" | "runtime-error" | "model-and-runtime-error"
+
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
   readonly id: string
@@ -78,6 +81,8 @@ export interface Line {
   readonly failure?: Failure
   /** The actions of the reply's failed steps the agent marked untold, in order, each drawn as Alpha's step notice. */
   readonly untold?: readonly string[]
+  /** A system notice stored by the agent instead of a reply, shown in Alpha's words. */
+  readonly notice?: StoredNotice
   readonly attachments?: readonly Attached[]
 }
 
@@ -126,8 +131,8 @@ export interface Seen {
   readonly replyUntold: readonly string[]
   /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
   readonly label: string
-  /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
-  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number; readonly messageId?: string } | undefined
+  /** Why the last reply did not finish, the fix the agent named, how long the provider asked to wait (-1 if none), and whether an action took effect before it was cut off. */
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number; readonly cutOff: CutOff; readonly messageId?: string } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   readonly files: readonly Attached[]
@@ -193,6 +198,12 @@ export interface Board {
   forgetPosition(): void
   /** The remembered position for `ticket`, if the locator still holds that ticket. */
   positionFor(ticket: number): Sighting | undefined
+  /** Keep a network `sighting` under the `ticket` the locator accepted. */
+  rememberNetwork(ticket: number, sighting: Sighting): void
+  /** Forget any remembered network position once the locator has none. */
+  forgetNetwork(): void
+  /** The remembered network position for `ticket`, if the locator still holds that ticket. */
+  networkFor(ticket: number): Sighting | undefined
   waitingRequest: (CommsRequest & { readonly ticket: number }) | undefined
   postingRequest: { readonly ticket: number; readonly request: CommsRequest } | undefined
   change(patch: Partial<Seen>): void
@@ -211,7 +222,7 @@ export interface Board {
   /** Keep the mutation target of the single typed writer until its stream's scope ends. */
   holdTurnPage(ticket: number): () => void
   /** Replace the loaded page, carrying only the words readers still hold, and close a newly redacted preview. */
-  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds: HistoryBounds, readers: readonly HistoryReference[]): number | undefined
+  takeHistory(ticket: number, conversation: number, lines: readonly Line[], redacted: ReadonlySet<string>, bounds: HistoryBounds, readers: readonly HistoryReference[], shape?: (page: ReadonlyArray<Line>) => ReadonlyArray<Line>): number | undefined
   append(ticket: number, conversation: number, line: Line): void
   rename(ticket: number, line: Line, id: string): void
   drop(ticket: number, line: Line): void
@@ -259,6 +270,7 @@ export const talk = Layer.effect(Talk, effect {
   const numbers = new Map<string, number>()
   const listeners = new Set<() => void>()
   let position: { readonly ticket: number; readonly sighting: Sighting } | undefined
+  let network: { readonly ticket: number; readonly sighting: Sighting } | undefined
   let loadedPage: number | undefined
   let turnPage: { readonly ticket: number } | undefined
   let readLines: readonly ReadLine[] = []
@@ -301,6 +313,9 @@ export const talk = Layer.effect(Talk, effect {
     rememberPosition: (ticket, sighting) => { position = { ticket, sighting } },
     forgetPosition: () => { position = undefined },
     positionFor: (ticket) => (position?.ticket === ticket ? position.sighting : undefined),
+    rememberNetwork: (ticket, sighting) => { network = { ticket, sighting } },
+    forgetNetwork: () => { network = undefined },
+    networkFor: (ticket) => (network?.ticket === ticket ? network.sighting : undefined),
     waitingRequest: undefined,
     postingRequest: undefined,
     change: (patch) => {
@@ -383,9 +398,10 @@ export const talk = Layer.effect(Talk, effect {
       pages.set(ticket, taken)
       board.change({ pages })
     },
-    takeHistory: (ticket, conversation, lines, redacted, bounds, readers) => {
+    takeHistory: (ticket, conversation, lines, redacted, bounds, readers, shape) => {
       const incoming = new Map(lines.map((line) => [line.id, line]))
-      const merged = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
+      const raw = [...lines, ...board.page(ticket).filter((line) => !incoming.has(line.id))]
+      const merged = shape === undefined ? raw : shape(raw)
       const preview = seen.preview
       if (preview !== undefined && previewOrigin === undefined) {
         for (const previous of seen.pages.values()) {
@@ -443,6 +459,7 @@ export const talk = Layer.effect(Talk, effect {
     messages.length = 0
     numbers.clear()
     position = undefined
+    network = undefined
     loadedPage = undefined
     turnPage = undefined
     readLines = []

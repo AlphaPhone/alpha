@@ -520,11 +520,29 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
 
+### The owner authorizes Gmail in Google and Inbox checks access on return
+
 Connect Gmail, Give access and Reconnect open Google's authorization for
 the same signed-in Cloud owner. The request covers reading, sending,
 saving drafts and organizing mail. Reconnecting keeps the selected
 account's existing Calendar access. Inbox checks the grants again on
 return and only uses the access Google actually granted.
+
+```quint
+pure val fullGmailRequest: Grant = { read: true, send: true, modify: true }
+
+pure def gmailAuthAdmitted(signedIn: bool, sameOwner: bool): bool = signedIn and sameOwner
+
+pure def reconnectKeepsCalendarAccess(hadCalendarAccess: bool, keepsCalendarAccess: bool): bool =
+  hadCalendarAccess implies keepsCalendarAccess
+
+pure def grantedGmailDeed(returnedGrant: Grant, deed: Deed): bool = allows(returnedGrant, deed)
+
+pure def lawGmailAuthUsesOnlyGranted(signedIn: bool, sameOwner: bool, grant: Grant, deed: Deed): bool =
+  (gmailAuthAdmitted(signedIn, sameOwner) implies (signedIn and sameOwner))
+    and allows(fullGmailRequest, deed)
+    and (grantedGmailDeed(grant, deed) iff allows(grant, deed))
+```
 
 ### Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out
 

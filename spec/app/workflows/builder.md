@@ -95,16 +95,9 @@ pure val stepsValues = Set(
   List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 },
        { op: T::ReadAloud, id: 2, source: 1, text: 0, items: 0, span: T::FixedDates, days: 1 }),
 )
-pure val weight_openBuilder = 2
-pure val weight_offerRead = 3
-pure val weight_rename = 2
-pure val weight_addStep = 3
-pure val weight_reviewSave = 3
-pure val weight_confirmSave = 3
 pure val weight_saveUnanswered = 3
 pure val weight_checkSave = 3
 pure val weight_saveChecked = 3
-pure val weight_letGo = 3
 pure val weight_reviewResend = 3
 pure val weight_confirmResend = 3
 ```
@@ -493,7 +486,8 @@ pure val eval_witness_canConfirmResend = (
 ### The draft is never edited while its save is kept, and a save is kept honestly
 
 Discovered by the proof: every save after the first has its own number;
-without it, one save could be counted twice.
+without it, one save could be counted twice, and a review shown is always
+of a named draft.
 
 ```quint
 pure def alwaysAKeptSaveLocksTheDraft(b: Builder): bool = and {
@@ -563,6 +557,36 @@ pure def sometimesASavedWorkflowIsEdited(b: Builder): bool = b.workflow >= 1 and
 
 pure def sometimesASaveIsLetGo(b: Builder): bool = b.save.attempt.outcome == A::Unknown and b.steps.length() >= 1
 
+pure val eval_witness_sometimesASaveIsApplied = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), ("saveAnswered", 1, true)
+)
+
+pure val eval_witness_sometimesALostSaveIsFound = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, true, false)
+)
+
+pure val eval_witness_sometimesASaveIsRefused = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false), ("saveAnswered", 1, false)
+)
+
+pure val eval_witness_sometimesASavedWorkflowIsEdited = (
+  ("ownerChanged", 1), ("openBuilder", 1, 1, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), ("confirmSave", false)
+)
+
+pure val eval_witness_canCancelSave = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("reviewSave", false), "cancelSave"
+)
+
 pure val eval_witness_sometimesASaveIsLetGo = (
   ("ownerChanged", 1),
   ("openBuilder", 0, 0, false),
@@ -628,4 +652,50 @@ pure def stepStepsChangeOnlyByTheOwner(before: Builder, via: str, after: Builder
   after.steps != before.steps implies
     (via == "addStep" or via == "removeStep" or via == "useGenerated" or via == "takeSaved" or via == "discard"
       or via == "offerRead" or via == "saveAnswered" or via == "saveChecked" or via == "ownerChanged")
+```
+
+## Story: Keep the workflow draft I was writing before this version
+
+> As the owner, I was partway through a workflow draft when Alpha updated, and I want to find it
+> when I next open a new workflow: once, never over a draft I wrote since, and never lost in the move.
+
+### The previous version's draft comes in once, only while none is kept, and its slot clears only after the kept draft reads back
+
+The earlier Alpha kept one unsaved workflow draft per agent in the connection plugin's encrypted
+slot `workflow-draft:v1:` followed by the SHA-256 of the JSON `[origin, owner, agent]` of the
+resident session it was written under. When the draft builder opens on the phone, that slot is read.
+A draft for this session, of the previous format, whose steps this version reads as a phone workflow,
+is kept as this version's draft only when this phone keeps no draft of its own: a draft written
+since wins, and the previous one waits in its slot until none is kept. A draft whose save the
+previous version had sent and not yet seen answered comes in with that save kept under its own
+mutation id, so the first thing offered is asking the agent for it, never a second save. The slot is
+cleared only once the draft this phone keeps reads back as exactly that draft, so a draft taken in
+whose slot could not be cleared is never taken in a second time; a slot that cannot be read as such
+a draft is never cleared. The draft is taken in only while the agent's phone catalog can be read,
+since a draft is kept with the compiler revision it is saved under. A development browser build
+never kept one, so nothing moves there.
+
+```quint
+type PreviousDraft = NoPreviousDraft | UnreadablePreviousDraft | PreviousDraftHeld | PreviousSaveSent
+
+pure def previousDraftAdopted(previous: PreviousDraft, kept: bool): bool =
+  not(kept) and (previous == PreviousDraftHeld or previous == PreviousSaveSent)
+
+pure def previousDraftSlotClears(previous: PreviousDraft, readBack: bool): bool =
+  (previous == PreviousDraftHeld or previous == PreviousSaveSent) and readBack
+
+pure def previousSaveKept(previous: PreviousDraft, kept: bool): bool =
+  previousDraftAdopted(previous, kept) and previous == PreviousSaveSent
+
+pure val previousValues = Set(NoPreviousDraft, UnreadablePreviousDraft, PreviousDraftHeld, PreviousSaveSent)
+pure val readBackValues = Set(true, false)
+
+pure def lawADraftWrittenSinceIsNeverReplaced(previous: PreviousDraft): bool =
+  not(previousDraftAdopted(previous, true))
+
+pure def lawAnUnreadableDraftStaysInItsSlot(readBack: bool): bool =
+  not(previousDraftSlotClears(UnreadablePreviousDraft, readBack))
+
+pure def lawTheSlotClearsOnlyOnceTheDraftReadsBack(previous: PreviousDraft): bool =
+  not(previousDraftSlotClears(previous, false))
 ```

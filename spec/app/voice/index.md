@@ -168,6 +168,20 @@ is still sent to the agent as a text turn using its configured backend.
 ```quint
 pure def alwaysIdleVoiceHoldsNoMicrophone(v: Voice): bool =
   v.phase == Idle implies v.mic == Off
+
+pure def nativeCaptureAdmitted(
+  engineReady: bool, residentRouteReady: bool, sameOwner: bool, sameEpoch: bool, captureActive: bool
+): bool =
+  engineReady and residentRouteReady and sameOwner and sameEpoch and captureActive
+
+pure def nativeTranscriptAdmitted(sameOwner: bool, sameEpoch: bool, captureActive: bool): bool =
+  sameOwner and sameEpoch and captureActive
+
+pure def lawNativeTalkRequiresCurrentOwnerEpochAndReadiness(
+  engineReady: bool, residentRouteReady: bool, sameOwner: bool, sameEpoch: bool, captureActive: bool
+): bool =
+  (not(engineReady) or not(residentRouteReady) or not(sameOwner) or not(sameEpoch) or not(captureActive))
+    implies not(nativeCaptureAdmitted(engineReady, residentRouteReady, sameOwner, sameEpoch, captureActive))
 ```
 
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
@@ -671,13 +685,14 @@ pure def stepReviewKeepsVoiceAndMicrophoneOpen(before: Voice, via: str, after: V
 ### A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does
 
 Cloud's own code for an account with no plan allowance and no credits
-left decides it, never the owner's words. Nothing of the turn is spoken,
-voice shows no text of its own about it, and it does not listen again:
-the conversation shuts down as Stop shuts it.
+left decides it, never the owner's words — whether Cloud refuses a spoken
+turn or refuses real-time Talk startup or streaming. Nothing of the turn is
+spoken, and voice does not listen again or loop on fallback: the
+conversation shuts down as Stop shuts it.
 
 ```quint
 pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
-  (v.phase == Thinking or v.phase == Speaking) and session == v.session and turn == v.turn and not(v.replied)
+  talking(v) and v.mic != Asking and not(v.disclosing) and session == v.session and turn == v.turn and not(v.replied)
 
 pure def refusedForFunds(v: Voice, session: int, turn: int): Change = shutDown(D::NoFailure, false, v)
 
@@ -739,6 +754,19 @@ of that conversation. Opening older history keeps its place.
 ```quint
 pure def alwaysSentTurnsBelongToASession(v: Voice): bool =
   v.sent > 0 implies v.session > 0
+
+pure def talkCreatesBlankConversation(
+  hasSelectedChat: bool, editorEmpty: bool, sendInFlight: bool
+): bool =
+  not(hasSelectedChat) and editorEmpty and not(sendInFlight)
+
+pure def talkTurnCanPost(sendInFlight: bool): bool = not(sendInFlight)
+
+pure def lawTalkRespectsSelectedChatAndExclusivePostSlot(
+  hasSelectedChat: bool, editorEmpty: bool, sendInFlight: bool
+): bool =
+  (hasSelectedChat implies not(talkCreatesBlankConversation(hasSelectedChat, editorEmpty, sendInFlight)))
+    and (sendInFlight implies not(talkTurnCanPost(sendInFlight)))
 ```
 
 ### What was heard but not sent is never counted as sent
@@ -1066,6 +1094,19 @@ before the file action.
 ```quint
 pure def alwaysNavigationClaimRequiresTalking(v: Voice): bool =
   v.claim != 0 implies talking(v)
+
+pure def spokenFilesNavigationAdmitted(
+  sameVoiceTurn: bool, sameSourceScreen: bool, directActionPermitted: bool,
+  retiredByOwnerOrStop: bool, alreadyFollowed: bool
+): bool =
+  sameVoiceTurn and sameSourceScreen and directActionPermitted
+    and not(retiredByOwnerOrStop) and not(alreadyFollowed)
+
+pure def lawSpokenFilesNavigationRunsAtMostOnceWhileActive(
+  sameVoiceTurn: bool, sameSourceScreen: bool, directActionPermitted: bool
+): bool =
+  not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, true, false))
+    and not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, false, true))
 ```
 
 ### A navigation claim is released when the shell does not open its destination
@@ -1102,7 +1143,18 @@ pure def alwaysAClaimBelongsToAnActiveConversation(v: Voice): bool =
 
 pure def sometimesFollowedItsNavigation(v: Voice): bool = v.followed != 0 and talking(v)
 
+pure val eval_witness_sometimesFollowedItsNavigation = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true)
+)
+
 pure def sometimesFollowedAgentNavigationWhileListening(v: Voice): bool = v.phase == Listening and v.followed != 0 and v.mic == On
+
+pure val eval_witness_sometimesFollowedAgentNavigationWhileListening = (
+  ("startTalking", 0), ("answerPrompt", true), ("micOpened", 1), ("speechHeard", 1),
+  ("turnEnded", 1), ("micClosed", 1), ("agentNavigates", 1, 1, 1, 0), ("navigated", 1, 1, true),
+  ("replyEnds", 1, 1, false, false), ("micOpened", 1)
+)
 ```
 
 ## Story: Choose where my speech goes

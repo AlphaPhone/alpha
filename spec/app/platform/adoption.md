@@ -94,8 +94,10 @@ one that could not be copied, the reading gives the earlier value as it
 is, and the move is tried again at the next reading: a text or action
 recorded only there is never taken as absent and done a second time. One
 that cannot be read at all stays where it is, and the reading goes on
-from this Alpha's store. Removing such a slot from this Alpha's store
-clears its earlier place too.
+from this Alpha's store, except the texts' journal while this Alpha's store
+holds none: its reading fails until the earlier one can be read, so no
+text is sent meanwhile ([Sending](../messages/sending.md)). Removing such a
+slot from this Alpha's store clears its earlier place too.
 
 ```quint
 type JournalReading = ReadsCurrent | ReadsEarlier
@@ -116,6 +118,7 @@ pure def lawAJournalHeldOnlyInTheEarlierStoreIsNeverReadAsEmpty(copied: bool): b
 | `workflow-notice-delivery:v1`, `workflow-approval-notices:v1`, `workflow-notice-taps:v1`, `workflow-notice-owner:v1` | [Notices](../notices/) | moved the first time it is read |
 | `inbox-drafts:v1:…`, `inbox-operation:v1:…` | [Inbox](../inbox/) | the area's to move, through `AlphaConnection` |
 | `sms-draft:v1:new`, `sms-draft:v1:thread:…` | [Messages](../messages/) | the area's to move, through `AlphaConnection` |
+| `alpha-sms-operation:claim:v1:…` | [Messages](../messages/) | left unread: this Alpha sends a text the owner approved in a chat under that approval's own number, so an approval names one send only, and the journal, moved, refuses a number it holds |
 | `assistant-draft:v1:…`, `alpha-proposal:v1`, `stage-session:v1` | [Assistant](../assistant/) | the area's to move, through `AlphaConnection` |
 | `workflow-draft:v1:…`, `clock-handoff:v1:device` | [Workflows](../workflows/) | the area's to move, through `AlphaConnection` |
 | `reminder-creations:v1:device`, `reminder-deletions:v1:device` | [Reminders](../reminders/) | the area's to move, through `AlphaConnection` |

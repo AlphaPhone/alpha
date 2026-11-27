@@ -33,6 +33,7 @@ export function textReview(agentId: string, id: string, operation: ReviewOperati
     journal: new Map<string, JournalEntry>(),
     confirmations: [] as Confirmation[],
     decisions: [] as string[],
+    rejections: [] as string[],
     decisionGate: undefined as Promise<void> | undefined,
     claims: [] as string[],
     receipts: [] as unknown[],
@@ -131,7 +132,7 @@ export function textReviewRoute(review: TextReviewScene, subjectUserId: string):
         return Response.json({ digest: proposal.digest, proposal });
       }
       if (step === "decision" && proposal.state === "pending" && body.decision === "reject") {
-        review.decisions.push(proposal.id);
+        review.rejections.push(proposal.id);
         await review.decisionGate;
         proposal.state = "rejected";
         return Response.json({ digest: proposal.digest, proposal });

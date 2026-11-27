@@ -121,6 +121,19 @@ pure def moveToTrash(s: Trash, items: List[int], approval: int, by: Actor): Move
 pure def alwaysItemsWaitOnlyBehindAJob(s: Trash): bool = s.waiting.length() > 0 implies busy(s)
 ```
 
+### A job holds entries only while it is running, and clears the read, marks and details until it finishes
+
+Discovered by the proof: once a job has ended or been cut by a restart, no
+entries remain on the idle job, so starting the next job cannot drop anything
+an unseen Trash still kept; and while a job runs, the previous read, marks and
+item details remain cleared.
+
+```quint
+pure def alwaysAJobHoldsEntriesOnlyWhileRunning(s: Trash): bool =
+  (not(busy(s)) implies s.job.entries.length() == 0)
+    and (busy(s) implies (s.listing.status == R::Idle and s.marked.length() == 0 and s.details == 0))
+```
+
 ### A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown
 
 What a job brought back or erased leaves the list at once, and what went in

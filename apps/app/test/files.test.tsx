@@ -634,7 +634,7 @@ describe("Files on a phone", () => {
 
   });
 
-  it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
+  it('Offer the file I am looking at to Inbox (spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/inbox/adding.md, "Story: Add files and people to my draft")', async () => {
     const { alpha, runtime, world } = await onFiles(undefined, "view:Inbox");
     const content = "A reviewed attachment";
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
@@ -1030,9 +1030,13 @@ describe("Files on a phone", () => {
       { key: "selected:a", kind: "selected", name: "lease.pdf", mimeType: "application/pdf", openedAt: 2, status: "ready", selectionId: leaseSelection },
       { key: "selected:b", kind: "selected", name: "gone.txt", mimeType: "text/plain", openedAt: 3, status: "revoked", selectionId: "b" },
     ]));
+    world.files.selections.set("b", { volume: "primary", path: "Download/gone.txt", canRename: true });
+    world.files.selections.set("c", { volume: "primary", path: "Documents/notes.txt", canRename: true });
+    localStorage.setItem("alpha.files.open.v1", "c");
     const first = await onFiles(world);
     await until(first.alpha, first.runtime, Recent, (s) => s.rows.length === 1 && s.rows[0]?.origin === "Picked");
     expect(localStorage.getItem("alpha.files.recent.v1")).toBeNull();
+    await vi.waitFor(() => expect([[...world.files.forgotten].sort(), localStorage.getItem("alpha.files.open.v1")]).toEqual([["b", "c"], null]));
     await until(first.alpha, first.runtime, Browser, (s) => s.open && s.storage.status === "Loaded");
     await press("lease.pdf");
     await until(first.alpha, first.runtime, Shown, (s) => s.drawing.status === "Loaded" && s.kind === "Pdf" && s.revision === 5);
@@ -1206,7 +1210,7 @@ describe("Files on a phone", () => {
     await hardware("home");
   });
 
-  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
+  it('Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/trash.md, "Story: Delete into the Trash")', async () => {
     const { alpha, runtime, world } = await onDownloads();
 
     const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
@@ -1237,7 +1241,7 @@ describe("Files on a phone", () => {
     expect(world.files.trash.map((one) => one.was.path).toSorted()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
   });
 
-  it("Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, \"A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown\")", async () => {
+  it('Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown")', async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     world.files.trash.push(

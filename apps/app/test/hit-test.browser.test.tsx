@@ -27,7 +27,7 @@ function numericZIndex(element: Element | null): number {
 }
 
 describe("Browser hit-test", () => {
-  // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"; spec/app/notices/toasts.md, "Story: Read a toast before it goes"
+  // spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"; spec/app/notices/toasts.md, "Story: Read a toast before it goes"
   it("layers Home, Ask Alpha, Attach sheet, and Toast", async () => {
     await page.viewport(390, 844);
     const { alpha } = await open(scene(), only("home", "assistant", "notice", "view:Browser", "view:Settings"));
@@ -101,7 +101,7 @@ describe("Browser hit-test", () => {
     expect(visited.size).toBeGreaterThanOrEqual(2);
   });
 
-  // spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
+  // spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A press that did not move taps its control once"
   it("expands Ask Alpha via real pointer drag", async () => {
     await page.viewport(390, 844);
     const { alpha } = await open(scene(), only("home", "assistant"));
@@ -126,7 +126,7 @@ describe("Browser hit-test", () => {
     await expect.poll(() => document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']")?.getAttribute("data-alpha-detent")).toBe("full");
   });
 
-  // spec/app/maps/index.md, "Story: Find a place on the map"
+  // spec/app/maps/index.md, "Story: Search for a place"
   it("mounts Maps with hit-testable controls", async () => {
     await page.viewport(390, 844);
     const uncaught: string[] = [];

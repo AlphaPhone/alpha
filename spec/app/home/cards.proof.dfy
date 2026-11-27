@@ -215,7 +215,7 @@ lemma lawTheCardShowsOnlyWhatMayBeOnIt_ensures(cards: Cards, now: int, others: O
   var cs := candidates(cards, others);
   CandidatesView(cards, others);
   LeadFacts(cs, now);
-  forall i | i in lead(cs, now) ensures !(i.done) && !(i.origin.PhoneCalendar? && (i.calendar in others.hidden)) {
+  forall i | i in lead(cs, now) ensures !(i.done) && !(hiddenItem(i, others)) {
     ProofLib.FilterMember((i: Item) => onCard(i, others), ((cards.calendar.items + cards.agent.items) + ProofLib.Filter((r: Item) => r.origin.Reminder?, others.reminders)), i);
   }
 }

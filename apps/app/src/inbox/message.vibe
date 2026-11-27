@@ -7,7 +7,7 @@ import * as Marking from "../../gen/app__inbox__marking.effect.vibe"
 import type { Effect as MarkOut, Event as MarkEvent } from "../../gen/app__inbox__marking.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
-import { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe"
+import { Machine as Preferences, loadsImages } from "../../gen/app__settings__preferences.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { MailContextRefused } from "@elizaos/plugin-inbox-client"
@@ -63,7 +63,8 @@ effect function read(ticket: number, account: number, message: number, position:
     }
     return undefined
   }
-  const found = place === "SelectedMessage" || anchor === undefined
+  const authoritative = place === "SelectedMessage" || anchor === undefined
+  const found = authoritative
     ? (Effect.map(effect { return (try prepared) ?? (try body(account, message)) }, (loaded) => ({ body: loaded, position: 0, thread: 1 })) catch (cause) => faultOf(cause))
     : (threadMessage(account, anchor, position, place) catch (cause) => threadFault(cause))
   const mailbox = try list.get()
@@ -71,7 +72,7 @@ effect function read(ticket: number, account: number, message: number, position:
   const access = accessOf(mailbox, account)
   if (typeof found === "string") return failedRead(ticket, access, found)
   const number = try ledger.remember(account, found.body.message)
-  ledger.read(ticket, found.body)
+  ledger.read(ticket, found.body, authoritative)
   return {
     type: "loaded", ticket, access, ok: true, fault: "Fine", revision: revisionOf(found.body.message),
     message: number, position: found.position, thread: found.thread,
@@ -216,7 +217,7 @@ const access = started(effect {
     // spec/app/inbox/message.md, "While the list shows its saved copy and access is being checked or offline, a message saved on the phone opens from there, marked as saved"
     if (shown.fromPhone) {
       if (known) {
-        const remote = (try (try Preferences).get()).images
+        const remote = loadsImages(try (try Preferences).get())
         try contained(view.send({ type: "accessKnown", access, remote }), "access known")
       } else if (!saved) try contained(view.send({ type: "close" }), "closing the saved message")
       return
@@ -245,7 +246,7 @@ const openedUnread = started(effect {
     const current = try view.get()
     const body = ledger.body(state.body.ticket)
     if (current.body.ticket !== state.body.ticket || current.body.status !== "Loaded" || mailbox.selected.account !== state.account || body === undefined) return
-    try ignore(forkChild(ledger.keepBody(mailbox, body)))
+    if (ledger.authoritative(state.body.ticket)) try ignore(forkChild(ledger.keepBody(mailbox, body)))
     if (!body.message.isUnread) return
     try ignore(marks.send({
       type: "openedUnread", access: accessOf(mailbox, state.account), account: state.account, message: state.message,

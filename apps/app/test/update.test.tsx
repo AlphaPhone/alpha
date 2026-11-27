@@ -232,7 +232,7 @@ describe("Updates", () => {
     await first.close();
     world.now += 60_000;
     const { alpha } = await open(world);
-    // spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+    // spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.installed === 120 && s.permission === "Required");
     expect([(await updatesOf(alpha)).offer.release.version, world.update.checks.length]).toEqual([121, 1]);
   });
@@ -313,7 +313,7 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     expect(world.update.health.length).toBe(reconnects);
   });
 
-  it("a page that cannot read the update holds, and a browser has no update to wait for (spec/app/update/page.md, \"A page that cannot read the update state holds rather than mount\")", async () => {
+  it('a page that cannot read the update holds, and a browser has no update to wait for (spec/app/update/page.md, "A page that cannot read the update state holds rather than mount")', async () => {
     const world = { ...scene(), phone: true };
     world.update.stateUnreadable = true;
     const { alpha } = await open(world);

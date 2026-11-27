@@ -18,6 +18,7 @@ export const meta: ComponentMeta<InboxSendOutcomeProps> = {
     "Found in Sent": { outcome: "foundSent", onCheckSent: undefined, onSendAgain: undefined },
     "Not found in Sent": { outcome: "notSent", onCheckSent: undefined },
     "Already checked": { onCheckSent: undefined },
+    "Earlier Alpha's send": { earlier: true, onCheckSent: undefined, onSendAgain: undefined },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

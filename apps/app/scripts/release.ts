@@ -251,7 +251,7 @@ const anonymousRead = (url: string, bound: number) => Effect.tryPromise({
     let at = url;
     for (let hop = 0; hop <= REDIRECTS; hop++) {
       if (!anonymous(at)) throw new Error(`${at} is not an anonymous HTTPS address`);
-      const response = await fetch(at, { redirect: "manual" });
+      const response = await fetch(at, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(30_000) });
       const next = response.headers.get("location");
       if (response.status >= 300 && response.status < 400 && next !== null) {
         await response.body?.cancel();
@@ -281,7 +281,15 @@ const repository = `--repo=${channelRepository}`;
 /** The channel on GitHub: its stable release through `gh`, and what anyone downloads from it. */
 export const githubChannel: ChannelPort = {
   listed: Effect.map(gh("release", "view", channelTag, repository, "--json", "assets", "--jq", ".assets[].name"), (names) => names.split("\n").filter((name) => name !== "")),
-  upload: (file, name, clobber) => gh("release", "upload", channelTag, `${file}#${name}`, ...(clobber ? ["--clobber"] : []), repository),
+  upload: (file, name, clobber) => Effect.gen(function* () {
+    const resolved = resolve(file);
+    if (resolved.includes("#")) return yield* new ReleaseRefused({ message: "upload file paths must not contain '#'" });
+    const repoId = Number((yield* gh("api", `repos/${channelRepository}`, "--jq", ".id")).trim());
+    if (repoId !== channelRepositoryId) {
+      return yield* new ReleaseRefused({ message: `${channelRepository} resolved to repository id ${repoId}, expected ${channelRepositoryId}` });
+    }
+    return yield* gh("release", "upload", channelTag, ...(clobber ? ["--clobber"] : []), repository, "--", `${resolved}#${name}`);
+  }),
   read: anonymousRead,
   recordFile: SIGNER,
 };
@@ -289,8 +297,17 @@ export const githubChannel: ChannelPort = {
 const text = (served: Served) => new TextDecoder().decode(served.bytes);
 
 /** The version the stable manifest names now, or 0 where there is none. */
-const named = (port: ChannelPort) => Effect.map(Effect.exit(port.read(manifestUrl(), MANIFEST_BYTES)), (read) =>
-  read._tag === "Success" ? (JSON.parse(text(read.value)) as { readonly versionCode?: number }).versionCode ?? 0 : 0);
+const named = (port: ChannelPort) => Effect.gen(function* () {
+  const read = yield* Effect.exit(port.read(manifestUrl(), MANIFEST_BYTES));
+  if (read._tag !== "Success") return 0;
+  const parsed = yield* attempt(() => JSON.parse(text(read.value)) as { readonly versionCode?: unknown });
+  if (parsed === null || typeof parsed !== "object") return yield* new ReleaseRefused({ message: "the channel manifest is not a JSON object" });
+  if (parsed.versionCode === undefined) return 0;
+  if (typeof parsed.versionCode !== "number" || !Number.isSafeInteger(parsed.versionCode) || parsed.versionCode < 0) {
+    return yield* new ReleaseRefused({ message: `the channel manifest has invalid versionCode ${JSON.stringify(parsed.versionCode)}` });
+  }
+  return parsed.versionCode;
+});
 
 /** The versions of the APKs the channel keeps, `alpha-phone-<version>.apk`, whoever uploaded them. */
 const retainedVersions = (names: readonly string[]) =>
@@ -651,7 +668,7 @@ function startedAgent(adb: Adb, user: string): Pilot.Agent {
   const log = quiet(adb, ["shell", "logcat", "-v", "epoch", "-T", `${since}.000`, "-s", "ElizaAgent:V", "-e", `'${word}'`, "-m", "1"]);
   if (AGENT_REFUSED.test(log)) return "RefusedStart";
   if (AGENT_RUNNING.test(log)) return "Running";
-  return running(adb).includes(PACKAGE) && !/ElizaAgentService/.test(adb(["shell", "dumpsys", "activity", "services", PACKAGE])) ? "NotVerified" : "NotRunning";
+  return running(adb).includes(PACKAGE) && !/AlphaAgentService/.test(adb(["shell", "dumpsys", "activity", "services", PACKAGE])) ? "NotVerified" : "NotRunning";
 }
 
 /** Claims the phone named by `serial` for one run, until the returned release is called. */

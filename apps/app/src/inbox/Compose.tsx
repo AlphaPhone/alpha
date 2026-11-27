@@ -58,6 +58,9 @@ function outcomeOf(ops: Operations, state: Composer): InboxSendOutcomeProps["out
   if (ops.draft === letter.id && ops.kind === "Send" && ops.of === ops.session) {
     const outcome = ops.attempt.outcome;
     if (outcome === "Recorded" || outcome === "Sent") return "sending";
+    if ((outcome === "Unknown" || outcome === "Refused" || outcome === "Confirmed") && letter.doubt.attempt === 0 && state.checked.includes(ops.attempt.id)) {
+      return letter.sent === 0 ? "notSent" : "foundSent";
+    }
     if (outcome === "Confirmed") return "sent";
     if (outcome === "Refused") return ops.withdrawn ? "stopped" : "refused";
     if (outcome === "Unknown") return "unknown";
@@ -207,8 +210,8 @@ export function Compose({ runtime, list }: ComposeProps) {
   const outcomeProps: InboxSendOutcomeProps | undefined = outcomeKind === undefined ? undefined : {
     outcome: outcomeKind,
     checking: checkingSent,
-    onCheckSent: checkingSent || can(checkSent, "Owner") ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
-    onSendAgain: (mayHaveGone(letter) || outcomeKind === "unknown") && !checkingSent && ops.can(sendingAgain, "Owner") ? () => void ops.send(sendingAgain, "Owner") : undefined,
+    onCheckSent: checkingSent || (outcomeKind === "unknown" && can(checkSent, "Owner")) ? () => { if (!checkingSent) void send(checkSent, "Owner"); } : undefined,
+    onSendAgain: outcomeKind !== "sending" && outcomeKind !== "sent" && !checkingSent && ops.can(sendingAgain, "Owner") && !ops.can(sending, "Owner") ? () => void ops.send(sendingAgain, "Owner") : undefined,
     onDismiss: ops.can(dismissOutcome, "Owner") ? () => void ops.send(dismissOutcome, "Owner") : undefined,
   };
   const aside = { type: "setAside" } as const;
@@ -234,7 +237,7 @@ export function Compose({ runtime, list }: ComposeProps) {
   };
   const sendAction = ops.can(sending, "Owner")
     ? () => void ops.send(sending, "Owner")
-    : mayHaveGone(letter) && ops.can(sendingAgain, "Owner")
+    : mayHaveGone(letter) && outcomeProps?.onSendAgain === undefined && ops.can(sendingAgain, "Owner")
       ? () => void ops.send(sendingAgain, "Owner")
       : undefined;
   return (
@@ -276,7 +279,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         clash={clash}
         onRestoreMine={copy?.seen && can({ type: "restoreMine" }, "Owner") ? () => void runtime.runPromise(restoreMyEdits()) : undefined}
         onUseSaved={latest && can(latest, "Owner") ? () => void runtime.runPromise(chooseLatestSavedDraft()) : undefined}
-        sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
+        sent={letter.sent !== 0 ? (letter.sent === letter.revision ? "already" : "earlier") : letter.doubt.attempt === 0 && letter.doubt.revision !== 0 ? "maybe" : "none"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
         onSend={sendAction}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}

@@ -170,6 +170,8 @@ pure def alwaysCanonicalRowBelongsToThisRun(r: Recovery): bool =
 
 ### The phone claims the row only when no other process holds its lease, and then looks at what is there
 
+A canonical pending receipt is never looked up as an earlier run's row: claiming it moves straight to finishing it or leaving it for the owner.
+
 ```quint
 pure def canClaim(r: Recovery, free: bool, by: Actor): bool = by == Phone and r.stage == Found and free
 
@@ -179,6 +181,8 @@ pure def claim(r: Recovery, free: bool, by: Actor): Moved =
     (if (r.row.deferred) leftForOwner(r.attempt, r) else act(FinishCanonical, false, r))
   else { state: { ...r, stage: Claimed, look: look },
     out: List(Inspects({ ticket: look.ticket, owner: r.owner, note: r.row.note, recording: r.row.recording })) }
+
+pure def alwaysACanonicalRowIsNeverClaimedForALook(r: Recovery): bool = r.stage == Claimed implies r.row.operation == ""
 ```
 
 ### What the phone finds decides the plan: one it can carry out, or a review for the owner, which the row then keeps

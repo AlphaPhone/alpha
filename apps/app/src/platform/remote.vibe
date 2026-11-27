@@ -1,23 +1,56 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"
+// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"; spec/app/platform/index.md, "A refusal carries the time the other side named for its allowance to come back, and a reader takes it only while it lies ahead"
 import * as Sse from "effect/encoding/Sse"
-import { replied, waitAdvised } from "../../gen/app__platform.effect.vibe"
+import { replied, resetAhead, waitAdvised } from "../../gen/app__platform.effect.vibe"
 import { Attempts } from "../runtime/index.vibe"
 
 /** The request provably never left Alpha: its route is not one the phone relays, or the bridge was busy or is not there. */
 export error Unsent { cause: unknown }
 /** The other side could not be reached, did not answer in time, or stopped mid-answer: it may have acted. */
 export error Unreachable { cause: unknown }
-/** The other side answered with a status other than 2xx, how many seconds it asked Alpha to wait, where it asked, and the reason it named, where Alpha reads one. */
-export error Refused { status: number; wait?: number; reason?: string }
+/**
+ * The other side answered with a status other than 2xx, how many seconds it asked Alpha to wait, where it asked, the
+ * reason it named, where Alpha reads one, and when it said its allowance comes back, in epoch milliseconds, where it
+ * named that.
+ */
+export error Refused { status: number; wait?: number; reason?: string; resetAt?: number }
+
+module web {
+  /** An instant `named` as epoch milliseconds or an ISO instant, as a whole number of milliseconds, where it is one. @throws {never} */
+  function instantOf(named: unknown): number | undefined {
+    const at = typeof named === "number" ? named : typeof named === "string" && named.trim() !== "" ? Date.parse(named) : Number.NaN
+    return Number.isSafeInteger(at) && at > 0 ? at : undefined
+  }
+  /** The `resetAt` a refusal's body names at its top or under its `error`. @throws {never} */
+  export function resetNamed(body: string | undefined): number | undefined {
+    if (body === undefined || body === "") return undefined
+    let read: unknown
+    try {
+      read = JSON.parse(body)
+    } catch {
+      return undefined
+    }
+    if (typeof read !== "object" || read === null) return undefined
+    const error = (read as { error?: unknown }).error
+    return instantOf((read as { resetAt?: unknown }).resetAt) ?? (typeof error === "object" && error !== null ? instantOf((error as { resetAt?: unknown }).resetAt) : undefined)
+  }
+}
+import { resetNamed } from web
 
 /**
  * The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole
- * seconds, or seconds already read; and with the `reason` the other side named, where it named one.
+ * seconds, or seconds already read; with the `reason` the other side named, where it named one; and the reset its
+ * `body` names, where it names one.
  */
-export function refusal(status: number, said: string | number | undefined, reason?: string): Refused {
+export function refusal(status: number, said: string | number | undefined, reason?: string, body?: string): Refused {
   const seconds = typeof said === "number" ? said : said !== undefined && /^\d+$/.test(said.trim()) ? Number(said.trim()) : undefined
   const wait = seconds !== undefined && waitAdvised(status, Number.isSafeInteger(seconds), seconds) ? { wait: seconds } : {}
-  return new Refused({ status, ...wait, ...(reason === undefined ? {} : { reason }) })
+  const resetAt = resetNamed(body)
+  return new Refused({ status, ...wait, ...(reason === undefined ? {} : { reason }), ...(resetAt === undefined ? {} : { resetAt }) })
+}
+
+/** When the allowance `refused` names comes back, where that is still after `now`. */
+export function resetOf(refused: Refused, now: number): number | undefined {
+  return refused.resetAt !== undefined && resetAhead(true, refused.resetAt, now) ? refused.resetAt : undefined
 }
 
 /** The other side answered 2xx with something that is not what was asked for. */
@@ -125,7 +158,7 @@ export effect function remoteAt(base: string): Wired!!HttpClient.HttpClient {
   }
   effect function answered(request: HttpClientRequest.HttpClientRequest): Opened!(Unreachable | Refused) {
     const opened = try open(request)
-    if (!replied(opened.status)) throw refusal(opened.status, opened.headers["retry-after"])
+    if (!replied(opened.status)) throw refusal(opened.status, opened.headers["retry-after"], undefined, try (opened.text |> timeout(%, patience) |> Effect.orElseSucceed(%, () => "")))
     return opened
   }
   return {

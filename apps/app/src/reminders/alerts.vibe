@@ -88,13 +88,21 @@ effect function cancelNative(item: ReminderItemRecord): void!!(PhoneReminders | 
   const phone = try PhoneReminders
   const remembered = ledger.armedNative.get(item.id)
   ledger.armedNative.delete(item.id)
-  if (phone.present) {
-    const occurrenceId = remembered?.occurrenceId ?? `${item.id}:${item.updatedAtMs}`
-    const revision = remembered?.revision ?? String(item.revision)
-    const bindingHash = remembered?.bindingHash ?? `${item.id}:${revision}`
-    const target = { sourceId: item.id, sourceRevision: revision, reminderId: item.id, occurrenceId, revision }
-    try ignore(phone.cancel({ id: item.id, target, operationId: `cancel-${item.id}-${revision}`, bindingHash }))
+  if (!phone.present) return
+  const list = phone.list() catch () => undefined
+  const alarm = list?.reminders.find((row) => row.id === item.id && row.target.reminderId === item.id && row.target.occurrenceId === row.occurrenceId)
+  if (alarm !== undefined) {
+    const operation: AndroidReminderOperation = { type: "reminder_cancel", target: alarm.target }
+    const bindingHash = tryPromise(() => hash(operation)) catch () => undefined
+    if (bindingHash === undefined) return
+    try ignore(phone.cancel({ id: item.id, target: alarm.target, operationId: `cancel-${item.id}-${item.revision}`, bindingHash }))
+    return
   }
+  if (list !== undefined || remembered === undefined) return
+  const target = { sourceId: item.id, sourceRevision: remembered.revision, reminderId: item.id, occurrenceId: remembered.occurrenceId, revision: remembered.revision }
+  const operation: AndroidReminderOperation = { type: "reminder_cancel", target }
+  const bindingHash = tryPromise(() => hash(operation)) catch () => remembered.bindingHash
+  try ignore(phone.cancel({ id: item.id, target, operationId: `cancel-${item.id}-${remembered.revision}`, bindingHash }))
 }
 
 /** Build a valid machine `applySync` payload from a normalized `RemindersStoreView`. */

@@ -77,20 +77,6 @@ pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
 pure val rowValues = Set(0, 1, 2)
-pure val weight_readAutomations = 2
-pure val weight_automationsRead = 3
-pure val weight_openEditor = 2
-pure val weight_editRow = 2
-pure val weight_pickPreset = 3
-pure val weight_toggleDay = 3
-pure val weight_setText = 2
-pure val weight_setTarget = 3
-pure val weight_reviewCreate = 3
-pure val weight_reviewChange = 2
-pure val weight_confirmChange = 3
-pure val weight_sendChange = 3
-pure val weight_changeAnswered = 2
-pure val weight_changeUnanswered = 3
 ```
 
 ### Changing the focused row closes its editor and actions when no change is kept
@@ -319,10 +305,19 @@ pure val eval_witness_canResendChange = (
 
 pure def canLetGo(a: Automations): bool = Q::canRelease(a.change)
 
+pure val eval_witness_canLetGo = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "changeUnanswered",
+  "checkChange", ("changeChecked", 1, false, false), "letGo")
+
 pure def letGo(a: Automations): Automations = { ...a, change: Q::release(a.change), recovering: false }
 ```
 
 ### One change is kept at a time, kept honestly, and a row holds only what the list said
+
+Discovered by the proof: a loaded list, open review or open editor belongs to
+the signed-in owner.
 
 ```quint
 pure def alwaysOneChangeIsKeptHonestly(a: Automations): bool = and {
@@ -480,6 +475,8 @@ pure def setZone(a: Automations, zone: int): Automations = { ...a, when: S::setZ
 
 ### What is asked is always one the agent can be asked for
 
+Discovered by the proof: an open editor is always proposing a Create or Edit.
+
 ```quint
 pure def alwaysTheScheduleIsWellFormed(a: Automations): bool = and {
   S::wellFormed(a.when), S::wellFormed(a.asked.when),
@@ -552,6 +549,11 @@ pure def restart(a: Automations): Automations = {
 }
 
 pure def canDismissRecovery(a: Automations): bool = a.recovering
+
+pure val eval_witness_canDismissRecovery = (
+  ("ownerChanged", 1), "readAutomations",
+  ("automationsRead", 1, true, true, 1, 0, true, true, Scheduled, false, PromptTask),
+  ("reviewChange", Fire), "confirmChange", "sendChange", "restart", "dismissRecovery")
 
 pure def dismissRecovery(a: Automations): Automations = { ...a, recovering: false }
 ```

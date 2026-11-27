@@ -81,6 +81,18 @@ export function onDay(row: Pick<Row, "begin" | "end">, day: number): boolean {
   return first <= day && day <= last;
 }
 
+// spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event"
+/** The words of a search as Calendar matches them: case-folded, split at spaces. @throws {never} */
+export function searchWords(query: string): ReadonlyArray<string> {
+  return query.toLocaleLowerCase().split(/\s+/).filter((word) => word !== "");
+}
+
+/** Whether `row`'s title, place or notes hold every word of a search, case-folded. @throws {never} */
+export function matchesSearch(row: Pick<Row, "title" | "place" | "notes">, words: ReadonlyArray<string>): boolean {
+  const text = `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase();
+  return words.every((word) => text.includes(word));
+}
+
 /** Android stores an all-day event's civil dates at UTC midnight. @throws {never} */
 export function androidWindowOf({ begin, end, allDay }: Pick<Row, "begin" | "end" | "allDay">): { begin: number; end: number } {
   return allDay ? { begin: utcStart(civilDay(begin)), end: utcStart(civilDay(end)) } : { begin, end };
@@ -132,8 +144,10 @@ export interface ShownStore {
   readonly reset: () => void;
 }
 
-/** Create a scoped Calendar row store backed by a reactive shelf, with no module-level mutable state. @throws {never} */
-export function createShownStore(): ShownStore {
+let activeStore: ShownStore | undefined;
+let fallbackStore: ShownStore | undefined;
+
+function makeShownStore(onReset?: () => void): ShownStore {
   const numbers = new Map<string, number>();
   const calendars = new Map<string, number>();
   const seen = new Map<string, { readonly content: string; readonly revision: number }>();
@@ -288,7 +302,48 @@ export function createShownStore(): ShownStore {
       nextNumber = 0;
       present = false;
       version.reset();
+      onReset?.();
     },
   };
   return store;
 }
+
+function currentStore(): ShownStore {
+  if (activeStore !== undefined) return activeStore;
+  fallbackStore ??= makeShownStore();
+  return fallbackStore;
+}
+
+/** Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. @throws {never} */
+export function createShownStore(): ShownStore {
+  const store = makeShownStore(() => {
+    if (activeStore === store) activeStore = undefined;
+  });
+  activeStore = store;
+  return store;
+}
+
+/** Live view of the active scoped Calendar row store, for sibling modules outside the `Shown` service layer. */
+export const shown: ShownStore = {
+  snapshot: () => currentStore().snapshot(),
+  subscribe: (listener) => currentStore().subscribe(listener),
+  keep: (source, day, read, partial) => currentStore().keep(source, day, read, partial),
+  mergeOne: (source, read) => currentStore().mergeOne(source, read),
+  toRow: (source, read) => currentStore().toRow(source, read),
+  of: (source, day) => currentStore().of(source, day),
+  all: (source) => currentStore().all(source),
+  visible: (hidden, phone, google) => currentStore().visible(hidden, phone, google),
+  partial: (source) => currentStore().partial(source),
+  drop: (source) => currentStore().drop(source),
+  present: () => currentStore().present(),
+  phone: (has) => currentStore().phone(has),
+  revisions: () => currentStore().revisions(),
+  restore: (kept) => currentStore().restore(kept),
+  number: (source, key) => currentStore().number(source, key),
+  lastSeen: (id) => currentStore().lastSeen(id),
+  find: (id) => currentStore().find(id),
+  listed: (calendars) => currentStore().listed(calendars),
+  listedName: (calendarId) => currentStore().listedName(calendarId),
+  listedSummary: (calendarId) => currentStore().listedSummary(calendarId),
+  reset: () => currentStore().reset(),
+};

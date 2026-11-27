@@ -6,7 +6,8 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
-import { checkout, prepared } from "../src/checkout.ts";
+import { alone, checkout, prepared } from "../src/checkout.ts";
+import { packEntryName, stagePackEntry } from "../src/pack.ts";
 import { pinnedCheckout } from "../src/pinned.vibe";
 import { type Cloud, type RealModel, said, scratch, startCloud } from "../src/services.ts";
 
@@ -167,4 +168,48 @@ describe("the eliza harness", () => {
       fs.rmSync(tree, { recursive: true, force: true });
     }
   });
+
+  it("stages the agent pack's entry package whole, with the product plugin's code, replacing the last one at once and leaving no half-written copy", () => {
+    const root = scratch();
+    try {
+      const agent = path.join(root, "packages/agent");
+      const product = path.join(root, "product");
+      fs.mkdirSync(agent, { recursive: true });
+      fs.mkdirSync(product, { recursive: true });
+      fs.writeFileSync(path.join(product, "index.js"), "export const product = 1\n");
+      fs.writeFileSync(path.join(product, "index.d.ts"), "export declare const product: 1\n");
+      const pack = { commit: "0".repeat(40), root, packages: new Map([["@elizaos/agent", agent], ["other", path.join(root, "packages/other")]]) };
+      const first = stagePackEntry(pack, "export const first = 1\n");
+      const second = stagePackEntry(pack, "export const second = 2\n", { name: "alpha-apps", dir: product });
+      const entry = path.dirname(second);
+      expect(first).toBe(second);
+      expect(fs.readFileSync(second, "utf8")).toBe("export const second = 2\n");
+      expect(JSON.parse(fs.readFileSync(path.join(entry, "package.json"), "utf8"))).toMatchObject({ name: packEntryName, version: "0.0.0" });
+      expect(fs.readdirSync(path.join(entry, "node_modules/@elizaos"))).toEqual(["agent"]);
+      expect(fs.realpathSync(path.join(entry, "node_modules/@elizaos/agent"))).toBe(fs.realpathSync(agent));
+      expect(fs.readdirSync(path.join(entry, "node_modules/alpha-apps")).sort()).toEqual(["index.js", "package.json"]);
+      expect(fs.readdirSync(path.join(root, ".alpha")).filter((name) => name.startsWith(".pack-entry-"))).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lets one process at a time prepare a clone, so two that race for it never build it together", async () => {
+    const root = scratch();
+    try {
+      const at = { commit: "0".repeat(40), root: path.join(root, "clone") };
+      const seen: string[] = [];
+      const work = (name: string) => async () => {
+        seen.push(`${name} in`);
+        await Effect.runPromise(Effect.sleep("200 millis"));
+        seen.push(`${name} out`);
+        return name;
+      };
+      expect(await Promise.all([alone(at, work("a")), alone(at, work("b"))])).toEqual(["a", "b"]);
+      expect([[seen[0], seen[1]], [seen[2], seen[3]]].map(([enter, leave]) => enter?.split(" ")[0] === leave?.split(" ")[0])).toEqual([true, true]);
+      expect(fs.existsSync(`${at.root}.building`)).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

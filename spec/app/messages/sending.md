@@ -181,15 +181,18 @@ The earlier Alpha journaled its sends in the encrypted slot
 `alpha-sms-sends.journal` before that, with the filter of retired numbers
 salted `alpha-sms-operation:v1:` and the same receiver and actions for the
 radio's reports; this Alpha's journal keeps every one of those names, in
-the phone's secure store, up to the same megabyte. The first time the phone
-reads its journal and holds none, it reads the earlier one: copied into its
-own store, and cleared there only once the copy is written. Its sends,
-their parts and delivery reports, and the numbers it retired carry over, so
-a report the radio gives after the update counts on its send, a send read
+the phone's secure store, up to the same megabyte. The phone's store moves
+it the way it moves each journal kept under its earlier name
+([Adoption](../platform/adoption.md)): the first time the phone reads its
+journal and holds none, it reads the earlier one, copied into its own
+store and cleared there only once the copy is written. Its sends, their
+parts and delivery reports, and the numbers it retired carry over, so a
+report the radio gives after the update counts on its send, a send read
 back finds its record, and a retired number is refused. An earlier journal
 that cannot be copied is still the one read, and is moved on a later
-reading; one that cannot be read stays where it was, and nothing is sent
-until it can be, as the earlier Alpha did.
+reading; one that cannot be read stays where it was, and while the phone
+holds no journal of its own nothing is sent until it can be read, as the
+earlier Alpha did.
 
 ```quint
 pure val earlierValues = Set(Set(), Set(1), Set(1, 2))
@@ -197,9 +200,14 @@ pure val earlierValues = Set(Set(), Set(1), Set(1, 2))
 pure def journalRead(earlier: Set[int], own: Set[int], earlierHeld: bool, ownHeld: bool): Set[int] =
   if (ownHeld) own else if (earlierHeld) earlier else Set()
 
+pure def journalReadable(ownHeld: bool, earlierUnreadable: bool): bool = ownHeld or not(earlierUnreadable)
+
 pure def lawASendTheEarlierAlphaJournaledIsNeverForgotten(earlier: Set[int], id: int, copied: bool): bool =
   earlier.contains(id) implies (journalRead(earlier, Set(), true, false).contains(id)
     and (Ad::earlierCleared(Ad::adoptionOf(true, false, copied)) implies copied))
+
+pure def lawNothingIsSentWhileAnEarlierJournalCannotBeRead(ownHeld: bool): bool =
+  journalReadable(ownHeld, true) == ownHeld
 ```
 
 ### A finished record is retired by a tombstone

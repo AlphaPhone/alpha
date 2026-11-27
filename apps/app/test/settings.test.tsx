@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Activity from "../gen/app__settings__activity.effect.vibe";
 import * as Android from "../gen/app__settings__android.effect.vibe";
 import * as Carrier from "../gen/app__settings__carrier.effect.vibe";
 import * as Developer from "../gen/app__settings__developer.effect.vibe";
@@ -13,12 +14,14 @@ import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import * as Layers from "../gen/app__shell__layers.effect.vibe";
 import home from "../src/home/index.tsx";
+import { reportOf } from "../src/settings/about.vibe";
 import settings from "../src/settings/index.tsx";
 import { Found } from "../src/settings/phone.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open as openAlpha, press, seen, underAct, until } from "./alpha.tsx";
 import { account, checkoutSession, checkoutUrl, type CheckoutScene, type RedemptionScene } from "./fakes/cloud.ts";
 import { type ListenerScene, notices } from "./fakes/settings.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
+import { textReview } from "./fakes/text-review.ts";
 
 underAct();
 afterEach(closeAll);
@@ -68,7 +71,7 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
-  it("Opens browser Notifications from App permissions and returns to Privacy", async () => {
+  it('Opens browser Notifications from App permissions and returns to Privacy (spec/app/settings/index.md, "The owner can open Notifications from App permissions")', async () => {
     const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
     await press("Privacy");
     await press("Permissions");
@@ -90,7 +93,7 @@ describe("Settings", () => {
     await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
   });
 
-  it("A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, \"A new screen is given focus within twelve frames, unless the owner has already moved it there\")", async () => {
+  it('A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, "A new screen is given focus within twelve frames, unless the owner has already moved it there")', async () => {
     const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
     await drawn(() => button("Privacy")?.focus());
     await press("Privacy");
@@ -102,7 +105,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Privacy")));
   });
 
-  it("Recovers an unavailable browser account only after Try again", async () => {
+  it('Recovers an unavailable browser account only after Try again (spec/app/account/session.md, "A sign-in the phone cannot read is said so and can be read again")', async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
     await vi.waitFor(() => expect(titled("Account")?.textContent).toContain("Signed out"));
@@ -125,7 +128,7 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
   });
 
-  it("On the launcher, Settings' and Workflows' first pages draw no Back and Android's Back still leaves them (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+  it(`On the launcher, Settings' and Workflows' first pages draw no Back and Android's Back still leaves them (spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it")`, async () => {
     const world = { ...scene(), phone: true };
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha } = await settingsOpen(world);
@@ -152,7 +155,7 @@ describe("Settings", () => {
     }
   });
 
-  it("Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+  it(`Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it")`, async () => {
     const { alpha } = await settingsOpen({ ...scene(), phone: false });
     await vi.waitFor(() => expect(button("Back")).toBeDefined());
     await press("Back");
@@ -219,6 +222,25 @@ describe("Settings", () => {
     expect(world.settings.opened).toEqual([]);
   });
 
+  it("Answer for what the agent did on the phone (spec/app/settings/activity.md, \"Story: Answer for what the agent did on the phone\")", async () => {
+    const world = { ...scene(), phone: true, image: true };
+    const review = textReview(world.notes.owner, "draft-for-maya", { type: "sms_compose", query: "Maya", body: "Meet at the front door" });
+    world.telephony.textReview = review;
+    const { alpha, machines } = await settingsOpen(world);
+    await press("About");
+    await tap("Agent activity");
+    // spec/app/settings/activity.md, "The journal is read only while the agent is ready, one read at a time, with ten seconds to answer"
+    await until(alpha, machines, Activity.Machine, (s) => s.journal.read.status === "Loaded" && s.rows.length === 1 && s.rows.every((row) => row.declinable));
+    // spec/app/settings/activity.md, "A proposal can be declined, and an unsettled action marked as happened or not, while the agent is ready, from a journal read and not being read again"; spec/app/settings/activity.md, "The owner's word goes only for an action shown that takes it, once, and is followed by reading the journal again"
+    const before = (await machines.runPromise(Activity.Machine.use((activity) => activity.get()))).journal.read.ticket;
+    await press("Decline");
+    await until(alpha, machines, Activity.Machine, (s) => s.journal.read.status === "Loaded" && s.journal.read.ticket > before && s.wordResult === "WordTaken" && !s.rows.some((row) => row.declinable));
+    expect([review.rejections, review.decisions, review.proposal.state]).toEqual([["draft-for-maya"], [], "rejected"]);
+    // spec/app/settings/activity.md, "Leaving the history forgets the proposals and retires a read"
+    await hardware("back");
+    await until(alpha, machines, Activity.Machine, (s) => s.rows.length === 0);
+  });
+
   it("See what the phone says (spec/app/settings/facts.md, \"Story: See what the phone says\")", async () => {
     const initial = { ...scene(), phone: true };
     initial.maps.precision = "approximate";
@@ -257,6 +279,8 @@ describe("Settings", () => {
     await settingsOpen(world);
     await press("About");
     await tap("Agent activity");
+    // spec/app/settings/activity.md, "Restart Alpha is offered only when the account area says the agent needs a restart, and Try again only when it needs another try"
+    expect(button("Try again")).toBeUndefined();
     await press("Restart Alpha");
     await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("3 records"));
     expect(recovery.tokens).toEqual([]);
@@ -284,7 +308,7 @@ describe("Settings", () => {
     expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
   });
 
-  it("Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, \"Story: Pay in the browser\"; spec/app/account/billing.md, \"Story: Keep billing to its sign-in\")", async () => {
+  it('Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/billing.md, "Story: Keep billing to its sign-in")', async () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
@@ -422,7 +446,7 @@ describe("Settings", () => {
     });
   });
 
-  it("Review notification collection and choose apps (spec/app/notices/collection.md, \"Story: Manage collection in Settings\")", async () => {
+  it('Review notification collection and choose apps (spec/app/notices/collection.md, "Story: Manage collection in Settings")', async () => {
     const { world } = await settingsOpen();
     await press("General");
     await tap("Notifications");
@@ -451,7 +475,7 @@ describe("Settings", () => {
     expect(world.settings.mirrorHistory).toEqual([]);
   });
 
-  it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+  it('Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, "Story: Manage my saved passwords"; spec/app/settings/android.md, "Story: Change what only Android can change")', async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
     await press("Passwords");
@@ -524,7 +548,7 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Apps");
   });
 
-  it("Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, \"Story: Manage my saved passwords\")", async () => {
+  it(`Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, "Story: Manage my saved passwords")`, async () => {
     const sceneWithProton = { ...scene(), phone: true };
     sceneWithProton.settings.passwordProvider = { installation: "absent", selection: "none", support: "available" };
     const { world } = await settingsOpen(sceneWithProton);
@@ -554,7 +578,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button(/^Proton Pass/)).toBeUndefined());
   });
 
-  it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
+  it('See and control the listener (spec/app/voice/listener.md, "Story: See and control the listener")', async () => {
     const pause = Promise.withResolvers<unknown>();
     const listener: ListenerScene = {
       status: { available: true, state: "LISTENING", label: "Listening", consented: true, listening: true, microphoneOpen: true },
@@ -601,7 +625,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
-  it("Opens the native destination for each App permissions row", async () => {
+  it('Opens the native destination for each App permissions row (spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to")', async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
@@ -800,7 +824,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
   });
 
-  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
+  it('A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight")', async () => {
     localStorage.setItem("alpha.browser.device.v1", JSON.stringify({ askBeforeAgentActions: false, agentLocationEnabled: false, autoLoadMailImages: true }));
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
@@ -870,6 +894,14 @@ describe("Settings", () => {
     await press("Clear log");
     await until(alpha, machines, Developer.Machine, (s) => s.log.read.status === "Loaded" && s.problems === 0);
     expect([world.settings.crashes, Boolean(button("Clear problem log"))]).toEqual([[], false]);
+    // spec/app/settings/developer.md, "The report copies only the fields Alpha allows, so no text, address, key or identifier can reach it": of the digests the host names, only those of the packaged agent files Alpha lists, each a digest, reach the report.
+    const digest = "c".repeat(64);
+    const listed = reportOf({
+      at: 0, native: true, problems: [], talk: undefined,
+      phone: { readings: [], grants: [], alerts: [], home: "AnotherApp", assistant: "NoSuchRole", launcher: false },
+      facts: { runtimeHashes: { "agent/inventory.json": digest, "agent/agent.mjs": digest, "agent/secrets.json": digest, "agent/alpha-source.json": "not a digest" } },
+    });
+    expect(listed.runtimeHashes).toEqual({ "agent/inventory.json": digest, "agent/agent.mjs": digest });
   });
 
   it("Erase all data (spec/app/settings/reset.md, \"Story: Erase all data\")", async () => {
@@ -885,7 +917,7 @@ describe("Settings", () => {
     expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).review.read.status]).toEqual([[1, 2], "Failed"]);
   });
 
-  it("Shows Carrier setup guidance on the web without exposing phone identifiers", async () => {
+  it('Shows Carrier setup guidance on the web without exposing phone identifiers (spec/app/settings/index.md, "The carrier identifiers and Phone are sensitive screens, only on a phone")', async () => {
     const { alpha } = await open(scene());
     await press("Settings");
     await press("General");
@@ -917,6 +949,16 @@ describe("Settings", () => {
     // spec/app/settings/network.md, "Leaving the page retires what it asked and forgets what it found; a join in flight is Android's and goes on"
     await hardware("back");
     await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
+    // spec/app/settings/network.md, "Only the newest scan's answer is taken: the networks it found, or why it could not scan": Location off is said as such
+    world.settings.scanRefusal = "LOCATION_DISABLED";
+    await press("Network");
+    await until(alpha, machines, Network.Machine, (s) => s.scan === "LocationOff" && s.found === 0);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Turn on Location to scan"));
+    world.settings.scanRefusal = undefined;
+    await press("Scan again");
+    await until(alpha, machines, Network.Machine, (s) => s.scan === "Found" && s.found === 1);
+    await hardware("back");
+    await until(alpha, machines, Network.Machine, (s) => s.found === 0 && s.scan === "NotScanned");
 
     let finishScan = () => {};
     world.settings.wifiScanGate = new Promise<void>((done) => { finishScan = done; });
@@ -931,6 +973,7 @@ describe("Settings", () => {
 
   it("Read what my carrier needs to activate a SIM (spec/app/settings/carrier.md, \"Story: Read what my carrier needs to activate a SIM\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
+    world.settings.carrier.eid = { status: "not-read" };
     await press("General");
     await tap("Carrier & SIM setup");
     await until(alpha, machines, Carrier.Machine, (s) => s.showing);
@@ -939,13 +982,18 @@ describe("Settings", () => {
     await press("Show identifiers");
     await until(alpha, machines, Carrier.Machine, (s) => s.read.read.status === "Loaded" && s.fields.length > 0);
     // spec/app/settings/carrier.md, "The EID is its own read, asked by the owner after the identifiers and only on a phone with an eSIM, so it never delays them"
+    // spec/app/settings/carrier.md, "The EID is its own read, asked by the owner after the identifiers and only on a phone with an eSIM, so it never delays them": an EID Android refused or could not read yet stays not read, and can be read again.
+    await press("Read EID");
+    await until(alpha, machines, Carrier.Machine, (s) => s.eidRead.read.status !== "Loading");
+    expect([(await machines.runPromise(Carrier.Machine.use((carrier) => carrier.get()))).eid.status, Boolean(button("Read EID"))]).toEqual(["NotRead", true]);
+    world.settings.carrier.eid = { status: "available", value: "89049032000000000000000000000001" };
     await press("Read EID");
     await until(alpha, machines, Carrier.Machine, (s) => s.eid.status === "Returned");
     // spec/app/settings/carrier.md, "Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied"
     expect([Boolean(titled("IMEI 1")), Boolean(titled("IMEI 2")), Boolean(titled("ICCID"))]).toEqual([true, false, false]);
     await tap("IMEI 1");
     await until(alpha, machines, Carrier.Machine, (s) => s.copied === "CopiedIt");
-    expect(world.settings.copied).toEqual(["356938035643809"]);
+    expect([world.settings.copied, document.querySelector('[role="status"]')?.textContent]).toEqual([["356938035643809"], "Copied"]);
     await seen(false);
     await until(alpha, machines, Carrier.Machine, (s) => s.fields.length === 0 && !s.showing);
     await seen(true);

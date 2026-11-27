@@ -902,7 +902,9 @@ is ever sent again. A draft sent with other words than it holds now is
 an earlier version of the email sent. A record is cleared once it is
 settled, once it is known never to have left, or once the draft of an
 unsettled send is on the shelf marked as possibly sent; any other stays
-where it is, to be read again.
+where it is, to be read again. Draft adoption reads the earlier
+operation record without deleting it; [operations](./sending.md) is the
+sole owner of taking in and clearing `inbox-operation:v1:<digest>`.
 
 ```quint
 type Phase = Preparing | Reviewing | Dispatching | Observed

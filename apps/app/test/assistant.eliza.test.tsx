@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeAll, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe";
@@ -31,11 +31,12 @@ it("Ask Alpha production assistant talks to eliza's agent and stops a stalled tu
   const productionMount: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
   const { alpha } = await openOver(elizaWorld(elizaHandle), productionMount);
   const runtime = assistant.runtime(alpha);
-  await until(alpha, runtime, Composer, (s) => s.slot === "Open");
   await until(alpha, runtime, Conversation, (s) => s.ready);
+  await until(alpha, runtime, Composer, (s) => s.binding.owner > 0 && s.slot === "Open");
 
   await elizaHandle.script({ kind: "text", parts: ["[answer] Hello ", "from ", "Ask Alpha."] }, "Say hello.");
   await fill("Message Alpha", "Say hello.");
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loaded");
   await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
@@ -45,6 +46,7 @@ it("Ask Alpha production assistant talks to eliza's agent and stops a stalled tu
 
   await elizaHandle.script({ kind: "stall", first: "[answer] Thinking" }, "Take your time.");
   await fill("Message Alpha", "Take your time.");
+  await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
   await press("Send");
   await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
   expect(button("Send")).toBeUndefined();

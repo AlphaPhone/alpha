@@ -1,6 +1,9 @@
 /** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). */
 export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
 
+/** Whether this runs under the development/test server or a build made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
+export const allowsTestOrigin = (): boolean => import.meta.env.DEV || allowsTestMocks();
+
 /** Whether the page was opened with the explicit `?tools=1` query, which alone admits nothing (spec/app/platform/index.md). */
 export const toolsAsked = (): boolean => new URLSearchParams(globalThis.location?.search ?? "").get("tools") === "1";
 

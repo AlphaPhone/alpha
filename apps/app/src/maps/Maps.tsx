@@ -1,7 +1,7 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, cn, dockClearance, focusRing, Input, type MapCamera, MapsChip, MapsPillButton, MapsPlaceRow, MapsRoundButton, MapsSearchBar, MapsSheet, MapsStatusCard, type MapStyle, MapView, Spinner, Toast, ToastRegion } from "@repo/ui";
 import { Effect } from "effect";
-import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, Lock, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
+import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, Link, LocateFixed, Lock, type LucideIcon, Mail, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
 import { type ReactNode, useRef, useState, useSyncExternalStore } from "react";
 import { Time } from "../runtime/index.vibe";
 import type { Resident, Shown } from "../runtime/ui.tsx";
@@ -12,7 +12,7 @@ import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } fr
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice, Sheet } from "../../gen/app__maps.ts";
 import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
 import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
-import { breaksThePlane, cameraAim, compassShown, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
+import { breaksThePlane, cameraAim, compassShown, fitPadding, followZoom, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
 import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.effect.vibe";
 import { badgeOnly, holding, needsSettings } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
@@ -56,6 +56,7 @@ const told: Record<GuideNotice, string> = {
   StoppedFromNotification: "Navigation stopped from the notification.",
   PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
   AccountChanged: "The Maps account changed. Navigation ended.",
+  RerouteKept: "Rerouting needs a precise, up-to-date location. The current route was kept.",
 };
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
@@ -122,10 +123,27 @@ const statusTop: Record<string, string> = {
   Place: "top-21 in-data-[alpha-launcher]:top-32", Directions: "top-58", Navigating: "top-47 in-data-[alpha-launcher]:top-58",
 };
 
+// spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
+/** What the owner reads while Cloud's wait holds Maps: Alpha's sentence around Cloud's number. */
 function waitNotice(wait: State["link"]["wait"], held: number): string {
-  if (wait === "AllowanceSpent") return `You have used your Maps allowance for this period. It resets in ${Math.max(1, Math.ceil(held / 86_400))} days.`;
-  if (wait === "Unnamed") return "Maps request limit reached. Try again later.";
-  return `Maps request limit reached. Try again in ${Math.max(1, Math.ceil(held / 60))} minutes.`;
+  if (wait === "AllowanceSpent") {
+    const days = Math.max(1, Math.ceil(held / 86_400));
+    return `You have used your Maps allowance for this period. It resets in ${days} ${days === 1 ? "day" : "days"}.`;
+  }
+  if (wait === "RateLimited") {
+    const minutes = Math.max(1, Math.ceil(held / 60));
+    return `Maps request limit reached. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  }
+  return "Maps request limit reached. Try again later.";
+}
+
+// spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
+/** The line under a place's name: its provider's most specific category, or what kind of place of the phone it is, or none. */
+function subtitleOf(spot: Spot, saved: boolean): string | undefined {
+  if (saved) return "Saved on this device";
+  if (spot.category !== "") return spot.category;
+  if (spot.providerId === "" && spot.id === "") return "Selected location";
+  return undefined;
 }
 
 // spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
@@ -337,6 +355,8 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
         <MapView
           className="absolute inset-0 h-full rounded-none"
           zoomControls={false}
+          followZoom={followZoom}
+          fitPadding={fitPadding}
           opening={{ at: northAmerica, zoom: style.kind === "raster" ? 2 : 2.4 }}
           compassBottom={now === "Navigating" ? 198 : floatBottom + 60}
           label={spot === undefined ? "Map" : `Map of ${placeName}`}
@@ -357,6 +377,7 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           onPressEnd={lift}
           onSettled={(view) => void runtime.runPromise(settled(view))}
           onDragged={() => offer(screen, { type: "panMap" })?.()}
+          onMenu={(at) => offer(screen, { type: "menuPin", lat: Math.round(at.lat * 1e6), lng: Math.round(normalizeLng(at.lng) * 1e6) })?.()}
         />
       )}
 
@@ -522,7 +543,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
   const saveName = kept?.name ?? (pinNameOf(state) || spot.name);
   const applied = name.trim() || (kept === undefined ? titleOf(spot, kept, state) : saveName);
   const apply = kept === undefined ? { type: "namePin", name: applied } as const : { type: "namePlace", name: applied } as const;
-  const pinned = spot.id === "" && pointIn(spot.name) !== undefined;
+  const subtitle = subtitleOf(spot, kept !== undefined);
   return (
     <MapsSheet aria-label={titleOf(spot, kept, state)} height={height} grows className="z-sheet">
       <SheetGrabber screen={screen} sheet={state.sheet} label="Resize place sheet" />
@@ -531,7 +552,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-3xl font-light break-words">{titleOf(spot, kept, state)}</h2>
             {can({ type: "startRenaming" }) && <button type="button" aria-label="Rename place" className={cn(focusRing, "min-h-12 rounded-md px-3 text-primary")} onClick={() => { setName(kept === undefined ? titleOf(spot, kept, state) : saveName); void send({ type: "startRenaming" }); }}>Rename</button>}
-            <div className="mt-1.5 text-sm text-muted-foreground">{pinned ? "Selected location" : spot.category || "Place"}</div>
+            <div className="mt-1.5 text-sm text-muted-foreground">{subtitle ?? "Place"}</div>
             {spot.hours !== undefined && <div className="mt-1 text-sm"><span className="font-semibold">Hours</span><span className="text-muted-foreground">{` · ${spot.hours}`}</span></div>}
           </div>
           <MapsRoundButton tone="fill" size="sm" aria-label="Close place" className="-mt-0.5 -mr-1.5" disabled={!back} onClick={back}><X className="size-4.5" /></MapsRoundButton>
@@ -542,6 +563,8 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
             ? can({ type: "namePlace", name: saveName }) && <MapsRoundButton aria-label="Save" aria-pressed={false} onClick={() => void send({ type: "namePlace", name: saveName })}><Star /></MapsRoundButton>
             : can({ type: "forgetPlace" }) && <MapsRoundButton aria-label="Remove from saved" aria-pressed className="text-primary" onClick={() => void send({ type: "forgetPlace" })}><Star className="fill-current" /></MapsRoundButton>}
           {can({ type: "handOn", kind: "SharePlace" }) && <MapsRoundButton aria-label="Share" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 /></MapsRoundButton>}
+          {can({ type: "handOn", kind: "EmailPlace" }) && <MapsRoundButton aria-label="Email" onClick={() => void send({ type: "handOn", kind: "EmailPlace" })}><Mail /></MapsRoundButton>}
+          {can({ type: "handOn", kind: "CopyLink" }) && <MapsRoundButton aria-label="Copy link" onClick={() => void send({ type: "handOn", kind: "CopyLink" })}><Link /></MapsRoundButton>}
           {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <MapsRoundButton aria-label="Website" onClick={() => void send({ type: "handOn", kind: "Website" })}><Globe /></MapsRoundButton>}
           {outside && can({ type: "handOn", kind: "MapsApp" }) && <MapsRoundButton aria-label="Open in another app" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}><ExternalLink /></MapsRoundButton>}
         </div>

@@ -5,7 +5,6 @@ import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
-import * as VoiceRoute from "../gen/app__voice__route.ts";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { CLOUD_TURN_GAP_MS } from "../src/platform/turnGap.ts";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
@@ -197,8 +196,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([stopped.engineHeld, world.voice.engineHeld, world.voice.releaseEngineHoldCalls]).toEqual([false, false, 1]);
 
     world.voice.probeGate = undefined;
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    document.dispatchEvent(new Event("visibilitychange"));
+    await seen(false);
+    await seen(true);
     await untilCondition(runtime, () => world.voice.warmSpeechOutputCalls === 2 && world.voice.liveCaptureStatusCalls === 3);
 
     world.signedIn = true;
@@ -1759,7 +1758,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
         await drawn(() => speakUtterance(world, answer));
         await drawnUntil(alpha, area, Voice.Machine, (state) =>
           state.sent === 2 && state.reviewPending === again && state.phase === "Listening" && state.mic === "On");
-        expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+        expect([review.decisions, review.rejections, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], [], []]);
         expect(button("Send this text") !== undefined).toBe(again);
         if (outcome === "send") {
           await tapSend();
@@ -1780,9 +1779,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     }
     expect(world.ask.said).toEqual(by === "voice" ? ["Start this chat", text, answer] : ["Start this chat", text]);
     expect(button("Send this text") !== undefined).toBe(outcome === "shown");
-    expect([review.decisions, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
-      [review.proposal.id], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
-    ] : outcome === "decline" ? [[review.proposal.id], [], []] : [[], [], []]);
+    expect([review.decisions, review.rejections, review.claims, world.telephony.sent]).toEqual(outcome === "send" ? [
+      [review.proposal.id], [], [review.proposal.id], [{ operationId: review.proposal.id, recipients: [...operation.recipients], body: operation.body }],
+    ] : outcome === "decline" ? [[], [review.proposal.id], [], []] : [[], [], [], []]);
     // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": the decision shows as v119's result chip under the review, and is never spoken.
     await drawn(() => vi.waitFor(() => expect(document.querySelector("[data-alpha-device-receipt]")?.textContent)
       .toBe(outcome === "send" ? "Android accepted the text request." : outcome === "decline" ? "Declined" : undefined)));
@@ -1810,7 +1809,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.ask.nextActions = propose;
       await drawn(() => speakUtterance(world, answer));
       await drawnUntil(alpha, area, Voice.Machine, (state) => state.sent === at + 2 && state.reviewPending && state.phase === "Listening" && state.mic === "On");
-      expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
+      expect([review.decisions, review.rejections, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], [], []]);
       expect(button("Send this text")).toBeDefined();
     }
     try {
@@ -2255,16 +2254,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
 
-  // spec/app/voice/route.md, "A failure of the network service holds speech on the phone: a minute after a brief failure, ten minutes after the account was refused, and the server's wait after a rate limit, never more than an hour"
-  it("computes voice route holds in milliseconds rather than seconds", () => {
-    const cloud = VoiceRoute.decide(VoiceRoute.changeAccount(VoiceRoute.signedOut, "CloudAccount", 1), true);
-    expect([VoiceRoute.briefHold, VoiceRoute.accountHold, VoiceRoute.longestHold]).toEqual([60_000, 600_000, 3_600_000]);
-    expect(VoiceRoute.noteFailure(cloud, "Brief", 0, 1_000).holdUntil).toBe(61_000);
-    expect(VoiceRoute.noteFailure(cloud, "AccountRefused", 0, 1_000).holdUntil).toBe(601_000);
-    expect(VoiceRoute.noteFailure(cloud, "RateLimited", 15_000, 1_000).holdUntil).toBe(16_000);
-  });
-
-  // spec/app/voice/index.md, "A failed network service falls back to this phone once per session when the phone is ready"
+  // spec/app/voice/index.md, "A network failure before Alpha has spoken moves the conversation to the phone at once, and the failed turn is not sent again"
   it("falls back to on-device speech when Cloud speech fails during an active session", async () => {
     const world = { ...scene(), phone: true, signedIn: true };
     world.voice.onDevice = true;
@@ -2283,19 +2273,20 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
   });
 
-  // spec/app/voice/index.md, "The microphone permission is read again on foreground return"
+  // spec/app/voice/index.md, "Android's answer to the prompt opens the microphone, or ends the start quietly when it was denied"
   it("re-syncs microphone permission grant on foreground return after OS settings change", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.permission = "denied";
     const { alpha, area } = await onComposer(world);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Denied");
 
+    await seen(false);
     world.voice.permission = "granted";
     await seen(true);
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Granted");
   });
 
-  // spec/app/voice/index.md, "Stop ends the conversation and abandons the stalled turn"
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("aborts a stalled voice turn and clears heard transcript when stopped", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.ask.stalled = true;
@@ -2502,5 +2493,39 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     memory.enqueueSentence(2, "Turn two sentence.");
     memory.enqueueSentence(1, "Late turn one sentence.");
     expect(memory.dequeueSentence(2)?.text).toBe("Turn two sentence.");
+  });
+
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+  it("preserves Cloud credit refusals during real-time Talk and keeps actionable Talk failures visible when fallback is unavailable", async () => {
+    const world = { ...scene(), phone: true };
+    world.voice.onDevice = false;
+    world.voice.localReady = false;
+    world.voice.liveCaptureAvailable = false;
+    const { alpha, area } = await onComposer(world, ...only("notice"));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    expect(sessionId).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code: "insufficient_credits" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off" && s.failure === "NoFailure");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Voice needs more Eliza Cloud credits. Add credits, then try again.");
+    });
+
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const secondSession = world.voice.activeMicSession;
+    expect(secondSession).toBeDefined();
+
+    await drawn(() => world.voice.emitCloud?.({ sessionId: secondSession ?? "", type: "error", code: "unauthorized" }));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+    await vi.waitFor(async () => {
+      await drawn(() => undefined);
+      expect(document.body.textContent).toContain("Sign in to use Cloud voice.");
+    });
   });
 });

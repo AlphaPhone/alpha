@@ -66,14 +66,14 @@ function detailsFor(apps: readonly DrawerApp[]) {
       if (group.length > 1) {
         const before = parts.length;
         const siblings = group.filter((other) => other.packageName === app.packageName);
-        if (siblings.length < group.length) parts.push(app.packageName);
+        if (siblings.length < group.length && app.packageName) parts.push(app.packageName);
         if (siblings.length > 1 && app.activityName) {
           parts.push(siblings.filter((other) => short(other) === short(app)).length === 1 ? short(app) : app.activityName);
           if (app.user && siblings.filter((other) => other.activityName === app.activityName).length > 1) {
             parts.push(`profile ${app.user}`);
           }
         }
-        if (parts.length === before) parts.push(app.packageName);
+        if (parts.length === before && app.packageName) parts.push(app.packageName);
       }
       details.set(app.id, parts);
     }

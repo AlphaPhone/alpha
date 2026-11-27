@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
 import { Machine as View } from "../gen/app__calendar.effect.vibe";
@@ -17,7 +18,62 @@ afterEach(async () => {
   document.documentElement.style.removeProperty("font-size");
 });
 
-it("Shows the selected day across a wide canvas and at large text (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/shell/keyboard.md, \"Story: Read everything at the text size I chose\")", async () => {
+it('Opens timed and all-day events in another column when the selected day is empty (spec/app/calendar/index.md, "Story: Look at an event")', async () => {
+  const world = { ...scene(), phone: true, signedIn: false, now: new Date(2026, 10, 25, 8).getTime() };
+  world.calendar.granted = true;
+  const today = civilDay(world.now);
+  const tomorrow = dayStart(today + 1);
+  world.calendar.phoneEvents.push(
+    { id: "1", calendarId: "local", title: "Neighbor only", begin: tomorrow + 10 * 3_600_000, end: tomorrow + 11 * 3_600_000, allDay: false, recurring: false },
+    { id: "2", calendarId: "local", title: "Neighbor holiday", begin: utcStart(today + 1), end: utcStart(today + 2), allDay: true, recurring: false },
+  );
+
+  await page.viewport(1280, 800);
+  const { alpha } = await open(world, only("view:Calendar"));
+  const view = calendar.runtime(alpha);
+  const current = () => view.runPromise(Effect.flatMap(View, (machine) => machine.get()));
+  await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Calendar" })));
+  await until(alpha, view, View, (state) => state.wide && state.phone.status === "Loaded" && state.phoneRows === 0);
+  const before = await current();
+  const main = document.querySelector("main");
+  if (!main) throw new Error("The Calendar host did not open");
+  main.style.maxWidth = "none";
+
+  await page.getByRole("button", { name: /^Neighbor only,/ }).click();
+  await expect.element(page.getByRole("heading", { name: "Neighbor only", exact: true })).toBeVisible();
+  await until(alpha, view, View, (state) => state.open > 0);
+  const opened = await current();
+  expect(opened.anchor).toBe(today);
+  expect(opened.phone.ticket).toBe(before.phone.ticket);
+  await page.getByRole("button", { name: "Back to calendar" }).click();
+  await expect.element(page.getByRole("button", { name: /^Neighbor only,/ })).toBeVisible();
+  await until(alpha, view, View, (state) => state.open === 0);
+  const closed = await current();
+  expect(closed.anchor).toBe(today);
+  expect(closed.phoneRows).toBe(0);
+
+  const date = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric" }).format(tomorrow);
+  const holiday = page.getByRole("button", { name: `${date} · Neighbor holiday, All day`, exact: true });
+  await holiday.click();
+  await expect.element(page.getByRole("heading", { name: "Neighbor holiday", exact: true })).toBeVisible();
+  const openedHoliday = await current();
+  expect(openedHoliday.anchor).toBe(today);
+  expect(openedHoliday.phone.ticket).toBe(before.phone.ticket);
+  await page.getByRole("button", { name: "Back to calendar" }).click();
+  await expect.element(holiday).toBeVisible();
+
+  document.documentElement.style.fontSize = "24px";
+  await expect.element(page.getByRole("region", { name: "Calendar agenda" })).toBeVisible();
+  const anyHoliday = page.getByRole("button", { name: /Neighbor holiday/ });
+  await expect.element(anyHoliday).not.toBeInTheDocument();
+  document.documentElement.style.removeProperty("font-size");
+  await page.viewport(412, 800);
+  await until(alpha, view, View, (state) => !state.wide);
+  await expect.element(anyHoliday).not.toBeInTheDocument();
+  expect((await current()).anchor).toBe(today);
+});
+
+it('Shows the selected day across a wide canvas and at large text (spec/app/calendar/index.md, "Story: See my days"; spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose")', async () => {
   const world = { ...scene(), phone: true, signedIn: false, now: new Date(2026, 10, 25, 8).getTime() };
   world.calendar.granted = true;
   const today = civilDay(world.now);
@@ -47,7 +103,8 @@ it("Shows the selected day across a wide canvas and at large text (spec/app/cale
   expect(columns()[0]?.querySelector('button[aria-label^="Previous source,"]')).not.toBeNull();
   expect(columns()[1]?.querySelector('button[aria-label^="Current source,"]')).not.toBeNull();
   expect(columns()[1]?.querySelector('button[aria-label^="Agenda reminder,"]')).not.toBeNull();
-  await expect.element(page.getByRole("button", { name: "All-day source, All day" })).toBeVisible();
+  const date = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric" }).format(dayStart(today));
+  await expect.element(page.getByRole("button", { name: `${date} · All-day source, All day`, exact: true })).toBeVisible();
   const chooseDate = page.getByRole("button", { name: /^Choose date:/ });
   await chooseDate.click();
   const views = page.getByRole("group", { name: "Calendar view" });

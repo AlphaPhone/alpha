@@ -42,6 +42,8 @@ export interface MapsScene {
   readonly asked: { path: string; key: string | null; body: unknown }[];
   /** Where the fake phone is. */
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
+  /** Where the network says the phone is when GPS is absent. */
+  network?: { latitude: number; longitude: number; accuracy: number };
   /** Whether Android currently grants Alpha location permission. */
   allowed: "granted" | "denied" | "prompt";
   /** When set, Android's location prompt stays open until it settles. */
@@ -54,6 +56,10 @@ export interface MapsScene {
   readonly watches: Set<string>;
   /** Alpha's screen-off guidance service: the session running with its notification, the arrival notices shown, and whether the owner opened Alpha from the notification. */
   readonly guidance: { session: string | undefined; title: string; text: string; arrivals: string[]; opened: boolean; stop?: (reason: string) => void };
+  /** Tiles answer 429 with this wait in seconds, once each, while it is set. */
+  tilesLimited: number | undefined;
+  /** The tiles the page fetched, as `z/x/y`. */
+  readonly tiles: string[];
 }
 
 export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00",
@@ -82,7 +88,20 @@ export function mapsScene(): MapsScene {
     listeners: new Set(),
     watches: new Set(),
     guidance: { session: undefined, title: "", text: "", arrivals: [], opened: false },
+    tilesLimited: undefined,
+    tiles: [],
   };
+}
+
+/** The page's speech synthesis as a recorder: what it was asked to read aloud, in order, and how often it was cut off. */
+export function speech(): { readonly spoken: string[]; cancels: number } {
+  const heard = { spoken: [] as string[], cancels: 0 };
+  class Utterance { constructor(readonly text: string) {} }
+  Object.assign(globalThis, {
+    SpeechSynthesisUtterance: Utterance,
+    speechSynthesis: { speak: (said: Utterance) => { heard.spoken.push(said.text); }, cancel: () => { heard.cancels += 1; } },
+  });
+  return heard;
 }
 
 /** The fake phone moves to `latitude, longitude`, and its open watches report it. */
@@ -107,7 +126,10 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
         if (scene.limited !== undefined) {
           const wait = scene.limited;
           scene.limited = undefined;
-          return Response.json({ error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) }, { status: 429 });
+          return Response.json(
+            { error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) },
+            { status: 429, ...(wait > 0 ? { headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } } : {}) },
+          );
         }
         const query = typeof body === "object" && body !== null && "query" in body ? String(body.query).toLowerCase() : "";
         const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
@@ -129,6 +151,20 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
         scene.routes.length === 0
           ? Response.json({ error: { code: "NoRoute", message: "no route" } }, { status: 422 })
           : Response.json({ providerId: "test-open", attribution, routes: scene.routes }));
+    },
+    (request, url) => {
+      const tile = /^\/api\/v1\/maps\/tiles\/(\d+)\/(\d+)\/(\d+)$/.exec(url.pathname);
+      if (request.method !== "GET" || tile === null) return;
+      scene.tiles.push(`${tile[1]}/${tile[2]}/${tile[3]}`);
+      if (scene.tilesLimited !== undefined) {
+        const wait = scene.tilesLimited;
+        scene.tilesLimited = undefined;
+        return Response.json(
+          { error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) },
+          { status: 429, ...(wait > 0 ? { headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } } : {}) },
+        );
+      }
+      return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/v1/maps/tiles/viewport") return;
@@ -153,7 +189,10 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
         if (scene.allowed === "prompt") scene.allowed = "granted";
         return { location: scene.allowed, accuracy: scene.precision };
       },
-      getCurrentPosition: () => (scene.here && scene.allowed === "granted" ? Promise.resolve({ coords: { ...scene.here, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"))),
+      getCurrentPosition: (options) => {
+        const found = options?.accuracy === "low" ? scene.network : scene.here;
+        return found && scene.allowed === "granted" ? Promise.resolve({ coords: { ...found, timestamp: now() }, cached: false }) : Promise.reject(rejection("TIMEOUT"));
+      },
       watchPosition: () => {
         if (scene.allowed !== "granted") return Promise.reject(rejection("PERMISSION_DENIED"));
         const watchId = `w${++next}`;

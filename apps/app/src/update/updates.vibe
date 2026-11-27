@@ -5,10 +5,8 @@ import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
-import { Device } from "../platform/index.vibe"
-import { LauncherUpdates } from "../platform/index.vibe"
-import { type Job, answer, contained, filledStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
-import { Time } from "../runtime/index.vibe"
+import { Device, LauncherUpdates } from "../platform/index.vibe"
+import { type Job, Time, answer, contained, filledStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
 
@@ -135,7 +133,6 @@ function storedUpdates(key: string, start = Updates.initial) {
   return Layer.provide(Updates.stored(key, start), filledStore(key, (kept) => ({ misses: kept.checked === "Missed" ? 1 : Updates.initial.misses, ...kept }), Updates.parseState))
 }
 
-// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
 const machine = reacting({ ...Updates, stored: storedUpdates }, { keep: 1, open: [{ type: "restart" }], carry })
 
 // spec/app/update/index.md, "The installed version never goes down, the signing root never changes, and a phone past its first 30 seconds is never starting again"
@@ -170,7 +167,7 @@ interface Facts {
   readonly reported: Engagement
 }
 
-/** The owner's activity: what an automatic update waits on. The phone reports no audio mode apart from a call. */
+/** The owner's activity: what an automatic update waits on. Audio counts as normal while no call is up; Alpha's updater reads Android's audio mode itself before it commits. */
 function activityOf({ shell, layers, call, front, typing, reported }: Facts): Activity {
   const held = layers.holds.some((id) => id !== holder)
   return Updates.withSignIn({

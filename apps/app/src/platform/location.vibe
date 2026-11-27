@@ -1,4 +1,4 @@
-// spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
+// spec/app/maps/connection.md, "Story: Use my location"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once, and then locates"
 import type { LocationResult, LocationPermissionStatus } from "@elizaos/os-bridges"
 import { registered } from "./device.vibe"
 import { phoneSystem } from "./launcher.vibe"

@@ -45,7 +45,8 @@ pure def ended(held: Listener, f: Feed): Feed = if (f.phase == Ended) f else {
 ### The subscription is asked for only once its listener is registered
 
 A listener registered after the feed was closed is removed at once; a
-listener that could not be registered ends the feed.
+listener that could not be registered ends the feed. While the feed stays
+open after asking to subscribe, its listener stays live.
 
 ```quint
 pure def canListenerResult(f: Feed): bool = f.listener == Waiting
@@ -54,6 +55,8 @@ pure def listenerResult(f: Feed, success: bool): Feed =
   if (not(success)) ended(Gone, { ...f, listener: Gone })
   else if (f.phase == Ended) { ...f, listener: Gone }
   else { ...f, listener: Live, phase: Subscribing, asked: true }
+
+pure def alwaysAnOpenAskingHoldsALiveListener(f: Feed): bool = (f.asked and f.phase != Ended) implies f.listener == Live
 
 pure def sometimesLateListenerRemoved(f: Feed): bool = f.phase == Ended and f.listener == Gone and not(f.asked)
 ```

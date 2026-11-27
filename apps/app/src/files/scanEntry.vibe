@@ -1,4 +1,4 @@
-// spec/app/camera/index.md, "Story: Scan a document"; spec/app/files/scan.md, "Story: Arrange the pages"
+// spec/app/files/scan.md, "Story: Arrange the pages"
 import type { SelectionId } from "@elizaos/os-bridges"
 import type { ResidentOwner } from "../platform/index.vibe"
 import type { Fields } from "../calendar/editor.vibe"

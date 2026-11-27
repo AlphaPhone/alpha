@@ -1,6 +1,8 @@
 lemma applyClaimed_ensures(s: Delivery, request: int)
   ensures (inv(s) ==> canApplyClaimed(s, request) ==> alwaysTheRelayIsTheAcceptedTurns(applyClaimed(s, request).state))
+  ensures (inv(s) ==> canApplyClaimed(s, request) ==> alwaysAnAcceptedTurnWasOffered(applyClaimed(s, request).state))
   ensures (inv(s) ==> canApplyClaimed(s, request) ==> alwaysAnEffectIsAppliedOnce(applyClaimed(s, request).state))
+  ensures (inv(s) ==> canApplyClaimed(s, request) ==> alwaysAClaimedRequestHasAClaim(applyClaimed(s, request).state))
   ensures (inv(s) ==> canApplyClaimed(s, request) ==> stepAnEffectNeedsAClaim(s, "applyClaimed", applyClaimed(s, request).state, applyClaimed(s, request).out))
   ensures (inv(s) ==> canApplyClaimed(s, request) ==> stepAnUnknownClaimIsNeverReplayed(s, "applyClaimed", applyClaimed(s, request).state))
 {

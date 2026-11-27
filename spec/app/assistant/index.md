@@ -13,6 +13,7 @@ for its reply. The rest of the area:
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
 - [Reply](./reply.md): a reply as it is written: its label, acknowledgment, cards, notices and failures
 - [Turn context](./context.md): what a turn tells the agent besides the screen: location, Browser's page, Maps, the clock and capabilities
+- [Entry](./entry.md): opening Ask Alpha from outside Alpha, and when that starts voice
 
 Alpha shows the turn's status as pulsing dots or a shape at the foot of the
 conversation, with the status as its accessible name. The agent's own label

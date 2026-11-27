@@ -144,6 +144,28 @@ pure def lawAWithdrawnStreamMayHaveBeenSent(answered: bool): bool = deliveryOf(a
 pure def lawAStreamThatErredMayHaveBeenSent(answered: bool): bool = deliveryOf(answered, Errored) == MaybeSent
 ```
 
+### A failed view request is recorded by its step and a fingerprint of its id, never by its path or body
+
+When the agent refuses a `POST` that claims a step on a screen, reports its
+result, or prepares a view's navigation, Alpha's log says which of the
+three it was and, where the body named a generated id, the first sixteen
+hex digits of that id's SHA-256, so a failure can be matched with the
+agent's own log. The path, the body and the id itself are never written.
+Any other failed request is logged as before, with nothing of this.
+
+```quint
+type ViewStep = NotAView | ClaimStep | ResultStep | PrepareStep
+
+pure def fingerprintWritten(kind: ViewStep, generatedId: bool, bodySmall: bool): bool =
+  kind != NotAView and generatedId and bodySmall
+
+pure def lawOnlyAViewStepIsFingerprinted(generatedId: bool, bodySmall: bool): bool =
+  not(fingerprintWritten(NotAView, generatedId, bodySmall))
+
+pure def lawAnIdNotGeneratedIsNeverWritten(kind: ViewStep, bodySmall: bool): bool =
+  not(fingerprintWritten(kind, false, bodySmall))
+```
+
 ## Story: Be told when to try again
 
 > As the owner, I want a request the agent or the cloud turned away for
@@ -171,6 +193,25 @@ pure def lawAnAdvisedWaitIsWithinADay(status: int, given: bool, seconds: int): b
   waitAdvised(status, given, seconds) implies (seconds >= 0 and seconds <= maxWaitSeconds)
 
 pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = not(waitAdvised(status, false, seconds))
+```
+
+### A refusal carries the time the other side named for its allowance to come back, and a reader takes it only while it lies ahead
+
+The cloud names when an exhausted allowance resets as `resetAt`, an ISO
+instant or epoch milliseconds, at the top of its refusal's body or under
+its `error`. The refusal keeps it, in epoch milliseconds, so a reader can
+say when the allowance is back even where no wait was given; the reader
+takes it only while it lies after the time it was told.
+
+```quint
+pure def resetAhead(named: bool, resetAt: int, now: int): bool = named and resetAt > now
+
+pure val resetAtValues = Set(0, 1000, 5000)
+
+pure def lawAResetIsNeverInThePast(named: bool, resetAt: int, now: int): bool =
+  resetAhead(named, resetAt, now) implies resetAt > now
+
+pure def lawAnUnnamedResetIsNeverTaken(resetAt: int, now: int): bool = not(resetAhead(false, resetAt, now))
 ```
 
 ### Only a 2xx answer is the reply; every other status is a refusal
@@ -295,6 +336,123 @@ type Net = NetUnknown | NetOnline | NetOffline
 pure def refusedOffline(network: Net): bool = network == NetOffline
 
 pure def lawOnlyAConfirmedOfflineRefuses(network: Net): bool = refusedOffline(network) iff network == NetOffline
+```
+
+## Story: Know roughly where my phone is without GPS
+
+> As the owner, I want Alpha to know roughly where my phone is when GPS has
+> no fix, indoors or right after a restart, without asking a lookup service
+> more often than my position can change.
+
+### A network position is asked only when one is needed now, reused for fifteen minutes, and kept for an hour while the same networks are seen
+
+Alpha's network location plugin looks the phone up once, from the Wi-Fi and
+cell networks it sees, only when a caller needs a position now: a Maps
+action, a locate card, the agent's warm-up. A position it found is given
+again without asking for fifteen minutes. After that, while the position
+is less than an hour old, the plugin is asked whether the networks it sees
+are the ones that position was found from, and nothing is sent where they
+are; the position then stands until it is an hour old. A lookup that failed
+is not tried again for two minutes, and meanwhile the last position that
+still stands is given. Where the phone has no such plugin, no position is
+looked up.
+
+```quint
+pure val reuseFor = 900000
+pure val standsFor = 3600000
+pure val retryAfter = 120000
+
+type Lookup = NoLookup | Reused | Waited | AskedIfUnchanged | Asked
+
+pure def stands(known: bool, now: int, found: int): bool = known and now >= found and now - found <= standsFor
+
+pure def lookupOf(plugin: bool, known: bool, fingerprinted: bool, now: int, found: int, checked: int, retryFrom: int): Lookup =
+  if (not(plugin)) NoLookup
+  else if (stands(known, now, found) and now - checked < reuseFor) Reused
+  else if (now < retryFrom) Waited
+  else if (stands(known, now, found) and fingerprinted) AskedIfUnchanged
+  else Asked
+
+pure val nowValues = Set(0, 60000, 900000, 3600001)
+pure val foundValues = Set(0, 60000, 3600002)
+pure val checkedValues = Set(0, 60000)
+pure val retryFromValues = Set(0, 120000)
+
+pure def lawNothingIsAskedWithinFifteenMinutes(known: bool, fingerprinted: bool, now: int, found: int, checked: int, retryFrom: int): bool =
+  (stands(known, now, found) and now - checked < reuseFor) implies lookupOf(true, known, fingerprinted, now, found, checked, retryFrom) == Reused
+
+pure def lawAFailedLookupWaitsTwoMinutes(known: bool, fingerprinted: bool, now: int, found: int, checked: int, retryFrom: int): bool =
+  lookupOf(true, known, fingerprinted, now, found, checked, retryFrom) == Asked implies now >= retryFrom
+
+pure def lawNoPluginNoLookup(known: bool, fingerprinted: bool, now: int, found: int, checked: int, retryFrom: int): bool =
+  lookupOf(false, known, fingerprinted, now, found, checked, retryFrom) == NoLookup
+
+pure def lawAPositionOverAnHourOldIsNeverReused(fingerprinted: bool, now: int, found: int, checked: int, retryFrom: int): bool =
+  now - found > standsFor implies lookupOf(true, true, fingerprinted, now, found, checked, retryFrom) != Reused
+```
+
+### With too few networks seen, the plugin asks for the position of the phone's address alone, and that answer is never confirmed unchanged
+
+Right after a restart Android may list no Wi-Fi yet and only cells the
+lookup cannot use. The plugin then sends a request naming no network,
+which the service answers from the request's address, at city level,
+rather than refusing. Such an answer names no networks, so it has no
+fingerprint: a later lookup asks afresh rather than whether it is
+unchanged.
+
+```quint
+pure def confirmedUnchanged(fingerprint: str, seen: str): bool = fingerprint != "" and fingerprint == seen
+
+pure val fingerprintValues = Set("", "a1", "b2")
+pure val seenValues = Set("", "a1")
+
+pure def lawAnAddressOnlyAnswerIsNeverConfirmed(seen: str): bool = not(confirmedUnchanged("", seen))
+
+pure def lawOnlyTheSameNetworksConfirm(fingerprint: str, seen: str): bool =
+  confirmedUnchanged(fingerprint, seen) implies fingerprint == seen
+```
+
+### A network position is taken only where it lies on the globe, has an accuracy, and is neither from the future nor over an hour old
+
+Degrees are counted in millionths. An answer that breaks any of these is a
+failed lookup.
+
+```quint
+pure def positionTaken(lat: int, lng: int, accuracy: int, taken: int, now: int): bool =
+  lat >= -90000000 and lat <= 90000000 and lng >= -180000000 and lng <= 180000000
+    and accuracy > 0 and taken <= now and now - taken <= standsFor
+
+pure val latValues = Set(-90000001, 0, 51500000)
+pure val lngValues = Set(-180000001, 0, 120000000)
+pure val accuracyValues = Set(0, 25, 3000)
+pure val takenValues = Set(0, 60000, 3600001)
+
+pure def lawAFutureAnswerIsRefused(lat: int, lng: int, accuracy: int, now: int): bool =
+  not(positionTaken(lat, lng, accuracy, now + 1, now))
+
+pure def lawAnAnswerWithoutAccuracyIsRefused(lat: int, lng: int, taken: int, now: int): bool =
+  not(positionTaken(lat, lng, 0, taken, now))
+```
+
+## Story: Come back to my phone where I left it
+
+> As the owner, I want coming back to Alpha to refresh what I see once,
+> and a screen I already left never to react to my return.
+
+### Alpha hears it came back to the front once for each return, and a screen that has gone hears nothing more
+
+Android may tell the page it shows more than once for one return. Only a
+change from hidden to shown is a return, and only a change from shown to
+hidden is leaving; a second word of the same is no news. A screen hears
+the page's returns only while it is open: what it listened with goes with
+it, and a word Android gives after that reaches nothing of it.
+
+```quint
+pure def news(wasShowing: bool, nowShowing: bool): bool = wasShowing != nowShowing
+
+pure def lawASecondWordOfTheSameIsNoNews(showing: bool): bool = not(news(showing, showing))
+
+pure def lawAReturnIsHeardOnlyFromHidden(wasShowing: bool): bool = news(wasShowing, true) iff not(wasShowing)
 ```
 
 ## Story: Keep my phone's state across restarts

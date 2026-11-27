@@ -1,23 +1,51 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/chats.md, "Story: Reuse words from a message"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
-import { AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
+import { AssistantCard, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { Effect, type ManagedRuntime } from "effect";
 import { useMemo, useState } from "react";
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
+import { textLimit } from "../../gen/app__assistant__composer.ts";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { ReplyFailure, UntoldSteps } from "./ReplyFailure.tsx";
-import type { Attached, Board, Line } from "./talk.vibe";
+import type { Attached, Board, Line, StoredNotice } from "./talk.vibe";
+
+const storedNotices: Record<StoredNotice, { readonly title: string; readonly detail: string; readonly action?: "signIn" | "retry"; readonly label?: string }> = {
+  "model-unavailable": { title: "No AI model ready", detail: "Connect a provider in Settings, then try again.", action: "signIn", label: "Open Settings" },
+  "runtime-error": { title: "Agent error", detail: "The agent hit an error while replying.", action: "retry", label: "Send again" },
+  "model-and-runtime-error": { title: "Agent error", detail: "No AI model is ready and the agent hit an error. Check Settings.", action: "signIn", label: "Open Settings" },
+};
+
+function NoticeCard({ kind, asked, onSettings, onSendAgain }: { kind: StoredNotice; asked?: string; onSettings?: () => void; onSendAgain?: (text: string) => void }) {
+  const { title, detail, action, label } = storedNotices[kind];
+  const act = action === "retry" ? (asked !== undefined && onSendAgain ? () => onSendAgain(asked) : undefined) : onSettings;
+  return <AssistantCard
+    card={act === undefined || action === undefined
+      ? { kind: "plain", text: `${title}. ${detail}` }
+      : { kind: "action", action, title, detail, ...(label === undefined ? {} : { label }) }}
+    onAct={act}
+  />;
+}
 
 export interface MessageActions {
   copy: (selection: MessageSelection) => void;
   useInEmail?: (selection: MessageSelection) => void;
   openLink?: (href: string) => void;
   reading?: { readonly message: number; readonly stop: () => void };
+}
+
+function mapCardSignature(card: MapsCard): string {
+  switch (card.kind) {
+    case "place": return `place:${card.place.name}:${card.place.formattedAddress ?? ""}`;
+    case "places": return `places:${card.query}:${card.near?.name ?? ""}`;
+    case "route": return `route:${card.origin.name}:${card.destination.name}:${card.travelMode}`;
+    case "handoff": return `handoff:${card.handoffKind}:${card.place.name}:${card.webUri}`;
+    case "locate": return `locate:${card.intent}:${card.query ?? ""}:${card.destination?.name ?? ""}`;
+  }
 }
 
 export function chip(file: Attached): AssistantAttachment {
@@ -53,25 +81,40 @@ interface HistoryProps {
 
 /** Recorded rows and their controls are rebuilt only when their data or available actions change. */
 export function useMessageRows({ runtime, board, lines, later, chats, writing, replying, holding, settled, canReadAloud, actions, onSettings, onPreview, onOpenMaps, opened, onChoose }: HistoryProps): MessageRows {
-  const prepared = useMemo(() => lines.map((line) => ({
-    line,
-    cards: line.mine ? [] : mapsCardsOf(line.text).cards,
-    reply: line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text),
-  })), [lines]);
+  const prepared = useMemo(() => lines.map((line) => {
+    const seenCards = new Map<string, number>();
+    const cards = (line.mine ? [] : mapsCardsOf(line.text).cards).map((card) => {
+      const base = mapCardSignature(card);
+      const count = (seenCards.get(base) ?? 0) + 1;
+      seenCards.set(base, count);
+      return { key: `${base}#${count}`, card };
+    });
+    return {
+      line,
+      cards,
+      reply: line.mine ? { words: line.text, choices: [] } : replyBlocks(line.text),
+    };
+  }), [lines]);
   return useMemo(() => {
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
+    const sendAgain = (text: string) => {
+      const edit = { type: "edit", blank: text.trim() === "", long: text.length > textLimit } as const;
+      if (!Composer.enabled(writing, edit)) return;
+      board.type(text);
+      compose(edit);
+    };
     const messages: HistoryRow[] = [];
     const messagesAfterLater: HistoryRow[] = [];
     let pastLater = false;
-    for (const { line, cards, reply: { words: text, choices } } of prepared) {
+    for (const [at, { line, cards, reply: { words: text, choices } }] of prepared.entries()) {
       const rows = pastLater ? messagesAfterLater : messages;
       if (line.id === later) pastLater = true;
       // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": a send of only the reviewed email or transcript draws no empty bubble of the owner's.
       const untold = line.untold ?? [];
       // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a reply with no text that marks a step is its notices.
-      if (text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 && !line.attachments?.length && line.quote === undefined) continue;
+      if (text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && line.notice === undefined && untold.length === 0 && !line.attachments?.length && line.quote === undefined) continue;
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -86,14 +129,17 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
       const readAloud = { type: "readAloud", message, mine: line.mine } as const;
       const reading = actions?.reading;
       const stopReading = reading !== undefined && reading.message === message && Chats.enabled(chats, readAloud) ? reading.stop : undefined;
+      const previous = prepared[at - 1]?.line;
       rows.push({
         id: line.id,
         author: line.mine ? "owner" : "alpha",
-        text,
+        text: line.notice === undefined ? text : "",
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
-        children: cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 ? undefined : <>
-          {cards.map((card) => <MapsCardView key={JSON.stringify(card)} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
+        children: line.notice !== undefined
+          ? <NoticeCard kind={line.notice} asked={previous?.mine ? previous.text : undefined} onSettings={onSettings} onSendAgain={sendAgain} />
+          : cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 ? undefined : <>
+          {cards.map(({ key, card }) => <MapsCardView key={key} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">
               {choice.options.map((option) => <Button key={option.value} variant="secondary" size="sm" onClick={() => onChoose(choice.id, option.value)}>{option.label}</Button>)}

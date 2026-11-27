@@ -51,9 +51,9 @@ function messagingLayers(overrides?: MessagingLayers) {
   )
 }
 
-/** The phone: each service through eliza's client of its Capacitor plugin, with the agent's token and the cloud's key kept in native code. */
+/** The phone: each service through eliza's client of its Capacitor plugin, with the agent's token and the cloud's key kept in native code; the plugins' services may tell the time. */
 export function phonePlatform(messaging?: MessagingLayers): Layer.Layer<Platform> {
-  return Layer.provideMerge(grounded, Layer.provideMerge(Layer.mergeAll(phoneDevice, relayedVault, relayedAgent, relayedCloud, phonePlugins, messagingLayers(messaging)), store))
+  return Layer.provideMerge(phonePlugins, Layer.provideMerge(grounded, Layer.provideMerge(Layer.mergeAll(phoneDevice, relayedVault, relayedAgent, relayedCloud, messagingLayers(messaging)), store)))
 }
 
 /** A page that is no phone: `agent` and `cloud` as they are reached from it, optional messaging layers, and no image, plugins or secrets. */

@@ -2,7 +2,7 @@
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
-const phoneOnly = ["Network", "Carrier & SIM setup", "Erase all data"];
+const phoneOnly = ["Network", "Erase all data"];
 
 const phonePages = extract(({ document }) => [...document.querySelectorAll<HTMLButtonElement>("button")].filter((button) => {
   const label = (button.getAttribute("aria-label") ?? button.textContent ?? "").trim();

@@ -177,8 +177,20 @@ calendar says Not connected.
 ```quint
 pure def scheduleLastMonth(month: int): int = month + 1
 
+pure def scheduleInRange(day: int, todayDay: int, lastIncludedDay: int): bool =
+  day >= todayDay and day <= lastIncludedDay
+
+pure def scheduleShowsNotConnected(standalone: bool, connected: bool, upcomingCount: int): bool =
+  standalone and not(connected) and upcomingCount == 0
+
 pure def lawScheduleCoversThisAndNextMonth(month: int): bool =
   scheduleLastMonth(month) == month + 1 and scheduleLastMonth(month) <= windowLastMonth(month)
+
+pure def lawScheduleStopsBeforePrefetchEnd(month: int): bool =
+  scheduleLastMonth(month) == month + 1 and scheduleLastMonth(month) < windowLastMonth(month)
+
+pure def lawDisconnectedEmptyScheduleSaysNotConnected(standalone: bool): bool =
+  scheduleShowsNotConnected(standalone, false, 0) iff standalone
 ```
 
 ## Story: Hide what I do not want to see

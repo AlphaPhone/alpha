@@ -9,14 +9,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
-import { Agent, type Reached } from "../src/platform/agent.vibe";
+import { Agent, type Reached, viewDiagnostic } from "../src/platform/agent.vibe";
 import { plugin as capacitorPlugin } from "../src/platform/capacitor.ts";
 import { CameraPort, browserCamera, ownedCaptureId } from "../src/platform/camera.vibe";
 import { Cloud, cloudAsked, cloudJsonBody } from "../src/platform/cloud.vibe";
-import { testMocks } from "../src/platform/device.vibe";
+import { Device, testMocks } from "../src/platform/device.vibe";
 import { boundWaitSeconds, createPkcePair, mapHttpFailure, parseRetryAfter } from "../src/platform/messaging.vibe";
+import { NetworkLocation } from "../src/platform/networkLocation.vibe";
 import { pageSpeechBase } from "../src/platform/pageSpeech.ts";
-import { Garbled, Refused, isDeclinedStatus, outcomeOf } from "../src/platform/remote.vibe";
+import { Garbled, Refused, isDeclinedStatus, outcomeOf, resetOf } from "../src/platform/remote.vibe";
 import { assertSlackUserToken } from "../src/platform/slack.vibe";
 import { Telegram, telegramAt } from "../src/platform/telegram.vibe";
 import { VoiceBridge } from "../src/platform/voice.vibe";
@@ -26,7 +27,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { listenerCount } from "./fakes/phone.ts";
 import type { Platform } from "../src/platform/platform.vibe";
 import { type Alpha, area } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { publish } from "./fakes/platform.ts";
 import { scene } from "./fakes/scene.ts";
@@ -77,7 +78,8 @@ it('keeps an unconfigured messaging route on the phone (spec/app/platform/index.
   }
 });
 
-it('Talks in a page only through the relay at exactly "/cloud" (spec/app/voice/index.md, "A page served by Alpha\'s development server talks through that server\'s own Cloud speech relay, and a page that names none offers no Talk")', () => {
+// spec/app/voice/index.md, "A page served by Alpha's development server talks through that server's own Cloud speech relay, and a page that names none offers no Talk"
+it('Talks in a page only through the relay at exactly "/cloud"', () => {
   const devices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: () => Promise.reject(new Error("not asked")) } });
   const named = (content: string | undefined) => {
@@ -185,6 +187,75 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"
     expect([await agent(429), await agent(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
     expect([await cloud(429), await cloud(503)]).toEqual([["Refused", 429, 30], ["Refused", 503, undefined]]);
+    // spec/app/platform/index.md, "A refusal carries the time the other side named for its allowance to come back, and a reader takes it only while it lies ahead"
+    const back = Date.UTC(2030, 0, 1);
+    const reset = failed(await alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (one) => one.call(HttpClientRequest.get(`/api/v1/platform/spent?until=${back}`))))) as Refused | undefined;
+    expect([reset?._tag, reset?.status, reset?.wait, reset?.resetAt]).toEqual(["Refused", 429, undefined, back]);
+    const ungiven = failed(await alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (one) => one.call(cloudBusy(429))))) as Refused | undefined;
+    expect([reset ? resetOf(reset, back - 1) : undefined, reset ? resetOf(reset, back) : undefined, ungiven ? resetOf(ungiven, 0) : undefined]).toEqual([back, undefined, undefined]);
+  });
+
+  // spec/app/platform/index.md, "Story: Know roughly where my phone is without GPS"
+  it("Know roughly where my phone is without GPS: a position looked up seldom, kept while the same networks are seen, and none in a browser (spec/app/platform/index.md, \"Story: Know roughly where my phone is without GPS\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha } = await open(world, only("home"));
+    const network = world.platform.network;
+    const locate = () => alpha.runtime.runPromise(Effect.flatMap(NetworkLocation, (one) => one.locate()));
+    const accuracy = async () => Option.getOrUndefined(Option.map(await locate(), (fix) => fix.accuracy));
+    const minutes = (count: number) => later(alpha, count * 60_000);
+    if (!phone) return void expect([Option.isNone(await locate()), network.asked]).toEqual([true, []]);
+    // spec/app/platform/index.md, "A network position is asked only when one is needed now, reused for fifteen minutes, and kept for an hour while the same networks are seen": two callers at once share one lookup.
+    const [first] = await Promise.all([locate(), locate()]);
+    expect([Option.map(first, (fix) => [fix.lat, fix.lng, fix.accuracy]), network.asked]).toEqual([Option.some([51_500_000, -120_000, 40]), [undefined]]);
+    await minutes(1);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined]]);
+    await minutes(15);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined, "cafe"]]);
+    await minutes(45);
+    expect([await accuracy(), network.asked]).toEqual([40, [undefined, "cafe", undefined]]);
+    network.failing = true;
+    await minutes(16);
+    expect([await accuracy(), network.asked.length]).toEqual([40, 4]);
+    await minutes(1);
+    expect([await accuracy(), network.asked.length]).toEqual([40, 4]);
+    // spec/app/platform/index.md, "With too few networks seen, the plugin asks for the position of the phone's address alone, and that answer is never confirmed unchanged"
+    Object.assign(network, { failing: false, seen: "", accuracy: 3000 });
+    await minutes(2);
+    expect([await accuracy(), network.asked.at(-1)]).toEqual([3000, "cafe"]);
+    await minutes(16);
+    expect([await accuracy(), network.asked.length, network.asked.at(-1)]).toEqual([3000, 6, undefined]);
+    // spec/app/platform/index.md, "A network position is taken only where it lies on the globe, has an accuracy, and is neither from the future nor over an hour old"
+    network.accuracy = 0;
+    await minutes(16);
+    expect([await accuracy(), network.asked.length]).toEqual([3000, 7]);
+    await minutes(1);
+    expect(network.asked.length).toBe(7);
+  });
+
+  // spec/app/platform/index.md, "A failed view request is recorded by its step and a fingerprint of its id, never by its path or body"
+  it("Talk to the resident agent: a failed view request is recorded by its step and its id's fingerprint alone (spec/app/platform/index.md, \"A failed view request is recorded by its step and a fingerprint of its id, never by its path or body\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)))].slice(0, 8).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const said = (method: string, path: string, body?: string) => alpha.runtime.runPromise(viewDiagnostic(method, path, body));
+    expect(await Promise.all([
+      said("POST", "/api/views/interact-claim", JSON.stringify({ requestId: id })),
+      said("POST", "/api/views/interact-result?x=1", JSON.stringify({ requestId: "not-generated" })),
+      said("POST", "/api/views/calendar/navigate", JSON.stringify({ completedActionHandoffId: id, secret: "words" })),
+      said("POST", "/api/views/calendar/navigate", JSON.stringify({ completedActionHandoffId: id, pad: "a".repeat(5000) })),
+      said("GET", "/api/views/interact-claim", JSON.stringify({ requestId: id })),
+      said("POST", "/api/messages", JSON.stringify({ requestId: id })),
+    ])).toEqual([` navigation=claim navigation_ref=${digest}`, " navigation=result", ` navigation=prepare navigation_ref=${digest}`, " navigation=prepare", "", ""]);
+  });
+
+  // spec/app/platform/index.md, "Story: Come back to my phone where I left it"
+  it("Come back to my phone where I left it: one return is heard once, however often Android says the page shows (spec/app/platform/index.md, \"Story: Come back to my phone where I left it\")", async () => {
+    const { alpha } = await open({ ...scene(), phone }, only("home"));
+    const heard = alpha.runtime.runPromise(Effect.flatMap(Device, (device) => Stream.runCollect(Stream.take(device.visible, 3))));
+    // spec/app/platform/index.md, "Alpha hears it came back to the front once for each return, and a screen that has gone hears nothing more"
+    for (const shown of [true, false, false, true, true, false]) await seen(shown);
+    expect(await heard).toEqual([false, true, false]);
+    await seen(true);
   });
 
   // spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
@@ -436,7 +507,7 @@ it("Platform boundary invariants: singleton Capacitor proxies, honest Garbled/40
   ]).toEqual(["42", "v:99"]);
 });
 
-it("Removes agent stream listeners even when abort fails (spec/app/platform/index.md, \"A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent\")", async () => {
+it('Removes agent stream listeners even when abort fails (spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent")', async () => {
   const world = { ...scene(), phone: true };
   world.platform.abortFails = true;
   const { alpha } = await open(world, only("home"));
@@ -445,7 +516,7 @@ it("Removes agent stream listeners even when abort fails (spec/app/platform/inde
   await vi.waitFor(() => expect([listenerCount("ElizaAgent", "streamData"), listenerCount("ElizaAgent", "streamEnd")]).toEqual([0, 0]));
 });
 
-it("Voice probe recovers after interruption and cloud openMic cancels capture after shut (spec/app/voice/index.md, \"Story: Hold a spoken conversation\"; spec/app/voice/index.md, \"Story: Mute, interrupt and stop\")", async () => {
+it('Voice probe recovers after interruption and cloud openMic cancels capture after shut (spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Mute, interrupt and stop")', async () => {
   const world = { ...scene(), phone: true };
   let releaseProbe = () => {};
   world.voice.probeGate = () => new Promise<void>((resolve) => { releaseProbe = resolve; });
@@ -470,7 +541,7 @@ it("Voice probe recovers after interruption and cloud openMic cancels capture af
   expect(world.voice.activeMicSession).toBeUndefined();
 });
 
-it("Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, \"Story: Take photos and videos\")", async () => {
+it('Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, "Story: Take photos and videos")', async () => {
   const stoppedTracks: string[] = [];
   const makeTrack = (label: string, extra?: Record<string, unknown>) => ({
     stop: () => { stoppedTracks.push(label); },
@@ -554,7 +625,7 @@ it("Browser camera releases audio track on recorder error and clears film on int
   }
 });
 
-it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/platform/index.md, \"Story: Talk to the resident agent\")", async () => {
+it('Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/platform/index.md, "Story: Talk to the resident agent")', async () => {
   const client = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({
       ok: false, error_code: 401, error_message: "SESSION_PASSWORD_NEEDED", hint: "pet", pending_auth_id: "pa-1",
@@ -564,7 +635,7 @@ it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/plat
   expect(result).toEqual({ kind: "PasswordRequired", hint: "pet", pendingAuthId: "pa-1" });
 });
 
-it("Cloud fetch preserves Request metadata and parses empty or non-JSON bodies without throwing (spec/kit/read.md, \"Story: Read from outside\")", () => {
+it('Cloud fetch preserves Request metadata and parses empty or non-JSON bodies without throwing (spec/kit/read.md, "Story: Read from outside")', () => {
   const controller = new AbortController();
   const parsed = cloudAsked(new Request("https://cloud.invalid/api/v1/user", {
     method: "POST",

@@ -123,6 +123,17 @@ pure def alwaysWhatWasDraftedIsUsable(g: Generate): bool = and {
 }
 ```
 
+### No draft is held while a generation is in flight
+
+Discovered by the proof: without stating that a loading generation clears any
+previous draft, using a draft could close the prompt while a generation was
+still loading.
+
+```quint
+pure def alwaysNoDraftWhileGenerating(g: Generate): bool =
+  g.generation.status == R::Loading implies g.drafted.length() == 0
+```
+
 ### Nothing is asked of the agent but a description that may be built, and a draft is taken only from the newest asking
 
 ```quint

@@ -68,8 +68,8 @@ pure val nowValues = Set(50, 100, 200)
 pure val untilValues = Set(200, 300)
 pure val revisionValues = Set(1, 2)
 pure val itemRevisionValues = Set(1, 2)
-pure val expectedRevisionValues = Set(1, 2, 3, 4)
-pure val attemptIdValues = Set(1, 2, 3, 4, 5)
+pure val expectedRevisionValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+pure val attemptIdValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 ```
 
 ### Scheduling arms a reminder for its due time (including already-due overdue reminders) and replaces any earlier schedule for that reminder
@@ -253,6 +253,9 @@ pure def reopen(s: Alerts): AlertMoved =
 ```
 
 ### Every tracked alert has a unique positive id, never rings early, never rings while completed, and any snoozed alert is strictly in the future
+
+Discovered by the proof: a pending calendar snooze is also strictly after the
+alert's last firing time.
 
 ```quint
 pure def validEntry(e: AlertEntry): bool =

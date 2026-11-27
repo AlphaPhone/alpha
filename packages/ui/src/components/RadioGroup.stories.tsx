@@ -18,5 +18,6 @@ export const Disabled = {
     canvas.getByRole("radiogroup").focus();
     await userEvent.keyboard(" {ArrowDown}");
     await expect(chosen()).toEqual(["false", "true", "false"]);
+    await expect(canvas.getByRole("radiogroup").getAttribute("aria-disabled")).toBe("true");
   },
 };

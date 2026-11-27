@@ -1,10 +1,17 @@
 // spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
 import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud"
 import { nativeAssetLinks } from "@elizaos/cloud-worker"
+import deploymentsTable from "@repo/deployment/deployments.json" with { type: "json" }
 import { registrationOf, type Environment, type Registration, type Statement } from "../gen/cloud.effect.vibe"
 import candidate from "../profile/candidate.example.json" with { type: "json" }
 import staging from "../profile/staging.json" with { type: "json" }
 import seed from "../seed/staging.json" with { type: "json" }
+
+/** Hosted cloud environments from `@repo/deployment`: production and staging origins and App Link hosts. */
+export const hostedDeployments = {
+  production: { kind: "hosted" as const, cloud: deploymentsTable.production.cloud, appLinkHost: deploymentsTable.production.appLinkHost },
+  staging: { kind: "hosted" as const, cloud: deploymentsTable.staging.cloud, appLinkHost: deploymentsTable.staging.appLinkHost },
+}
 
 /** The local `staging` profile and the `candidate` template an operator completes for Alpha Cloud. */
 export const profiles = {

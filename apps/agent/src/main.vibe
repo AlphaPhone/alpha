@@ -65,6 +65,8 @@ schema Host {
 /** The export each hosted package builds its module with, as `runAgentCli`'s `hostModules` takes it. */
 const localSpeechModule = "@elizaos/plugin-local-inference"
 const walletModuleName = "@elizaos/plugin-wallet"
+/** The bundled plugin whose `init` the entry wraps with `startedLater`. */
+const workflowPluginName = "@elizaos/plugin-workflow"
 const hostedExports: Readonly<Record<string, string>> = {
   "@elizaos/plugin-notes": "notesModuleWith",
   [walletModuleName]: "walletModule",
@@ -75,7 +77,106 @@ const hostedExports: Readonly<Record<string, string>> = {
 const alphaOwned = (name: string) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName
 
 /**
- * The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, and the Alpha product plugin.
+ * The runtime services the entry gives the plugins (spec/agent/index.md, "The pack's entry gives the workflow plugin the
+ * enrolled phone's steps and Maps its saved places"): `workflow-device`, each step offered to the enrolled phone through
+ * eliza's device-action requests and aborted on stop, and Maps' saved places, one file per owner under the agent's state
+ * directory, written only against the revision it read, through an atomic rename, one write at a time.
+ *
+ * The workflow plugin reads its `workflow-worker` and `workflow-device` services once, in its `init`, but the pinned
+ * eliza starts every service only after the runtime has initialized, so that read always found neither: the engine said
+ * `unavailable` with a pinned worker and the device steps were never offered. `startedLater` lets that `init` see each
+ * of the two services that is registered (the worker only when the launch pins one) as an object that waits for the
+ * started service on each call. A service that is not registered stays absent. This belongs upstream in
+ * `@elizaos/plugin-workflow`, which should look its services up when it uses them.
+ */
+const hostServices = [
+  'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
+  'import { Service } from "@elizaos/core"',
+  'import { WORKFLOW_DEVICE_SERVICE } from "@elizaos/plugin-workflow"',
+  'import { registerMapsSavedPlaces } from "@elizaos/plugin-maps"',
+  'import { MapsFailure } from "@elizaos/plugin-maps-client"',
+  'import { createHash, randomUUID } from "node:crypto"',
+  'import { mkdir, readFile, rename, writeFile } from "node:fs/promises"',
+  'import path from "node:path"',
+  "",
+  "const savesLimit = 256 * 1024",
+  "const failed = (message) => new MapsFailure({ code: \"storage\", message })",
+  "",
+  "async function readSaves(file) {",
+  "  let text",
+  "  try { text = await readFile(file, \"utf8\") } catch (error) { if (error?.code === \"ENOENT\") return undefined; throw error }",
+  "  const { revision, text: saved } = JSON.parse(text)",
+  "  if (!Number.isSafeInteger(revision) || revision < 0 || typeof saved !== \"string\") throw new Error(\"Saved places are damaged\")",
+  "  return { revision, text: saved }",
+  "}",
+  "",
+  "function savedPlaceFiles(root) {",
+  "  let queue = Promise.resolve()",
+  "  const serial = (work) => { const next = queue.then(work, work); queue = next.catch(() => undefined); return next }",
+  "  const fileOf = (owner) => path.join(root, `${createHash(\"sha256\").update(owner, \"utf8\").digest(\"hex\")}.json`)",
+  "  return {",
+  "    read: (owner) => Effect.tryPromise({ try: () => serial(() => readSaves(fileOf(owner))), catch: () => failed(\"Saved places could not be read.\") }),",
+  "    write: (owner, expectedRevision, text) => Effect.tryPromise({",
+  "      try: () => serial(async () => {",
+  "        if (Buffer.byteLength(text, \"utf8\") > savesLimit) return false",
+  "        await mkdir(root, { recursive: true, mode: 0o700 })",
+  "        const file = fileOf(owner)",
+  "        const current = await readSaves(file)",
+  "        if (current?.revision !== expectedRevision) return false",
+  "        const staged = `${file}.${randomUUID()}.part`",
+  "        await writeFile(staged, JSON.stringify({ revision: (current?.revision ?? 0) + 1, text }), { mode: 0o600, flag: \"wx\" })",
+  "        await rename(staged, file)",
+  "        return true",
+  "      }),",
+  "      catch: () => failed(\"Saved places could not be written.\"),",
+  "    }),",
+  "  }",
+  "}",
+  "",
+  "class WorkflowDevice extends Service {",
+  "  static serviceType = WORKFLOW_DEVICE_SERVICE",
+  '  capabilityDescription = "Reviewed workflow steps on the enrolled Alpha phone"',
+  "  stopping = new AbortController()",
+  "  static async start(runtime) { return new WorkflowDevice(runtime) }",
+  "  constructor(runtime) { super(runtime); this.offer = workflowDeviceOffer(runtime) }",
+  "  enrollment() { return this.offer.enrollment() }",
+  "  perform(binding, target, operation) { return this.offer.perform(binding, target, operation, this.stopping.signal) }",
+  "  async stop() { this.stopping.abort() }",
+  "}",
+  "",
+  "const runtimeServices = ({ stateDirectory }) => [",
+  "  WorkflowDevice,",
+  "  class MapsSavedPlaces extends Service {",
+  '    static serviceType = "maps-saved-places"',
+  '    capabilityDescription = "The owner\'s saved places, kept under the agent\'s state"',
+  "    static async start(runtime) { return new MapsSavedPlaces(runtime) }",
+  "    constructor(runtime) { super(runtime); registerMapsSavedPlaces(runtime, savedPlaceFiles(path.join(stateDirectory, \"maps\", \"saved-places\"))) }",
+  "    async stop() {}",
+  "  },",
+  "]",
+  "",
+  "const lateServices = { \"workflow-worker\": [\"spawnWorker\"], [WORKFLOW_DEVICE_SERVICE]: [\"enrollment\", \"perform\"] }",
+  "",
+  "function startedLater(plugin) {",
+  "  if (plugin?.init === undefined) return plugin",
+  "  return { ...plugin, init: async (config, runtime) => {",
+  "    const own = Object.hasOwn(runtime, \"getService\")",
+  "    const previous = runtime.getService",
+  "    const registered = new Set(runtime.getRegisteredServiceTypes())",
+  "    runtime.getService = function (name) {",
+  "      const found = previous.call(this, name)",
+  "      const methods = lateServices[name]",
+  "      if (found != null || methods === undefined || !registered.has(name)) return found",
+  "      const started = () => runtime.getServiceLoadPromise(name)",
+  "      return Object.fromEntries(methods.map((method) => [method, (...args) => started().then((service) => service[method](...args))]))",
+  "    }",
+  "    try { return await plugin.init(config, runtime) } finally { if (own) runtime.getService = previous; else delete runtime.getService }",
+  "  } }",
+  "}",
+]
+
+/**
+ * The pack's entry: eliza's agent command started with each bundled plugin, each hosted package's module, the Alpha product plugin, and the entry's runtime services.
  * The command is imported from agent-host's own CLI module, as eliza's bundle entry does: the package's root also exports the bundle
  * builder, which would carry Vite into the bundle. Take the Android inference export from its owning module for the
  * same reason: the OS root includes build tooling. The entry sits at `.alpha/pack-entry-<worktree>/entry.js` inside the pack's clone.
@@ -90,14 +191,13 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     'import { fileURLToPath, pathToFileURL } from "node:url"',
     `import { runAgentCli } from "../../packages/agent-host/dist/src/cli.js"`,
     'import { startStore as openEarlierPGlite } from "../../packages/agent-host/dist/src/storage/migrate.js"',
-    'import { workflowDeviceOffer } from "../../packages/agent-host/dist/src/device-actions/workflow-offer.js"',
-    'import { Service } from "@elizaos/core"',
     'import { Effect } from "effect"',
     ...(includesSpeech ? [
       'import { androidInferenceEngine } from "../../packages/os/dist/src/inference/index.js"',
     ] : []),
     ...bundled.map((name, index) => `import * as plugin${index} from ${JSON.stringify(name)}`),
     ...allHosted.map(({ name, module }, index) => `import { ${module} as host${index}${name === product.name ? ", makeNativeNotesCleanup, notesTranscriptionRoutes" : name === localSpeechModule ? ", localInferenceProvider" : ""} } from ${JSON.stringify(name)}`),
+    ...hostServices,
     `const notesCleanup = makeNativeNotesCleanup(${JSON.stringify(nativeNotesCleanup)})`,
     'const earlierVectorPath = join(dirname(fileURLToPath(import.meta.url)), "vector.tar.gz")',
     'const earlierVectorExtension = { name: "pgvector", setup: async (_pg, emscriptenOpts) => ({ emscriptenOpts, bundlePath: pathToFileURL(earlierVectorPath) }) }',
@@ -131,20 +231,13 @@ export function entrySource(bundled: readonly string[], hosted: readonly { name:
     '  if (account === undefined) return { status: 503, body: { error: "RESIDENT_ACCOUNT_UNAVAILABLE" } }',
     '  return { status: 200, body: { epoch: context.epoch, agentId: context.runtime.agentId, userId: account.userId, organizationId: account.organizationId } }',
     '} })',
-    'class WorkflowDevice extends Service {',
-    '  static serviceType = "workflow-device"',
-    '  capabilityDescription = "Reviewed workflow steps on the enrolled Alpha phone"',
-    '  stopping = new AbortController()',
-    '  static async start(runtime) { return new WorkflowDevice(runtime) }',
-    '  constructor(runtime) { super(runtime); this.offer = workflowDeviceOffer(runtime) }',
-    '  enrollment() { return this.offer.enrollment() }',
-    '  perform(binding, target, operation) { return this.offer.perform(binding, target, operation, this.stopping.signal) }',
-    '  async stop() { this.stopping.abort() }',
-    '}',
     "runAgentCli({",
-    "  runtimeServices: () => [WorkflowDevice],",
+    "  runtimeServices,",
     "  bundled: [",
-    ...bundled.map((name, index) => `    { packageName: ${JSON.stringify(name)}, plugin: plugin${index}.default ?? plugin${index}.plugin },`),
+    ...bundled.map((name, index) => {
+      const plugin = `plugin${index}.default ?? plugin${index}.plugin`
+      return `    { packageName: ${JSON.stringify(name)}, plugin: ${name === workflowPluginName ? `startedLater(${plugin})` : plugin} },`
+    }),
     ...allHosted.map(({ name }) => `    { packageName: ${JSON.stringify(name)}, plugin: undefined },`),
     "  ],",
     `  productPlugin: ${JSON.stringify(product.name)},`,

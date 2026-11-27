@@ -10,11 +10,10 @@ import { alphaImage } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const rule = "spec/app/messages/index.md, \"The search field opens over the list, and Back closes it with what it typed\"";
 const searchField = () => document.querySelector<HTMLInputElement>("input[aria-label='Search conversations']");
 
 describe("Messages search", () => {
-  it(`On the launcher the search draws no Back, Android's Back closes it, and the next Back leaves Messages (${rule})`, async () => {
+  it(`On the launcher the search draws no Back, Android's Back closes it, and the next Back leaves Messages (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
     const world = alphaImage();
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha } = await open(world, only("home", "view:Messages"));
@@ -54,7 +53,7 @@ describe("Messages search", () => {
     return { alpha, runtime };
   }
 
-  it(`Off the launcher the search keeps its Back, which closes the search and stays in Messages (${rule})`, async () => {
+  it(`Off the launcher the search keeps its Back, which closes the search and stays in Messages (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
     const { alpha, runtime } = await openMessagesView(false);
     expect(document.querySelector("main")?.hasAttribute("data-alpha-launcher")).toBe(false);
 
@@ -67,7 +66,7 @@ describe("Messages search", () => {
     await vi.waitFor(() => expect(searchField()).toBeNull());
   });
 
-  it(`The search opens empty, and a conversation opened from its results returns to them before Back closes the search (${rule})`, async () => {
+  it(`The search opens empty, and a conversation opened from its results returns to them before Back closes the search (spec/app/messages/index.md, "The search field opens over the list, and Back closes it with what it typed")`, async () => {
     const { alpha, runtime } = await openMessagesView(true);
     const everyone = (await runtime.runPromise(Effect.flatMap(Messages, (machine) => machine.get()))).threads;
     const words = document.querySelector("ul[aria-label='Conversations'] button")?.getAttribute("aria-label")?.split(" ")[0] ?? "";

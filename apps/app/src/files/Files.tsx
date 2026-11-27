@@ -281,7 +281,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               <Button type="button" variant="ghost" size="icon" aria-label="Close filter controls" onClick={() => setFiltering(false)}><X /></Button>
             </div>
             <div role="group" aria-label="Kind" className="flex flex-wrap gap-1">
-              {kinds.map(([one, name]) => <Button key={name} type="button" variant={kind === one ? "secondary" : "ghost"} size="sm" aria-pressed={kind === one} onClick={() => setKind(one)}>{name}</Button>)}
+              {kinds.map(([one, name]) => <Chip key={name} pressed={kind === one} onPressedChange={() => setKind(one)}>{name}</Chip>)}
             </div>
           </form>
         )}

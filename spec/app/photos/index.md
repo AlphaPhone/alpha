@@ -21,6 +21,21 @@ screen or a spinner. Scanning text from a selected image opens the on-device
 [scan review](../files/scan.md) over Photos and returns to the same library
 when dismissed.
 
+### Scanning a selected image runs on-device review over Photos without saving until the owner chooses
+
+Dismissing the review returns to the same library. The image is only used in the [scan review](../files/scan.md) unless the owner explicitly saves something from it.
+
+```quint
+pure def photoImageScanAdmitted(ownerSelected: bool, onDevice: bool, explicitSave: bool): bool =
+  ownerSelected and onDevice and not(explicitSave)
+
+pure def photoScanSavesAnything(explicitSave: bool): bool = explicitSave
+
+pure def lawPhotoScanWritesNothingWithoutExplicitSave(ownerSelected: bool, onDevice: bool): bool =
+  not(photoScanSavesAnything(false))
+    and (photoImageScanAdmitted(ownerSelected, onDevice, false) iff (ownerSelected and onDevice))
+```
+
 ## Domain
 
 ### What Photos shows
@@ -549,6 +564,14 @@ pure def sometimesFailed(s: Photos): bool = s.visible and s.library.status == R:
 
 ```quint
 pure def sometimesPaged(s: Photos): bool = s.paging and s.library.status == R::Loaded and s.rows.size() >= 2
+
+pure val eval_witness_sometimesPaged = (
+  ("accessIs", P::Granted, false, Phone),
+  ("showView", false, Set(), Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, true, Phone),
+  ("loadMore", Owner),
+  ("listed", 2, true, Set(2), Set(2), Set(), 0, 1, false, Phone),
+)
 ```
 
 ## Story: Look at what I just took on the lock screen
@@ -705,9 +728,21 @@ pure def canUndoTrash(s: Photos, by: Actor): bool =
 
 pure def undoTrash(s: Photos, by: Actor): Photos = { ...s, job: C::undoTrash(s.job, s.revision, by) }
 
+pure val eval_witness_canUndoTrash = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("requested", C::Trash, 1, 1, Owner), ("sendNext", Set(1), Phone),
+  ("changed", 1, Set(1), Set(), false, true, Phone), ("undoTrash", Owner))
+
 pure def canUndoLapsed(s: Photos, by: Actor): bool = C::canLapse(s.job, by)
 
 pure def undoLapsed(s: Photos, by: Actor): Photos = { ...s, job: C::lapse(s.job, by) }
+
+pure val eval_witness_canUndoLapsed = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("requested", C::Trash, 1, 1, Owner), ("sendNext", Set(1), Phone),
+  ("changed", 1, Set(1), Set(), false, true, Phone), ("undoLapsed", Phone))
 ```
 
 ### Every change is the owner's, of exactly what they chose or confirmed, at the revision they were shown, and nothing is tried again before an unknown outcome is read back
@@ -823,12 +858,14 @@ pure def sometimesCameraAlbum(s: Photos): bool = s.cameraAlbum > 0 and s.shelf.d
 
 ### A dialog about an album is about the album showing, and "Add to album" has a subject
 
+A Camera capture's album chooser stays on the unfiltered Library.
+
 ```quint
 pure def alwaysDialogNamesItsSubject(s: Photos): bool =
   ((s.shelf.dialog == AL::RenameAlbum or s.shelf.dialog == AL::DeleteAlbum) implies (s.shelf.target == s.album and s.album != 0))
     and (s.shelf.dialog == AL::ChooseAlbum implies ((s.selecting and s.selected.size() > 0) or s.cameraAlbum != 0))
-    and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and s.album == 0 and not(s.selecting) and unlocked(s)
-      and s.library.status == R::Loaded
+    and (s.cameraAlbum != 0 implies (s.cameraAlbum == s.cameraItem and not(s.selecting) and unlocked(s)
+      and cameraVisit(s) and s.library.status == R::Loaded
       and (s.shelf.dialog == AL::ChooseAlbum or s.shelf.dialog == AL::NewAlbum)))
     and AL::alwaysDialogNamesItsSubject(s.shelf)
 ```
@@ -870,6 +907,12 @@ pure def canRemoveSelected(s: Photos, by: Actor): bool =
     and AL::canWrite(s.shelf, AL::Remove, s.album, "", 0, s.selected.size() > 0, false, s.albums.size())
 
 pure def removeSelected(s: Photos, by: Actor): Done = writing(AL::Remove, s.album, "", 0, s.selected, false, by, s)
+
+pure val eval_witness_canRemoveSelected = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("openAlbum", 1, Owner), ("listed", 3, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("startSelect", Owner), ("toggle", 1, Owner), ("removeSelected", Owner))
 ```
 
 ### An album change is the owner's, carries exactly the selection or the items confirmed, to an album listed or the album showing
@@ -910,8 +953,20 @@ pure def albumWritten(s: Photos, attempt: int, confirmed: bool, known: bool, by:
 ```quint
 pure def sometimesAddingToAlbum(s: Photos): bool = s.shelf.write.outcome == A::Sent and s.shelf.change == AL::Add and s.tab == Library
 
+pure val eval_witness_sometimesAddingToAlbum = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("showTab", Library, Owner), ("listed", 3, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("startSelect", Owner), ("toggle", 1, Owner), ("chooseAlbum", Owner), ("addTo", 1, Owner))
+
 pure def sometimesAlbumDeleted(s: Photos): bool =
   s.shelf.change == AL::Delete and s.shelf.write.outcome == A::Confirmed and s.tab == Albums and s.album == 0
+
+pure val eval_witness_sometimesAlbumDeleted = (
+  ("accessIs", P::Granted, true, Phone), ("showTab", Albums, Owner),
+  ("listed", 2, true, Set(1), Set(), Set(), 0, 1, false, Phone),
+  ("openAlbum", 1, Owner), ("deleteAlbum", Owner), ("confirmDelete", Owner),
+  ("albumWritten", 1, true, true, Phone))
 ```
 
 ## Story: Carry out what I confirmed for Alpha
@@ -949,5 +1004,31 @@ pure def confirmAlbum(s: Photos, name: str, letters: int, items: Set[int], basis
 ```quint
 pure def sometimesProposalRunning(s: Photos): bool = C::running(s.job) and s.job.change == C::Share and s.job.requests >= 1
 
+pure val eval_witness_sometimesProposalRunning = (
+  ("accessIs", P::Granted, true, Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, false, Phone),
+  ("confirmProposal", C::Share, Set(1), 1, Owner), ("sendNext", Set(1), Phone))
+
 pure def sometimesProposedAlbum(s: Photos): bool = s.shelf.proposed and s.shelf.write.outcome == A::Confirmed
+```
+
+### A saved copy the earlier Alpha left pending is checked once instead of forgotten
+
+On the phone the earlier Alpha kept the one pending saved-copy operation
+id under `alpha.photos.pending-copy.v1`. When Camera or Photos starts on
+the phone and that record holds an operation id, its outcome is checked
+once through the phone's edit receipt, never saved again, and the record
+is removed only once the phone settles it (saved or no longer pending). A
+record that is not an operation id, or one whose receipt is still unknown
+or unreachable, stays where it is. The browser build kept its own
+receipts in its library, so it leaves the phone record alone.
+
+```quint
+type PendingOutcome = PendingUnknown | PendingSaved | PendingGone
+
+pure def previousCopyCleared(hasRecord: bool, receipt: PendingOutcome): bool =
+  hasRecord and receipt != PendingUnknown
+
+pure def lawAnUnsettledPreviousCopyIsNeverForgotten(hasRecord: bool, receipt: PendingOutcome): bool =
+  (hasRecord and receipt == PendingUnknown) implies not(previousCopyCleared(hasRecord, receipt))
 ```

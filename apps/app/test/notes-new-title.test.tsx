@@ -40,7 +40,7 @@ const collectionOf = (titles: readonly string[], deleted: readonly string[] = []
   trash: deleted.map((title, index) => ({ note: note(`t${index}`, title, "", 0), deletedAt: new Date(0).toISOString() })),
 });
 
-describe("A new note starts titled New note (spec/app/notes/editor.md, \"The owner opens a note, or starts a new one, and the agent opens the one note the owner just named, only when no unsaved draft waits and nothing else of Notes is open; the agent's note may take the place of a saved one\")", () => {
+describe(`A new note starts titled New note (spec/app/notes/editor.md, "The owner opens a note, or starts a new one, and the agent opens the one note the owner just named, only when no unsaved draft waits and nothing else of Notes is open; the agent's note may take the place of a saved one")`, () => {
   it("numbers past every note and deleted note titled New note, as v119's nextDefaultNoteTitle, and leaves other titles alone", () => {
     expect(startingTitle(collectionOf([]))).toBe("New note");
     expect(startingTitle(collectionOf(["Groceries", "New notes", "New note 0", "New note x", "Newnote 4"]))).toBe("New note");
@@ -80,7 +80,7 @@ describe("A new note starts titled New note (spec/app/notes/editor.md, \"The own
   });
 });
 
-describe("A new note holding only its starting title is not kept (spec/app/notes/editor.md, \"Closing the editor keeps an unsaved draft for later, and lets go of a saved one\")", () => {
+describe('A new note holding only its starting title is not kept (spec/app/notes/editor.md, "Closing the editor keeps an unsaved draft for later, and lets go of a saved one")', () => {
   async function closeUnchanged(alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof notes.runtime>, world: ReturnType<typeof scene>, before: string[]) {
     await press("Done");
     await until(alpha, runtime, Editor, (state) => !state.showing && !waiting(state) && !state.fresh);

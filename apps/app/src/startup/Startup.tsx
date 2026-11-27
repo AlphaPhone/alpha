@@ -12,6 +12,8 @@ import {
 import { Effect, type ManagedRuntime } from "effect";
 import { RefreshCw, X } from "lucide-react";
 import { useMemo, useSyncExternalStore } from "react";
+import type { Machine as ShellMachine } from "../../gen/app__shell.effect.vibe";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as StartupMachine } from "../../gen/app__startup.effect.vibe";
 import { useMachine as useStartup } from "../../gen/app__startup.react.ts";
 import { type Outcome, presentation, shows } from "../../gen/app__startup.ts";
@@ -41,7 +43,7 @@ const connectionMessages: Partial<Record<Outcome, string>> = {
 };
 
 type StartupRuntime = ManagedRuntime.ManagedRuntime<
-  StartupMachine | StartupDesk | AccessDesk | AccessMachine | RecoveryMachine | JournalMachine | Agent | Time,
+  ShellMachine | StartupMachine | StartupDesk | AccessDesk | AccessMachine | RecoveryMachine | JournalMachine | Agent | Time,
   unknown
 >;
 
@@ -121,6 +123,7 @@ export function StartupOverlay({
   side?: Side;
   version?: string;
 }) {
+  const shell = useShell(runtime);
   const boot = useTimed(runtime, useStartup);
   const access = useTimed(runtime, useAccess);
   const recovery = useTimed(runtime, useRecovery);
@@ -194,7 +197,8 @@ export function StartupOverlay({
 
   const showMark = bootState !== undefined && shows(bootState, "Mark");
   const accessPanel = accessState && accessDesk.hasHooks() ? panel(accessState) : "Hidden";
-  const connectionMessage = bootState && bootState.known && bootState.connection !== "Pending" && bootState.connection !== "Connected" && !host.agentHealthy
+  const onHome = shell.state !== undefined && shell.state.trail.length === 0;
+  const connectionMessage = onHome && bootState && shows(bootState, "Home") && bootState.connection !== "Pending" && bootState.connection !== "Connected" && !host.agentHealthy
     ? connectionMessages[bootState.connection]
     : undefined;
 

@@ -251,7 +251,7 @@ export function MediaGrid({ rows, selection, grouped, density, runtime, revision
   const placeAnchor = useCallback((section: HTMLElement | null) => {
     const saved = anchorRef.current;
     const pane = section?.parentElement;
-    if (!pane || saved?.density !== density) return;
+    if (!pane || !saved || saved.density !== density) return;
     anchorRef.current = undefined;
     const line = Array.from(pane.querySelectorAll<HTMLElement>("[data-alpha-grid-line]")).find((one) =>
       one.dataset.alphaGridLine?.split(",").includes(saved.member));

@@ -185,8 +185,10 @@ const releasedOver = (port: ChannelPort) => async (...argv: string[]) => {
 };
 const released = releasedOver(channelAt().port);
 
-describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify and publish a release\")", () => {
-  it("names the one launcher channel, and keeps the APKs of the repository's earlier names (spec/release/index.md, \"Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid\")", async () => {
+// spec/release/index.md, "Story: Qualify and publish a release"
+describe("Qualify and publish a release", () => {
+  // spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"
+  it("names the one launcher channel, and keeps the APKs of the repository's earlier names", async () => {
     expect(await released("channel")).toEqual({ ok: true, value: {
       repository: "eliza-research/alpha", repositoryId: 1396333361, tag: "app-stable-alphacompute",
       manifestUrl: "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json",
@@ -198,7 +200,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     ]).toEqual([true, false, false]);
   });
 
-  it("refuses a build its verification recorded with test mocks, and one with no row at all (spec/release/index.md, \"A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate\")", async () => {
+  // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
+  it("refuses a build its verification recorded with test mocks, and one with no row at all", async () => {
     const directory = scratch();
     const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
     const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
@@ -236,14 +239,20 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     // spec/release/index.md, "The APK is uploaded while the receipt is valid, above the floor and the published version; one already on the channel is never overwritten, only reused": a damaged APK left by a delivery that failed half way is reused, never verifies, and nothing moves.
     channel.assets["alpha-phone-123.apk"] = json("half an upload");
     const damaged = qualified(123);
-    expect(await published(damaged)).toMatchObject({ ok: false, said: expect.stringContaining("not the admitted APK") as unknown });
+    const damagedResult = await published(damaged);
+    expect(damagedResult.ok).toBe(false);
+    expect(damagedResult.ok ? "" : damagedResult.said).toContain("not the admitted APK");
     expect([channel.uploads.length, damaged.run.state.stage, damaged.run.state.reused, JSON.parse(new TextDecoder().decode(channel.assets["alpha-update-stable.json"]))]).toEqual([2, "Uploaded", true, { schema: "alpha-update/v1", versionCode: 122, apkUrl: apkUrl(122), sha256: first.read.sha256, sizeBytes: first.read.apk.bytes }]);
     // spec/release/index.md, "Qualification and upload both happen before the receipt expires"
     const stale = qualified(124, 30);
-    expect(await published(stale)).toMatchObject({ ok: false, said: expect.stringContaining("refuses the upload") as unknown });
+    const staleResult = await published(stale);
+    expect(staleResult.ok).toBe(false);
+    expect(staleResult.ok ? "" : staleResult.said).toContain("refuses the upload");
     // spec/release/index.md, "The channel's retained APKs raise the floor: a candidate is numbered, and a release published, only above every APK any writer keeps there"
     channel.assets["alpha-phone-130.apk"] = json("alpha 130");
-    expect(await published(qualified(125))).toMatchObject({ ok: false, said: expect.stringContaining("refuses the upload") as unknown });
+    const floorResult = await published(qualified(125));
+    expect(floorResult.ok).toBe(false);
+    expect(floorResult.ok ? "" : floorResult.said).toContain("refuses the upload");
     delete channel.assets["alpha-phone-130.apk"];
     // spec/release/index.md, "A manifest that did not take can be repaired by the same candidate": a manifest that still names the older release sends the candidate back, and moving it again settles it.
     const stuck = { ...channel.port, upload: (file: string, name: string, clobber: boolean) => name === "alpha-update-stable.json" ? Effect.void : channel.port.upload(file, name, clobber) };
@@ -255,10 +264,12 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     expect(await published(qualified(127), overtaking)).toMatchObject({ ok: true, state: { stage: "Abandoned", pointer: 140, floor: 140 } });
   });
 
-  it("refuses a manifest whose name or notes a phone would not show (spec/release/index.md, \"A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them\")", async () => {
+  // spec/release/index.md, "A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them"
+  it("refuses a manifest whose name or notes a phone would not show", async () => {
     const directory = scratch();
     const long = await released("manifest", "--apk", join(directory, "alpha-phone-122.apk"), "--version", "122", "--notes", "x".repeat(501), "--out", join(directory, "m.json"));
-    expect(long).toMatchObject({ ok: false, tag: "UsageError", said: expect.stringContaining("notes of at most 500") as unknown });
+    expect(long).toMatchObject({ ok: false, tag: "UsageError" });
+    expect(long.ok ? "" : long.said).toContain("notes of at most 500");
   });
 
   it("reports the channel healthy only for a launcher of Alpha's one key above every floor, kept and served exactly (spec/release/index.md, \"The channel is healthy only while its manifest names a launcher of Alpha's one key, above the retired channel and the last recorded release, at an address it keeps, served with exactly its size and digest\")", async () => {
@@ -267,14 +278,18 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     const offer = { schema: "alpha-update/v1", variant: "launcher", versionCode: 122, signerSha256: reviewed, apkUrl: apkUrl(122), sha256: digestOf(apk), sizeBytes: apk.length };
     const status = (manifest: unknown) => releasedOver(channelAt({ "alpha-update-stable.json": json(manifest), "alpha-phone-122.apk": apk }).port)("status");
     expect(await status(offer)).toMatchObject({ ok: true, value: { versionCode: 122, kept: true, exact: true } });
-    for (const unhealthy of [{ signerSha256: digest("another key") }, { variant: "companion" }, { sha256: digest("other bytes") }])
-      expect(await status({ ...offer, ...unhealthy })).toMatchObject({ ok: false, said: expect.stringContaining("not healthy") as unknown });
+    for (const unhealthy of [{ signerSha256: digest("another key") }, { variant: "companion" }, { sha256: digest("other bytes") }]) {
+      const checked = await status({ ...offer, ...unhealthy });
+      expect(checked.ok).toBe(false);
+      expect(checked.ok ? "" : checked.said).toContain("not healthy");
+    }
     // spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid": the Android build reads the manifest from the very address the release publishes.
     const host = JSON.parse(readFileSync(place("android/host.json"), "utf8")) as { buildConfigFields: { name: string; value: unknown }[] };
     expect(host.buildConfigFields.find((field) => field.name === "ALPHA_UPDATE_MANIFEST_URL")?.value).toBe(manifestUrl());
   });
 
-  it("moves nothing for an APK it cannot admit (spec/release/index.md, \"An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold\")", async () => {
+  // spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"
+  it("moves nothing for an APK it cannot admit", async () => {
     const directory = scratch();
     const missing = await released("publish", "--run", join(directory, "run.json"), "--apk", join(directory, "alpha-phone-122.apk"), "--manifest", write(directory, "m.json", {}), "--execute");
     expect([missing.ok, missing.tag !== "UsageError"]).toEqual([false, true]);
@@ -302,7 +317,9 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(compareUrl(lock)).toBe(`https://api.github.com/repos/elizaOS/eliza/compare/${lock.commit}...${lock.branch}`);
     expect([compared({ ...lock, status: "diverged", mergeBase: digest("older") }, lock), compared({ ...lock, commit: "0".repeat(40), status: "ahead", mergeBase: lock.commit }, lock)])
       .toEqual([{ forThePin: true, reached: false }, { forThePin: false, reached: true }]);
-    expect(await candidate("121", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }))).toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"upstream\":true") as unknown });
+    const diverged = await candidate("121", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }));
+    expect(diverged).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(diverged.ok ? "" : diverged.said).toContain("\"upstream\":true");
     expect(await candidate("121", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
@@ -407,7 +424,8 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
     expect(pilotUpdate({ adb: pilotPhone().adb, serial: "pilot-1", apk, locks }).state.leg).toBe("Done");
   });
 
-  it("fails a run whose agent never says it is running, even with Alpha's process up (spec/release/pilot.md, \"A run passes only when the agent came back\")", () => {
+  // spec/release/pilot.md, "A run passes only when the agent came back"
+  it("fails a run whose agent never says it is running, even with Alpha's process up", () => {
     const { adb, apk } = pilotPhone({ agentLog: "" });
     const update = pilotUpdate({ adb, serial: "pilot-3", apk, locks: scratch() });
     expect([update.state.leg, update.state.agent, update.state.passed]).toEqual(["Done", "NotVerified", false]);
@@ -545,8 +563,9 @@ describe("Sign a preserving OS update (spec/release/os.md, \"Story: Sign a prese
     const file = join(directory, "plan.json");
     writeFileSync(file, bytes);
     expect(await released("os-plan", "--plan", file, "--plan-sha256", reviewed)).toMatchObject({ ok: true, value: { admitted: true, outputObject: plan.outputObject } });
-    expect(await released("os-sign", "--plan", file, "--plan-sha256", reviewed, "--target-files", file, "--ota-tools", file, "--work", join(directory, "work")))
-      .toMatchObject({ ok: false, tag: "ReleaseRefused", said: expect.stringContaining("\"inputs\":false") as unknown });
+    const osSign = await released("os-sign", "--plan", file, "--plan-sha256", reviewed, "--target-files", file, "--ota-tools", file, "--work", join(directory, "work"));
+    expect(osSign).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(osSign.ok ? "" : osSign.said).toContain("\"inputs\":false");
   });
 
   it("signs from a build that keeps its keys and its phone's data, and from no build that replaces data or brings a hook", () => {

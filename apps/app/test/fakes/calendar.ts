@@ -72,6 +72,9 @@ export interface CalendarScene {
   lost: boolean;
   handedOff: number;
   readonly handoffs: AndroidCalendarHandoffEvent[];
+  /** Each agent action the phone's own review was given, as `<type> <operationId>`, and what the owner answers there. */
+  readonly reviewed: string[];
+  review: "applied" | "cancelled" | "conflict" | "queued" | "unknown";
   /** The agent's approvals list: each Calendar request it filed (`.eliza/packages/agent-host/src/approvals/routes.vibe`), and how it was resolved. */
   readonly approvals: FakeApproval[];
   /** The agent's linked sync control: its revision, whether it is paused, the Google calendar it writes to, and the state of each linked event. */
@@ -83,6 +86,7 @@ export function calendarScene(): CalendarScene {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
+    reviewed: [], review: "applied",
     control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
   };
 }
@@ -270,6 +274,11 @@ interface Creations {
   save(input: { id?: string; title: string; body?: string; location?: string; begin: number; end: number; calendarId: string; creationId?: string; separateCreation?: boolean; expected?: { revision: string } }): Promise<{ status: string; id?: string; calendarId?: string; creationId?: string }>;
   saveOptions(input: { event: AndroidCalendarHandoffEvent; calendarId: string; creationId: string; separateCreation: boolean }): ReturnType<Creations["save"]>;
   pendingCreations(): Promise<{ status: string; creations: { creationId: string; status: string }[] }>;
+  executeAgent(input: { operation: unknown; operationId: string }): Promise<{ status: string; result?: unknown }>;
+  cancelAgent(input: { operationId: string }): Promise<{ status: string }>;
+  requestWorkflowReadAccess(): Promise<{ status: string }>;
+  readWorkflowRange(input: { calendarIds: readonly string[]; start: string; end: string; timeZone: string; maximumEvents: number }): Promise<{ status: string; events?: unknown }>;
+  prepareAgentSource(): Promise<{ status: string; sourceId?: string; sourceRevision?: string }>;
 }
 
 /** The phone event `id` as the plugin compares it: its revision is what it says. */
@@ -332,6 +341,28 @@ export function elizaCalendar(scene: CalendarScene): Faked {
         status: "ready", recurrence: "one-off", writable: true, revision: revisionOf(event), sourceRevision: revisionOf(event),
         evidence: { selectedRow: "ParentRow", sync: "LocalUnsynced", sourceCurrent: true, bounded: true, otherExceptions: false, liveException: "NoLiveException", instances: 1, begin: event.begin, finish: event.end, exceptionOriginal: 0 },
       });
+    },
+    executeAgent({ operation, operationId }) {
+      const op = operation as { type: string; target?: { sourceId: string; eventId: string; revision: string }; fields?: Record<string, unknown> };
+      scene.reviewed.push(`${op.type} ${operationId}`);
+      if (scene.review !== "applied") return Promise.resolve({ status: scene.review });
+      if (op.type === "calendar_read_next") {
+        return Promise.resolve({ status: "applied", result: { version: 1, kind: "calendar_read_next", window: { start: "2026-11-24T00:00:00.000Z", end: "2026-11-25T00:00:00.000Z", timeZone: "UTC" }, event: null } });
+      }
+      const target = op.target ?? { sourceId: "local", eventId: `p${scene.phoneEvents.length + 1}`, revision: "0".repeat(64) };
+      return Promise.resolve({ status: "applied", result: { version: 1, kind: op.type, sourceId: target.sourceId, eventId: target.eventId, revision: target.revision } });
+    },
+    cancelAgent: () => Promise.resolve({ status: "cancelled" }),
+    prepareAgentSource: () => Promise.resolve(scene.granted ? { status: "ready", sourceId: "local", sourceRevision: "0".repeat(64) } : { status: "permission-required" }),
+    requestWorkflowReadAccess() {
+      scene.asked += 1;
+      return Promise.resolve({ status: scene.granted ? "granted" : "denied" });
+    },
+    readWorkflowRange({ calendarIds, start, end, maximumEvents }) {
+      const [from, to] = [Date.parse(start), Date.parse(end)];
+      const events = scene.phoneEvents.filter((event) => calendarIds.includes(event.calendarId) && event.begin < to && event.end > from).slice(0, maximumEvents + 1)
+        .map((event) => ({ id: event.id, calendarId: event.calendarId, revision: "0".repeat(64), title: event.title ?? "", start: new Date(event.begin).toISOString(), end: new Date(event.end).toISOString(), allDay: event.allDay }));
+      return Promise.resolve({ status: "ready", events });
     },
     dispatchDeletion({ id }) {
       scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id);
