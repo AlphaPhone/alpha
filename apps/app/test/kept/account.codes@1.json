@@ -2,6 +2,10 @@
   "key": "alpha/app/account/codes@1",
   "spec": "spec/app/account/codes.md",
   "shape": "ceff845c5fab996d",
+  "sealed": {
+    "shape": "ceff845c5fab996d",
+    "state": "474406ca372a72f3"
+  },
   "state": {
     "authority": "",
     "redeem": {

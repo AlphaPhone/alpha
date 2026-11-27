@@ -2,6 +2,10 @@
   "key": "alpha/app/files/scan@1",
   "spec": "spec/app/files/scan.md",
   "shape": "4b5512ca48db02f6",
+  "sealed": {
+    "shape": "4b5512ca48db02f6",
+    "state": "15008f8cea88cc95"
+  },
   "state": {
     "open": false,
     "origin": "Document",

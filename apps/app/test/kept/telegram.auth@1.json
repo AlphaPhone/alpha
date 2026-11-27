@@ -2,6 +2,10 @@
   "key": "alpha/app/telegram/auth@1",
   "spec": "spec/app/telegram/auth.md",
   "shape": "1059c8d66a8cdbaf",
+  "sealed": {
+    "shape": "1059c8d66a8cdbaf",
+    "state": "3ff61a9cfe60ef17"
+  },
   "state": {
     "step": "SignedOut",
     "work": "Idle",
