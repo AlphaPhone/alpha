@@ -3993,7 +3993,7 @@ function theCommandLine() {
     }
   });
 
-  test("a verifier install during the exploration retries the check, whose second exploration agrees with the pass already shown", { skip: !["linux-x64", "linux-arm64", "darwin-arm64"].includes(`${process.platform}-${process.arch}`) }, async () => {
+  const exploreRetried = async (secondRun: string) => {
     const root = toolchain(oneRule("value", "A value", "pure val answer = 42"), "quint", "lsc");
     const shim = path.join(root, "node_modules/.bin/quint");
     fs.unlinkSync(shim);
@@ -4004,8 +4004,10 @@ function theCommandLine() {
     fs.writeFileSync(path.join(root, "server.js"), 'import http from "node:http"; import fs from "node:fs";\nconst app = http.createServer((_, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end(fs.readFileSync("index.html")); });\napp.listen(0, "127.0.0.1", () => console.log(`Local: http://localhost:${app.address().port}/`));\n');
     fs.writeFileSync(path.join(root, "node_modules/.bin/bombadil"), `#!/usr/bin/env node
 const fs = require("node:fs");
-if (!fs.existsSync("explorations")) fs.linkSync("node_modules/.bin/quint", "second-install-quint");
+const first = !fs.existsSync("explorations");
+if (first) fs.linkSync("node_modules/.bin/quint", "second-install-quint");
 fs.appendFileSync("explorations", "explored\\n");
+if (!first) { ${secondRun} }
 const actions = fs.readFileSync("explorations", "utf8").split("\\n").length;
 for (let i = 0; i < actions; i++) console.log("00:00.00" + i + " click");
 `, { mode: 0o755 });
@@ -4013,12 +4015,23 @@ for (let i = 0; i < actions; i++) console.log("00:00.00" + i + " click");
       import { main } from "./vibestack/pipeline.ts";
       await main(["check", "--json"]);
     `], root, { ...process.env, CHROME: process.execPath });
+    return { retry, explorations: read("explorations", root) };
+  };
+  const exploringPlatform = { skip: !["linux-x64", "linux-arm64", "darwin-arm64"].includes(`${process.platform}-${process.arch}`) };
+
+  test("a verifier install during the exploration retries the check, whose second exploration agrees with the pass already shown", exploringPlatform, async () => {
+    const { retry, explorations } = await exploreRetried("");
     assert.equal(retry.stderr, "", retry.stdout);
-    assert.equal(read("explorations", root), "explored\nexplored\n");
+    assert.equal(explorations, "explored\nexplored\n");
     const rows = retry.stdout.trimEnd().split("\n").map((line) => JSON.parse(line));
     assert.deepEqual(rows.slice(0, -1), rows.at(-1).results);
     assert.deepEqual(rows.filter((row) => row.stage === "explore").map((row) => [row.ok, row.summary]),
       [[true, `index.html: 2 actions in ${profile("normal").explore} s broke no property of Bombadil's defaults (pnpm run start)`]]);
+  });
+
+  test("a retried exploration that no longer holds never agrees with the pass already shown", exploringPlatform, async () => {
+    const { retry } = await exploreRetried('console.error("the page broke"); process.exit(1);');
+    assert.match(retry.stderr, /tool installation changed/, retry.stdout);
   });
 
   test("usage lists every command, check --json prints a line for each result and then the whole answer, and gen runs under the project's lock", async () => {

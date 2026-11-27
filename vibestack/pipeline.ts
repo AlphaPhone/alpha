@@ -35,12 +35,16 @@ export { scanSpec } from "./scan.ts";
 export interface Result { ok: boolean; stage: "model" | "always" | "sometimes" | "replay" | "types" | "proof" | "tests" | "traces" | "explore" | "review" | "skipped"; summary: string; detail: string; where?: string; /** The rules the result concerns, each by its spec and key. */ rules?: { file: string; key: string }[] }
 /** The Node these tools run on: the major release .nvmrc pins, and the root's `engines` floor. */
 export const NODE = 26;
+/** A held exploration's summary with its count of actions, which a time-bounded run does not repeat, left out. */
+const heldExploration = (row: Result) => row.stage === "explore" && row.ok && /^.+?: \d+ actions in /.test(row.summary)
+  ? row.summary.replace(/^(.+?: )\d+ actions in /, "$1# actions in ") : undefined;
 /**
  * Whether a retried check's row says what the row already shown said. An exploration is bounded by time, not by its
- * actions, so one that passes again agrees with a pass on the same page however many actions each took.
+ * actions, so one that holds again agrees with one that held on the same page however many actions each took.
  */
 const agrees = (row: Result, shown: Result) => isDeepStrictEqual(row, shown)
-  || (row.stage === "explore" && shown.stage === "explore" && row.ok && shown.ok && row.where === shown.where);
+  || (heldExploration(row) !== undefined && heldExploration(row) === heldExploration(shown)
+    && isDeepStrictEqual({ ...row, summary: "" }, { ...shown, summary: "" }));
 export const show = ({ ok, stage, summary, detail }: Result) => `${stage === "skipped" ? "-" : ok ? "✓" : "✗"} ${stage.padEnd(9)} ${summary}${detail ? "\n" + detail.trimEnd() : ""}`;
 
 /** Whether `accept` can record a check: every stage but review passed, every story has rules and every rule has Quint. */
