@@ -1,18 +1,35 @@
 export { commands } from "./commands/index.ts";
+export type { AlphaNextSubcommand } from "./commands/alpha-next.ts";
+export {
+  buildEmulatorPlan,
+  type EmulatorE2eReport,
+  type EmulatorStageResult,
+  type EmulatorToolchainPlan,
+} from "./commands/alpha-next-emulator.ts";
 export {
   cssLengthToDp,
   generateAndroidResources,
   oklchToHex,
   parseAlphaDesignTokens,
-  type AlphaNextSubcommand,
+  renderAlphaFontsXml,
   type DpLength,
   type FontAssetStatus,
+  type GeneratedFontAsset,
   type GeneratedResource,
   type HexColor,
   type ParsedDesignTokens,
+  type SyncFontsReport,
   type SyncTokensReport,
   type TokenSyncTarget,
-} from "./commands/alpha-next.ts";
+} from "./commands/alpha-next-tokens.ts";
+export {
+  scanSecurityInvariants,
+  validateSuiteManifest,
+  type Aapt2CheckResult,
+  type SecurityInvariantResult,
+  type SuiteManifestReport,
+  type ValidateReport,
+} from "./commands/alpha-next-validate.ts";
 export {
   defineCommand,
   runCli,

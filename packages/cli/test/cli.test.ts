@@ -9,12 +9,38 @@ import {
   defineCommand,
   oklchToHex,
   runCli,
+  scanSecurityInvariants,
+  validateSuiteManifest,
   type CliIo,
+  type EmulatorE2eReport,
+  type SyncFontsReport,
   type SyncTokensReport,
+  type ValidateReport,
 } from "../src/index.ts";
 
 const templateRoot = path.resolve(import.meta.dirname, "../../..");
 const mainPath = path.resolve(import.meta.dirname, "../src/main.ts");
+
+const ALL_18_VIEWS = [
+  "Phone",
+  "Messages",
+  "Contacts",
+  "Browser",
+  "Inbox",
+  "Telegram",
+  "Slack",
+  "Calendar",
+  "Clock",
+  "Reminders",
+  "Camera",
+  "Photos",
+  "Maps",
+  "Notes",
+  "Files",
+  "Workflows",
+  "Wallet",
+  "Settings",
+] as const;
 
 function createRecorder(): { readonly io: CliIo; readonly out: () => string; readonly err: () => string } {
   const stdout: string[] = [];
@@ -37,12 +63,49 @@ function parseJson(raw: string): unknown {
   return JSON.parse(raw) as unknown;
 }
 
+function makeValidSuiteManifest() {
+  return {
+    schemaVersion: 1,
+    corePackage: "ai.alphacompute.alphaphone",
+    ipcPermission: "ai.alphacompute.permission.AGENT_IPC",
+    apps: [
+      {
+        id: "core",
+        view: null,
+        surface: "overlay",
+        applicationId: "ai.alphacompute.alphaphone",
+        label: "Alpha",
+        defaultRoles: ["ROLE_ASSISTANT"],
+        permissions: ["android.permission.INSTALL_SELF_UPDATES"],
+        allowedAgentRoutePrefixes: ["*"],
+        allowedCloudRoutePrefixes: ["*"],
+        allowedSecureStoreSlots: ["*"],
+        assetsProfile: "core",
+      },
+      ...ALL_18_VIEWS.map((view) => ({
+        id: view.toLowerCase(),
+        view,
+        surface: "app",
+        applicationId: `ai.alphacompute.${view.toLowerCase()}`,
+        label: view,
+        defaultRoles: view === "Phone" ? ["ROLE_DIALER"] : view === "Messages" ? ["ROLE_SMS"] : [],
+        permissions: ["ai.alphacompute.permission.AGENT_IPC"],
+        allowedAgentRoutePrefixes: ["/api/health", "/api/status"],
+        allowedCloudRoutePrefixes: [],
+        allowedSecureStoreSlots: [],
+        assetsProfile: view === "Camera" || view === "Files" ? "ocr" : "thin",
+      })),
+    ],
+  };
+}
+
 describe("project CLI", () => {
   test("lists registered commands in human and JSON help output", async () => {
     const human = createRecorder();
     expect(await runCli({ argv: ["--help"], commands, rootDir: templateRoot, cwd: templateRoot, io: human.io })).toBe(0);
     expect(human.out()).toContain("Usage: pnpm cli <command> [options]");
     expect(human.out()).toContain("status");
+    expect(human.out()).toContain("alpha-next");
 
     const structured = createRecorder();
     expect(await runCli({ argv: ["help", "--json"], commands, rootDir: templateRoot, cwd: templateRoot, io: structured.io })).toBe(0);
@@ -65,16 +128,28 @@ describe("project CLI", () => {
           },
           {
             name: "alpha-next",
-            summary: "Alpha NEXT Android token sync, manifest, validation, and emulator levers",
-            usage: "pnpm cli alpha-next <sync-tokens|manifest|validate|emulator-e2e> [options]",
+            summary: "Alpha NEXT Android token/font sync, manifest, validation, and emulator levers",
+            usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e> [options]",
             flags: {
               check: {
                 kind: "boolean",
-                description: "Verify generated resources match on-disk files without writing",
+                description: "Verify generated resources or validation gates without writing",
               },
               write: {
                 kind: "boolean",
-                description: "Write generated Android XML resources to target directories",
+                description: "Write generated Android resources or fonts to target directories",
+              },
+              "with-fonts": {
+                kind: "boolean",
+                description: "Also derive Launcher3 .ttf fonts and alpha_fonts.xml during sync-tokens",
+              },
+              aapt2: {
+                kind: "boolean",
+                description: "Run Android SDK aapt2 compile on Launcher3 overlay resources during validate",
+              },
+              "dry-run": {
+                kind: "boolean",
+                description: "Inspect Tier-1 emulator toolchain and plan without booting an AVD",
               },
               target: {
                 kind: "string",
@@ -94,9 +169,21 @@ describe("project CLI", () => {
                 kind: "string",
                 description: "Override path to Android suite apps.json registry",
               },
+              "apk-dir": {
+                kind: "string",
+                description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e",
+              },
+              avd: {
+                kind: "string",
+                description: "Android Virtual Device name for emulator-e2e (default: alpha_next_api35)",
+              },
               serial: {
                 kind: "string",
                 description: "Target ADB device serial for emulator-e2e",
+              },
+              timeout: {
+                kind: "string",
+                description: "Boot timeout in seconds for emulator-e2e (default: 180)",
               },
             },
           },
@@ -258,104 +345,150 @@ describe("project CLI", () => {
     expect(() => cssLengthToDp("10em")).toThrow("Invalid CSS length value");
   });
 
-  test("alpha-next sync-tokens generates deterministic Android XML, supports write/check, and scaffolds subcommands", async () => {
-    const dryRun = createRecorder();
-    expect(await runCli({
-      argv: ["alpha-next", "sync-tokens", "--json"],
-      commands,
-      rootDir: templateRoot,
-      cwd: templateRoot,
-      io: dryRun.io,
-    })).toBe(0);
-    const report = parseJson(dryRun.out()) as {
-      readonly ok: boolean;
-      readonly command: string;
-      readonly data: SyncTokensReport;
-    };
-    expect(report.ok).toBe(true);
-    expect(report.command).toBe("alpha-next");
-    expect(report.data.mode).toBe("dry-run");
-    expect(report.data.colorCounts).toEqual({ light: 41, dark: 28 });
-    expect(report.data.files.map((file) => file.relativePath)).toEqual([
-      "apps/app/aosp/launcher3/overlay/res/values/colors.xml",
-      "apps/app/aosp/launcher3/overlay/res/values-night/colors.xml",
-      "apps/app/aosp/launcher3/overlay/res/values/dimens.xml",
-      "apps/app/android/alpha-ipc/src/main/res/values/colors.xml",
-      "apps/app/android/alpha-ipc/src/main/res/values-night/colors.xml",
-      "apps/app/android/alpha-ipc/src/main/res/values/dimens.xml",
-    ]);
-
-    const launcherColors = report.data.files[0];
-    const launcherDimens = report.data.files[2];
-    expect(launcherColors?.content).toContain('<color name="alpha_color_alpha">#0000FF</color>');
-    expect(launcherColors?.content).toContain('<color name="launcher_accent_color">#0000FF</color>');
-    expect(launcherDimens?.content).toContain('<dimen name="alpha_radius_tile">22dp</dimen>');
-    expect(launcherDimens?.content).toContain('<dimen name="alpha_radius_drawer_icon">18dp</dimen>');
-    expect(launcherDimens?.content).toContain('<dimen name="alpha_radius_dock">31dp</dimen>');
-    expect(launcherDimens?.content).toContain('<dimen name="alpha_radius_home_card">30dp</dimen>');
-    expect(launcherDimens?.content).toContain('<dimen name="qsb_widget_radius">31dp</dimen>');
-    expect(report.data.fonts.some((font) => font.file.endsWith("public-sans-latin.woff2") && !font.androidReady)).toBe(true);
-    expect(report.data.fonts.some((font) => font.file.endsWith("fraunces-italic-400.ttf") && font.androidReady)).toBe(true);
-
+  test("alpha-next sync-tokens, sync-fonts, and aapt2 compile work end-to-end without touching design-system fonts", async () => {
+    const fontsBefore = fs.readdirSync(path.join(templateRoot, "packages/design-system/fonts")).sort();
     const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-next-tokens-"));
     try {
-      const checkBefore = createRecorder();
-      expect(await runCli({
-        argv: ["alpha-next", "sync-tokens", "--check", "--out", tmpOut, "--json"],
-        commands,
-        rootDir: templateRoot,
-        cwd: templateRoot,
-        io: checkBefore.io,
-      })).toBe(1);
-
       const writeRun = createRecorder();
       expect(await runCli({
-        argv: ["alpha-next", "sync-tokens", "--write", "--out", tmpOut, "--json"],
+        argv: ["alpha-next", "sync-tokens", "--write", "--with-fonts", "--out", tmpOut, "--json"],
         commands,
         rootDir: templateRoot,
         cwd: templateRoot,
         io: writeRun.io,
       })).toBe(0);
 
-      const checkAfter = createRecorder();
+      const report = parseJson(writeRun.out()) as { readonly ok: boolean; readonly data: SyncTokensReport };
+      expect(report.ok).toBe(true);
+      expect(report.data.mode).toBe("write");
+      expect(report.data.colorCounts).toEqual({ light: 41, dark: 28 });
+      expect(report.data.fontSync?.files.map((item) => item.relativePath)).toEqual([
+        "apps/app/aosp/launcher3/overlay/res/font/alpha_public_sans.ttf",
+        "apps/app/aosp/launcher3/overlay/res/font/fraunces_italic_400.ttf",
+        "apps/app/aosp/launcher3/overlay/res/xml/alpha_fonts.xml",
+      ]);
+      expect(report.data.fontSync?.files[0]?.sha256).toBe("bbf4e1f31aec30b8e0b06825f411666a8f7d7c6954c3ac61779bbaf789df1611");
+
+      const checkTokens = createRecorder();
       expect(await runCli({
-        argv: ["alpha-next", "sync-tokens", "--check", "--out", tmpOut, "--json"],
+        argv: ["alpha-next", "sync-tokens", "--check", "--with-fonts", "--out", tmpOut, "--json"],
         commands,
         rootDir: templateRoot,
         cwd: templateRoot,
-        io: checkAfter.io,
+        io: checkTokens.io,
       })).toBe(0);
 
-      const targetFile = path.join(tmpOut, "apps/app/aosp/launcher3/overlay/res/values/dimens.xml");
-      fs.writeFileSync(targetFile, "<resources/>\n", "utf8");
-      const checkStale = createRecorder();
+      const checkFonts = createRecorder();
+      expect(await runCli({
+        argv: ["alpha-next", "sync-fonts", "--check", "--out", tmpOut, "--json"],
+        commands,
+        rootDir: templateRoot,
+        cwd: templateRoot,
+        io: checkFonts.io,
+      })).toBe(0);
+      const fontsParsed = parseJson(checkFonts.out()) as { readonly ok: boolean; readonly data: SyncFontsReport };
+      expect(fontsParsed.ok).toBe(true);
+      expect(fontsParsed.data.files).toHaveLength(3);
+
+      const validateAapt2 = createRecorder();
+      expect(await runCli({
+        argv: ["alpha-next", "validate", "--aapt2", "--out", tmpOut, "--json"],
+        commands,
+        rootDir: templateRoot,
+        cwd: templateRoot,
+        io: validateAapt2.io,
+      })).toBe(0);
+      const validated = parseJson(validateAapt2.out()) as { readonly ok: boolean; readonly data: ValidateReport };
+      expect(validated.ok).toBe(true);
+      expect(validated.data.tokensInSync).toBe(true);
+      expect(validated.data.securityPassed).toBe(true);
+      expect(validated.data.aapt2?.ran).toBe(true);
+      expect(validated.data.aapt2?.passed).toBe(true);
+
+      const dimensPath = path.join(tmpOut, "apps/app/aosp/launcher3/overlay/res/values/dimens.xml");
+      fs.writeFileSync(dimensPath, "<resources/>\n", "utf8");
+      const staleCheck = createRecorder();
       expect(await runCli({
         argv: ["alpha-next", "sync-tokens", "--check", "--out", tmpOut, "--json"],
         commands,
         rootDir: templateRoot,
         cwd: templateRoot,
-        io: checkStale.io,
+        io: staleCheck.io,
       })).toBe(1);
-      const staleParsed = parseJson(checkStale.out()) as { readonly ok: boolean; readonly data: SyncTokensReport };
+      const staleParsed = parseJson(staleCheck.out()) as { readonly ok: boolean; readonly data: SyncTokensReport };
       expect(staleParsed.ok).toBe(false);
       expect(staleParsed.data.stale).toEqual(["apps/app/aosp/launcher3/overlay/res/values/dimens.xml"]);
     } finally {
       fs.rmSync(tmpOut, { recursive: true, force: true });
     }
 
-    for (const sub of ["manifest", "validate", "emulator-e2e"] as const) {
-      const rec = createRecorder();
-      expect(await runCli({
-        argv: ["alpha-next", sub, "--json"],
-        commands,
-        rootDir: templateRoot,
-        cwd: templateRoot,
-        io: rec.io,
-      })).toBe(0);
-      const parsedSub = parseJson(rec.out()) as { readonly ok: boolean; readonly data: { readonly subcommand: string } };
-      expect(parsedSub.ok).toBe(true);
-      expect(parsedSub.data.subcommand).toBe(sub);
+    const fontsAfter = fs.readdirSync(path.join(templateRoot, "packages/design-system/fonts")).sort();
+    expect(fontsAfter).toEqual(fontsBefore);
+  });
+
+  test("validates suite apps.json strictly and catches privilege, role, and uniqueness violations", () => {
+    const valid = validateSuiteManifest(makeValidSuiteManifest(), "apps/app/android/suite/apps.json");
+    expect(valid.status).toBe("valid");
+    expect(valid.appsCount).toBe(19);
+    expect(valid.viewsCovered).toHaveLength(18);
+    expect(valid.missingViews).toEqual([]);
+
+    const broken = makeValidSuiteManifest();
+    broken.apps[1] = {
+      ...broken.apps[1],
+      defaultRoles: ["ROLE_ASSISTANT"],
+      permissions: ["android.permission.INSTALL_SELF_UPDATES"],
+      allowedAgentRoutePrefixes: ["*"],
+    };
+    const invalid = validateSuiteManifest(broken, "apps/app/android/suite/apps.json");
+    expect(invalid.status).toBe("invalid");
+    expect(invalid.issues.some((issue) => issue.includes("overlaps"))).toBe(true);
+    expect(invalid.issues.some((issue) => issue.includes("INSTALL_SELF_UPDATES"))).toBe(true);
+    expect(invalid.issues.some((issue) => issue.includes('wildcard "*"'))).toBe(true);
+  });
+
+  test("scans security invariants and flags sharedUserId, proprietary APKs, loopback IPC, and captureSecureLayers", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-next-sec-"));
+    try {
+      const manifestFile = path.join(tmpRoot, "apps/app/android/alpha-ipc/src/main/AndroidManifest.xml");
+      const playApk = path.join(tmpRoot, "apps/app/aosp/sandboxed-play/gms.apk");
+      const ipcJava = path.join(tmpRoot, "apps/app/android/alpha-ipc/src/main/java/Bad.java");
+      const bridgeJava = path.join(tmpRoot, "apps/app/aosp/control-bridge/src/ai/alphacompute/control/AlphaControlBridgeService.java");
+      for (const file of [manifestFile, playApk, ipcJava, bridgeJava]) {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+      }
+      fs.writeFileSync(manifestFile, '<manifest android:sharedUserId="ai.alphacompute.shared" />', "utf8");
+      fs.writeFileSync(playApk, "fake-apk", "utf8");
+      fs.writeFileSync(ipcJava, 'String url = "http://127.0.0.1:8080";', "utf8");
+      fs.writeFileSync(bridgeJava, "boolean captureSecureLayers = true;", "utf8");
+
+      const findings = scanSecurityInvariants(tmpRoot);
+      expect(findings.every((item) => !item.passed)).toBe(true);
+
+      fs.writeFileSync(bridgeJava, "boolean captureSecureLayers = false;", "utf8");
+      const afterBridgeFix = scanSecurityInvariants(tmpRoot).find((item) => item.id === "capture-secure-layers-disabled");
+      expect(afterBridgeFix?.passed).toBe(true);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
+  });
+
+  test("emulator-e2e --dry-run inspects SDK plan cleanly without launching an emulator", async () => {
+    const dryRun = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "emulator-e2e", "--dry-run", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: dryRun.io,
+    })).toBe(0);
+    const parsed = parseJson(dryRun.out()) as { readonly ok: boolean; readonly data: EmulatorE2eReport };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.mode).toBe("dry-run");
+    expect(parsed.data.plan.avdName).toBe("alpha_next_api35");
+    expect(parsed.data.plan.emulatorArgs).toContain("-no-window");
+    expect(parsed.data.plan.emulatorArgs).toContain("swiftshader_indirect");
+    expect(parsed.data.stages.map((stage) => stage.stage)).toContain("verify-accessibility-and-browser-control");
 
     const missingSub = createRecorder();
     expect(await runCli({
