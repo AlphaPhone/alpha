@@ -67,15 +67,15 @@ names the same way: the agent's own calendar by that summary, and another
 calendar by the summary the agent lists for it, or as the request names
 it where the agent lists none, as the Sunday demo build printed the summary
 of the request's source (apps/app/src/prototype/calendar-approval-fields.ts:17
-and 48). The card reads the agent's calendar list itself where it reads the
-request, when Calendar holds no summary for the calendar the request names,
-so a card filed from Talk or Ask Alpha on Home names it the same way whether
-or not Calendar was ever opened, as v119 read the owner's sources for each
-card it built. A read of the agent's events that comes back unavailable
-takes those events away but keeps the names the agent listed, since eliza
-answers its own calendar's empty days as unavailable while it still lists
-that calendar; only the agent's next list, or another owner signing in,
-replaces them.
+and 48). The card reads the agent's calendar list itself each time it
+reads the request, so a card filed from Talk or Ask Alpha on Home names it
+the same way whether or not Calendar was ever opened, and never by a
+calendar the agent no longer lists, as v119 read the owner's sources for
+each card it built. A read of the agent's events that comes back
+unavailable takes those events away but keeps the names the agent listed,
+since eliza answers its own calendar's empty days as unavailable while it
+still lists that calendar; only the agent's next list, or another owner
+signing in, replaces them.
 
 ```quint
 pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed
