@@ -2583,16 +2583,17 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code }));
       await endsQuietly(code, lines);
     };
-    const startRefused = async () => {
+    const startRefused = async (code = "insufficient_credits", lines = 1) => {
       const starts = world.voice.startCloudSpeechCalls;
-      world.voice.cloudStartGate = () => Promise.reject(rejection("Cloud refused Talk", "insufficient_credits"));
+      world.voice.cloudStartGate = () => Promise.reject(rejection("Cloud refused Talk", code));
       await press("Talk");
       await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase !== "Idle" || world.voice.startCloudSpeechCalls > starts);
-      await endsQuietly("start refused", 1);
+      await endsQuietly(`start ${code}`, lines);
       world.voice.cloudStartGate = undefined;
       expect(world.voice.startCloudSpeechCalls).toBe(starts + 1);
     };
 
+    await startRefused("unauthorized", 0);
     await streamRefused("unauthorized", 0);
     await startRefused();
     await fill("Message Alpha", "Hello");
