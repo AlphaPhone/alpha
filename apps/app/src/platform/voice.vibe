@@ -1,7 +1,7 @@
 // spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
 import { parseVoiceTranscriptEnvelope } from "@elizaos/agent"
 import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os-bridges"
-import { fresh } from "../runtime/attempts.vibe"
+import { fresh } from "../runtime/index.vibe"
 import { Agent } from "./agent.vibe"
 import { registered } from "./device.vibe"
 import { pageMicrophone, pageSpeechBase, pageSpeechRelay } from "./pageSpeech.ts"

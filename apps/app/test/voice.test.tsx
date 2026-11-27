@@ -1201,14 +1201,37 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => world.voice.emitCloud?.({ type: "speech-start", sessionId }));
     await later(alpha, 2000);
     expect([(await state()).sent, (await state()).phase, world.ask.said]).toEqual([0, "Listening", []]);
-    await drawn(() => world.voice.emitCloud?.({ type: "speech-end", sessionId, text: items }));
-    await later(alpha, CLOUD_TURN_GAP_MS);
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.turn === 2 && s.phase === "Listening");
-    expect(world.ask.said).toEqual([`${name} ${items}`]);
+    await finishJoinedCloudTurn(alpha, area, world, sessionId, `${name} ${items}`, items);
+  });
 
+  async function muteThenUnmute(
+    alpha: Awaited<ReturnType<typeof startCloudTalk>>["alpha"],
+    area: Awaited<ReturnType<typeof startCloudTalk>>["area"],
+    targetMic: "On" | "Opening" = "On",
+  ) {
+    await later(alpha, 100);
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
+    await press("Unmute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => !s.muted && s.mic === targetMic);
+  }
+
+  async function expectSentOnceWhileMuted(
+    alpha: Awaited<ReturnType<typeof startCloudTalk>>["alpha"],
+    area: Awaited<ReturnType<typeof startCloudTalk>>["area"],
+    world: Awaited<ReturnType<typeof startCloudTalk>>["world"],
+    state: Awaited<ReturnType<typeof startCloudTalk>>["state"],
+    asked: string,
+  ) {
+    expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
+    await later(alpha, CLOUD_TURN_GAP_MS);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.muted && s.mic === "Off" && s.phase === "Listening");
+    expect(world.ask.said).toEqual([asked]);
+    await later(alpha, 2000);
+    expect([(await state()).sent, world.ask.said]).toEqual([1, [asked]]);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
-  });
+  }
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
   it("over the Cloud relay, Mute within the gap shuts the microphone at once and still sends the finished sentence when the gap ends, as v119 did", async () => {
@@ -1218,28 +1241,31 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await later(alpha, 200);
     await press("Mute microphone");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
-    expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
     // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119 setMuted closed the capture, then still sent the utterance at its long gap (voice-assistant-session.ts:596-611).
-    await later(alpha, CLOUD_TURN_GAP_MS);
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.muted && s.mic === "Off");
-    expect(world.ask.said).toEqual([asked]);
+    await expectSentOnceWhileMuted(alpha, area, world, state, asked);
+  });
 
+  async function finishJoinedCloudTurn(
+    alpha: Awaited<ReturnType<typeof startCloudTalk>>["alpha"],
+    area: Awaited<ReturnType<typeof startCloudTalk>>["area"],
+    world: Awaited<ReturnType<typeof startCloudTalk>>["world"],
+    sessionId: Awaited<ReturnType<typeof startCloudTalk>>["sessionId"],
+    expected: string,
+    items: string,
+  ) {
+    await drawn(() => world.voice.emitCloud?.({ type: "speech-end", sessionId, text: items }));
+    await later(alpha, CLOUD_TURN_GAP_MS);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.turn === 2 && s.phase === "Listening");
+    expect(world.ask.said).toEqual([expected]);
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
-  });
+  }
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
   it("over the Cloud relay, Mute and then Unmute within the gap keep the finished sentence, and it is sent once when the gap ends, as v119 did", async () => {
-    const { world, alpha, area } = await openCloudVoiceSheet(false);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
-    const sessionId = world.voice.activeMicSession;
-    const state = () => area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    const { world, alpha, area, state, heard } = await startCloudTalk();
     const asked = "What is on my calendar tomorrow?";
-    await drawn(() => {
-      world.voice.emitCloud?.({ type: "speech-start", sessionId });
-      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked });
-    });
+    await heard(asked);
     await later(alpha, 100);
     await press("Mute microphone");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
@@ -1258,15 +1284,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     const next = "And the day after?";
     let opens = () => {};
     world.voice.cloudUnmuteGate = () => new Promise<void>((resolve) => { opens = resolve; });
-    await drawn(() => {
-      world.voice.emitCloud?.({ type: "speech-start", sessionId });
-      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: next });
-    });
-    await later(alpha, 100);
-    await press("Mute microphone");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
-    await press("Unmute microphone");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => !s.muted && s.mic === "Opening");
+    await heard(next);
+    await muteThenUnmute(alpha, area, "Opening");
     await later(alpha, CLOUD_TURN_GAP_MS);
     expect([(await state()).sent, (await state()).mic, world.ask.said]).toEqual([1, "Opening", [asked]]);
     await drawn(() => opens());
@@ -1279,43 +1298,22 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
   it("over the Cloud relay, speech on the microphone Unmute reopened within the gap joins the words held for it, and both are sent as one turn", async () => {
-    const { world, alpha, area } = await openCloudVoiceSheet(false);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
-    const sessionId = world.voice.activeMicSession;
-    const state = () => area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    const { world, alpha, area, sessionId, state, heard } = await startCloudTalk();
     const name = "Make a checklist called shoot day checklist.";
     const items = "Pixel, pack the tripod plate, bring the blue notebook.";
-    await drawn(() => {
-      world.voice.emitCloud?.({ type: "speech-start", sessionId });
-      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: name });
-    });
-    await later(alpha, 100);
-    await press("Mute microphone");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
-    await press("Unmute microphone");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => !s.muted && s.mic === "On");
+    await heard(name);
+    await muteThenUnmute(alpha, area, "On");
     await later(alpha, 100);
     // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": speech before the gap ends holds it open, as v119 cleared its timers on new speech (voice-assistant-session.ts:827-830).
     await drawn(() => world.voice.emitCloud?.({ type: "speech-start", sessionId }));
     await later(alpha, 1000);
     expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
-    await drawn(() => world.voice.emitCloud?.({ type: "speech-end", sessionId, text: items }));
-    await later(alpha, CLOUD_TURN_GAP_MS);
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.turn === 2 && s.phase === "Listening");
-    expect(world.ask.said).toEqual([`${name} ${items}`]);
-
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    await finishJoinedCloudTurn(alpha, area, world, sessionId, `${name} ${items}`, items);
   });
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
   it("over the Cloud relay, Mute pressed while the owner is still speaking keeps what they said, and sends it once when the gap after its final ends, as v119 did", async () => {
-    const { world, alpha, area } = await openCloudVoiceSheet(false);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
-    const sessionId = world.voice.activeMicSession;
-    const state = () => area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    const { world, alpha, area, sessionId, state } = await startCloudTalk();
     const asked = "What is on my calendar tomorrow?";
     await drawn(() => world.voice.emitCloud?.({ type: "speech-start", sessionId }));
     await later(alpha, 300);
@@ -1324,15 +1322,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Closing");
     await drawn(() => world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked }));
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
-    expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
-    await later(alpha, CLOUD_TURN_GAP_MS);
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.muted && s.mic === "Off" && s.phase === "Listening");
-    expect(world.ask.said).toEqual([asked]);
-    await later(alpha, 2000);
-    expect([(await state()).sent, world.ask.said]).toEqual([1, [asked]]);
-
-    await press("Stop voice conversation");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+    await expectSentOnceWhileMuted(alpha, area, world, state, asked);
   });
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"

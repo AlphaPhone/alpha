@@ -108,46 +108,44 @@ async function pageBridge() {
 }
 
 describe("Talk in a page over its own relay (spec/app/voice/index.md, \"Story: Hold a spoken conversation\")", () => {
-  it("Mute within the gap shuts the page's microphone and still sends the finished sentence once when the gap ends, as v119 did", async () => {
-    const page = await pageBridge();
-    await page.openMic(1);
-    const asked = "What is on my calendar tomorrow?";
-    relay.speechStarts();
-    relay.speechEnds(asked);
-    await pause(100);
-    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119's setMuted closed the capture, then still sent the utterance at its long gap (voice-assistant-session.ts:596-611).
-    await page.closeMic(1);
+  const asked = "What is on my calendar tomorrow?";
+
+  async function expectSentOnce(page: Awaited<ReturnType<typeof pageBridge>>, extraWaitMs = 0) {
     expect(page.sent()).toEqual([]);
-    await pause(CLOUD_TURN_GAP_MS);
+    await pause(CLOUD_TURN_GAP_MS + extraWaitMs);
     expect(page.sent()).toEqual([asked]);
     await pause(CLOUD_TURN_GAP_MS);
     expect(page.sent()).toEqual([asked]);
     await page.stop();
+  }
+
+  async function speakAndMuteInGap() {
+    const page = await pageBridge();
+    await page.openMic(1);
+    relay.speechStarts();
+    relay.speechEnds(asked);
+    await pause(100);
+    await page.closeMic(1);
+    return page;
+  }
+
+  it("Mute within the gap shuts the page's microphone and still sends the finished sentence once when the gap ends, as v119 did", async () => {
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119's setMuted closed the capture, then still sent the utterance at its long gap (voice-assistant-session.ts:596-611).
+    const page = await speakAndMuteInGap();
+    await expectSentOnce(page);
   });
 
   it("Mute and then Unmute within the gap keep the page's finished sentence, and it is sent once when the gap ends, as v119 did", async () => {
-    const page = await pageBridge();
-    await page.openMic(1);
-    const asked = "What is on my calendar tomorrow?";
-    relay.speechStarts();
-    relay.speechEnds(asked);
-    await pause(100);
-    await page.closeMic(1);
+    const page = await speakAndMuteInGap();
     await pause(50);
     // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119 kept the utterance and its timer across the capture Unmute opened (voice-assistant-session.ts:612-622 and 722-735).
     await page.openMic(1);
-    expect(page.sent()).toEqual([]);
-    await pause(CLOUD_TURN_GAP_MS);
-    expect(page.sent()).toEqual([asked]);
-    await pause(CLOUD_TURN_GAP_MS);
-    expect(page.sent()).toEqual([asked]);
-    await page.stop();
+    await expectSentOnce(page);
   });
 
   it("Mute pressed while the owner is still speaking keeps what the page heard, and sends it once when the gap after its final ends, as v119 did", async () => {
     const page = await pageBridge();
     await page.openMic(1);
-    const asked = "What is on my calendar tomorrow?";
     relay.speechStarts();
     await pause(50);
     // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119's Mute finalized the speech up to then and sent it (voice-assistant-session.ts:593-611); the relay gives its final as the microphone shuts.
@@ -155,11 +153,6 @@ describe("Talk in a page over its own relay (spec/app/voice/index.md, \"Story: H
     await pause(0);
     relay.speechEnds(asked);
     await closing;
-    expect(page.sent()).toEqual([]);
-    await pause(CLOUD_TURN_GAP_MS + 50);
-    expect(page.sent()).toEqual([asked]);
-    await pause(CLOUD_TURN_GAP_MS);
-    expect(page.sent()).toEqual([asked]);
-    await page.stop();
+    await expectSentOnce(page, 50);
   });
 });
