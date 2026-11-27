@@ -2,7 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type RequestsStore, createRequestsStore } from "./requests.ts"
 import { Time } from "../runtime/index.vibe"
-import { type KeptNumbers, type ShownStore, createShownStore, exactNumbers, startAt } from "./shown.ts"
+import { type KeptNumbers, type ShownStore, createShownStore, exactNumbers, startAt, unreadAt } from "./shown.ts"
 
 /** Scoped per-runtime store of Calendar events read from Phone and Google. */
 export service Shown: ShownStore {}
@@ -31,7 +31,7 @@ const shownLayer = Layer.effect(Shown, effect {
   const decoded: KeptNumbers | undefined = stored === undefined ? undefined : decodeNumbers(stored) catch () => undefined
   const read = decoded === undefined ? undefined : exactNumbers(decoded)
   if (stored !== undefined && read === undefined) try ignore(kv.set(`${numbersKey}.unreadable`, stored))
-  const kept = startAt(read, now)
+  const kept = got === undefined ? unreadAt(now) : startAt(read, now)
   const keep = (numbers: KeptNumbers) => runFork(ignore(kv.set(numbersKey, JSON.stringify(numbers))))
   const store = createShownStore(kept, got === undefined ? undefined : keep)
   try Effect.addFinalizer(() => sync(() => { store.reset() }))
