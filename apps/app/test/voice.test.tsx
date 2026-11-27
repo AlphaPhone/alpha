@@ -32,6 +32,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
 import { untoldStep } from "./fakes/ask.ts";
 import { publish } from "./fakes/platform.ts";
+import { rejection } from "./fakes/phone.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
 import { alsoPending, askedPage, textReview } from "./fakes/text-review.ts";
@@ -92,6 +93,10 @@ const sendVoice = (runtime: VoiceRuntime, event: Voice.Event) =>
 
 const getShell = (runtime: VoiceRuntime) =>
   runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.get()));
+
+/** The toasts of the Alpha a journey started from its composer: its area runtime shares the app's. */
+const getToasts = (runtime: VoiceRuntime) =>
+  (runtime as unknown as ManagedRuntime.ManagedRuntime<Toasts, unknown>).runPromise(Effect.flatMap(Toasts, (m) => m.get()));
 
 const sendShell = (runtime: VoiceRuntime, event: Shell.Event) =>
   runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send(event)));
@@ -589,8 +594,8 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect(await turn("And Friday", "Let me check your calendar.", 2)).toEqual(["Let me check your calendar.", "You're clear tomorrow.", "Nothing is booked."]);
   });
 
-  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-  it("keeps listening after other refusals and ends quietly when Cloud refuses a spoken turn for spent funds", async () => {
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  it("keeps listening after other refusals and ends quietly when Cloud refuses a spoken turn for spent funds, leaving its one line until the next turn", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
 
@@ -602,6 +607,7 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     speakUtterance(world, "And tomorrow");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
 
+    expect([fundingRows(), (await getShell(runtime)).assistant]).toEqual([0, "Bar"]);
     world.ask.refusal = { failureKind: "insufficient_credits", cloudCode: "allowance_exhausted", planAction: "funding" };
     speakUtterance(world, "And Friday");
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
@@ -609,6 +615,17 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     expect([ended.phase, ended.mic, ended.failure, ended.engineHeld, ended.sent, world.voice.engineHeld, world.voice.activeMicSession, world.voice.startLiveCaptureCalls, world.voice.spoken]).toEqual([
       "Idle", "Off", "NoFailure", false, 3, false, undefined, 3, [],
     ]);
+    for (let i = 0; i < 30; i += 1) await runtime.runPromise(Effect.yieldNow);
+    const toasts = await getToasts(runtime);
+    expect([fundingRows(), button("Manage plan") !== undefined, toasts.issued, toasts.showing, (await getShell(runtime)).assistant]).toEqual([1, true, 0, false, "Sheet"]);
+
+    await sendVoice(runtime, { type: "startTalking", now: untimed });
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
+    world.ask.refusal = undefined;
+    speakUtterance(world, "And Saturday");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.sent === 4);
+    for (let i = 0; i < 30; i += 1) await runtime.runPromise(Effect.yieldNow);
+    expect([fundingRows(), button("Manage plan")]).toEqual([0, undefined]);
   });
 
   // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a reply ready before its turn ends is not spoken while the proposal waits, even when a later tool's progress replaced the proposal's own
@@ -746,6 +763,11 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 
 /** Ask Alpha alone: the screen a spoken conversation from the composer draws. */
 const talkMounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
+
+const fundingLine = "You’re out of plan allowance and credits, so I couldn’t reply.";
+
+/** How many messages in Ask Alpha's conversation read as the one out-of-funds line. */
+const fundingRows = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].filter((row) => row.textContent?.includes(fundingLine)).length;
 
 async function onComposer(world: Scene, ...otherMounts: Mount[]) {
   const { alpha } = await open(world, [...talkMounts, ...otherMounts]);
@@ -2552,8 +2574,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(memory.dequeueSentence(2)?.text).toBe("Turn two sentence.");
   });
 
-  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
-  it("ends real-time Talk quietly when Cloud refuses it for spent funds or asks for sign-in with no phone speech to fall back on: no toast, and Talk is offered again", async () => {
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
+  it("ends real-time Talk quietly when Cloud asks for sign-in or refuses its stream or start for spent funds: no toast, one funds line in the chat until the next turn, and Talk is offered again", async () => {
     const world = { ...scene(), phone: true };
     world.voice.onDevice = false;
     world.voice.localReady = false;
@@ -2562,20 +2584,40 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
     const toasts = () => alpha.runtime.runPromise(Effect.flatMap(Toasts, (m) => m.get()));
     const raised = (await toasts()).issued;
-
-    for (const code of ["insufficient_credits", "unauthorized"]) {
+    const endsQuietly = async (step: string, lines: number) => {
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+      for (let turn = 0; turn < 10; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+      const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+      const shown = await toasts();
+      expect([step, after.failure, after.retries, shown.issued - raised, shown.showing, world.voice.activeMicSession, button("Talk") !== undefined, fundingRows(), button("Manage plan") !== undefined]).toEqual([
+        step, "NoFailure", 0, 0, false, undefined, true, lines, lines > 0,
+      ]);
+    };
+    const streamRefused = async (code: string, lines: number) => {
       await press("Talk");
       await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
       const sessionId = world.voice.activeMicSession;
       expect(sessionId).toBeDefined();
       await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code }));
-      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
-      for (let turn = 0; turn < 10; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
-      const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
-      const shown = await toasts();
-      expect([code, after.failure, after.retries, shown.issued - raised, shown.showing, world.voice.activeMicSession, button("Talk") !== undefined]).toEqual([
-        code, "NoFailure", 0, 0, false, undefined, true,
-      ]);
-    }
+      await endsQuietly(code, lines);
+    };
+    const startRefused = async () => {
+      const starts = world.voice.startCloudSpeechCalls;
+      world.voice.cloudStartGate = () => Promise.reject(rejection("Cloud refused Talk", "insufficient_credits"));
+      await press("Talk");
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase !== "Idle" || world.voice.startCloudSpeechCalls > starts);
+      await endsQuietly("start refused", 1);
+      world.voice.cloudStartGate = undefined;
+      expect(world.voice.startCloudSpeechCalls).toBe(starts + 1);
+    };
+
+    await streamRefused("unauthorized", 0);
+    await startRefused();
+    await fill("Message Alpha", "Hello");
+    await press("Send");
+    await drawnUntil(alpha, area, Conversation, (s) => s.turn.send.id === 1 && s.turn.reply === "Complete");
+    expect(fundingRows()).toBe(0);
+    await streamRefused("insufficient_credits", 1);
+    await startRefused();
   });
 });

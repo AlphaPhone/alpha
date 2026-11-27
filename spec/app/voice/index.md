@@ -693,7 +693,10 @@ left decides it, never the owner's words, whether Cloud refuses a spoken
 turn or the start or stream of real-time Talk. Nothing of the turn is
 spoken, voice shows no text of its own about it, and it does not listen
 again or fall back to another route: the conversation shuts down as Stop
-shuts it.
+shuts it. The only word of it is the conversation's one fixed line for
+out of funds, with Manage plan, left once in the conversation showing as
+for a refused reply, with Ask Alpha raised to its sheet when it was lower;
+the next turn there clears it.
 
 ```quint
 pure def canRefusedForFunds(v: Voice, session: int, turn: int): bool =
