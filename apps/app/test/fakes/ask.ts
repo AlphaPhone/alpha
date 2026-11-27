@@ -66,6 +66,8 @@ export interface AskScene {
   beforeDraftExchange?: () => Promise<void>;
   /** The native store answers every read of a draft slot as unreadable, as its SecureSlots does for a slot it cannot decrypt. */
   draftReadsFail?: boolean;
+  /** Every message posted waits: "unheard" before the agent keeps it, as when Alpha stops before its request arrives; "unanswered" once the agent kept it, with no frame back. */
+  holdPosts?: "unheard" | "unanswered";
   refusedDraftExchanges: number;
   /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
   noOptionalFields?: boolean;
@@ -304,6 +306,7 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       const found = /^\/api\/conversations\/([^/]+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
+      if (scene.holdPosts === "unheard") return new Promise<Response>(() => undefined);
       const conversationId = decodeURIComponent(found[1] ?? "");
       const kept = scene.kept.get(conversationId);
       if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
@@ -323,6 +326,7 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (scene.holdPosts === "unanswered") return new Promise<Response>(() => undefined);
         if (found[2] !== undefined && scene.nextDropsWith !== undefined) {
           const dropped = scene.nextDropsWith;
           scene.nextDropsWith = undefined;
