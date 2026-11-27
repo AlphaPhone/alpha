@@ -12,7 +12,7 @@ import * as Voice from "../../gen/app__voice.effect.vibe"
 import type { Field } from "../../gen/app__voice__dictation.ts"
 import { Agent, isCloudFundsRefusal } from "../platform/index.vibe"
 import { Device } from "../platform/index.vibe"
-import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace, voiceViews } from "../assistant/views.vibe"
+import { Views, delivery, pageIn, placeOf, preparedIn, resendWithoutMode, viewOfPlace } from "../assistant/views.vibe"
 export { placeOf, viewOfPlace }
 import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
@@ -414,18 +414,9 @@ module pure {
   import { clockWords, meridiemOf, twelveHour } from "../../gen/app__voice.ts"
   import { withoutTurnTags } from "../assistant/words.ts"
 
-  const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
-
-  /** @throws {never} */
-  export function requestedDestination(text: string): string | undefined {
-    const found = navigateTag.exec(text)
-    return found?.[1]
-  }
-
   /** The reply's speakable text, without the agent's turn tag: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
   export function speakableText(text: string): string {
     return withoutTurnTags(text)
-      .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
       .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
       .replace(/:[ \t]*(?=\r?\n)/g, ".")
       .replace(/\s*\n\s*/g, "\n")
@@ -538,15 +529,8 @@ module pure {
       .replace(/\s+/g, " ")
   }
 }
-import { requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure
+import { speakableText, spokenForm, takeCompleteSentences } from pure
 export { speakableText, spokenForm }
-
-function placeForDestination(name: string): number | undefined {
-  const lowered = name.toLowerCase()
-  if (lowered === "home") return 1
-  const matched = voiceViews.find((view) => view.toLowerCase() === lowered)
-  return matched === undefined ? undefined : placeOf(matched)
-}
 
 interface VoicePost {
   readonly session: number
@@ -834,10 +818,6 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
       const sameSource = effect { return (try atSource) && (try shell.get()).route === sourceRoute }
       try views.spoken(held, sameSource, (place, inside) =>
         openRouteForVoice(placeOf(place === "Home" ? undefined : place), sourceRoute, session, turn, atSource, memory, voice, shell, inside ? "Inside" : "Show"))
-    } else if (!actions.some((action) => action.action === "VIEWS")) {
-      const requested = requestedDestination(finalText)
-      const place = requested === undefined ? undefined : placeForDestination(requested)
-      if (place !== undefined) try openRouteForVoice(place, sourceRoute, session, turn, currentRequest, memory, voice, shell)
     }
   }
   if (!Voice.canSentence(try voice.get(), session, turn)) return undefined
