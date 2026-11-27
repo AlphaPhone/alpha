@@ -2308,7 +2308,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       expect(recordings).toBe(1);
       await press("Discard transcription");
     } else {
-      expect(button("On-device speech unavailable")?.disabled).toBe(true);
+      // spec/app/voice/dictation.md, "Ask Alpha names recognition preparation and can start only after its recognition check succeeds": nor once on-device speech is unavailable
+      expect([button("On-device speech unavailable")?.disabled, shownWords(button("On-device speech unavailable"))]).toEqual([true, ""]);
       await press("On-device speech unavailable");
       expect(recordings).toBe(0);
       await switchToKeyboard();

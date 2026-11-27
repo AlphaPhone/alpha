@@ -43,8 +43,8 @@ pure def openRecorder(r: Recorder, target: Field): Recorder =
 ### Ask Alpha names recognition preparation and can start only after its recognition check succeeds
 
 Preparing and unavailable are states of the disabled record button. While
-recognition is preparing and while the microphone starts, the button shows
-no words: that state is said only to a screen reader. The
+recognition is preparing or unavailable and while the microphone starts,
+the button shows no words: that state is said only to a screen reader. The
 other fields keep their usual recording entry. A late check cannot ready a
 new recorder, and checking does not open the microphone.
 
