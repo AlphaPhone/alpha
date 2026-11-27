@@ -113,7 +113,7 @@ async function openInbox(world: Scene) {
   return opened;
 }
 
-it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
+it(`Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, "Story: Open my message from a notice"; spec/app/inbox/notices.md, "Ask Alpha from a notice checks the same email again before spending the tap")`, async () => {
   const world = { ...scene(), phone: true, image: true };
   const notices: InboxNoticeScene = { spent: [], released: [] };
   world.inbox.notices = notices;
@@ -162,7 +162,7 @@ it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, 
   expect(world.ask.said).toEqual([]);
 }, 120_000);
 
-it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/adding.md, \"The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address\")", async () => {
+it(`Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md, "Story: Add files and people to my draft"; spec/app/inbox/adding.md, "The people shown are for the draft and the newest Contacts read, and choosing one adds only its displayed address")`, async () => {
   const world = { ...scene(), phone: true, image: true };
   world.telephony.contacts = false;
   const maya = world.telephony.people[0];
@@ -200,7 +200,7 @@ it("Choose a phone contact for the email I’m writing (spec/app/inbox/adding.md
   expect([world.telephony.contacts, added, world.inbox.changes]).toEqual([true, [email], []]);
 });
 
-it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Change the stars or read state of selected mail\")", async () => {
+it(`Star and mark the mail I reviewed (spec/app/inbox/sending.md, "Story: Change the stars or read state of selected mail")`, async () => {
   const world = scene();
   const { alpha } = await openInbox(world);
   const runtime = inbox.runtime(alpha);
@@ -233,7 +233,7 @@ it("Star and mark the mail I reviewed (spec/app/inbox/sending.md, \"Story: Chang
   expect(world.inbox.changes).toHaveLength(4);
 });
 
-it("Delete the reviewed phone drafts (spec/app/inbox/drafts.md, \"The owner can review and delete selected local drafts on the shelf, at the revisions shown\")", async () => {
+it(`Delete the reviewed phone drafts (spec/app/inbox/drafts.md, "The owner can review and delete selected local drafts on the shelf, at the revisions shown")`, async () => {
   const world = scene();
   const first = await openInbox(world);
   const { alpha } = first;
@@ -528,7 +528,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
-it("Open and close Cloud sign-in without leaving Inbox (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
+it(`Open and close Cloud sign-in without leaving Inbox (spec/app/inbox/index.md, "Story: Connect Gmail and keep to its grant")`, async () => {
   const world = scene();
   world.signedIn = false;
   const { alpha } = await open(world, inboxAccountMounts);
@@ -952,7 +952,7 @@ it("says Open to retry on Home's mail card only after a failed read, and recover
   await afterDraw(() => expect(status()).toMatch(/^you@gmail\.example( · Updated .+)?$/u));
 });
 
-it("Flags bare-domain phishing link text and waits two seconds before writing draft edits to the phone (spec/app/inbox/message.md, \"Only an https link without credentials in it can be reviewed and opened; any other link stays text\"; spec/app/inbox/drafts.md, \"Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket\")", async () => {
+it(`Flags bare-domain phishing link text and waits two seconds before writing draft edits to the phone (spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket")`, async () => {
   expect(linkOf("https://evil.test/login", "bank.com").mismatch).toBe(true);
   expect(linkOf("https://bank.com/login", "bank.com").mismatch).toBe(false);
 
@@ -1147,7 +1147,7 @@ async function saveReplyDraft(alpha: Alpha, runtime: ReturnType<typeof inbox.run
   await until(alpha, runtime, Writing, (s) => s.letter.gmail !== 0);
 }
 
-it("Distinguishes prose colons from bare-domain phishing labels in linkOf (spec/app/inbox/message.md, \"Only an https link without credentials in it can be reviewed and opened; any other link stays text\")", () => {
+it(`Distinguishes prose colons from bare-domain phishing labels in linkOf (spec/app/inbox/message.md, "Only an https link without credentials in it can be reviewed and opened; any other link stays text")`, () => {
   expect([
     linkOf("https://northpoint.test/room", "Meeting: 3pm").mismatch,
     linkOf("https://evil.example/steal", "bank.example/login").mismatch,
@@ -1155,7 +1155,7 @@ it("Distinguishes prose colons from bare-domain phishing labels in linkOf (spec/
   ]).toEqual([false, true, false]);
 });
 
-it("Refuses oversized file handoffs into a new draft with NoRoom (spec/app/inbox/adding.md, \"A file handed over from Files or Photos is shown to the owner before it joins the draft open, or starts a new message from the account given, and only where it fits\")", async () => {
+it(`Refuses oversized file handoffs into a new draft with NoRoom (spec/app/inbox/adding.md, "A file handed over from Files or Photos is shown to the owner before it joins the draft open, or starts a new message from the account given, and only where it fits")`, async () => {
   const { alpha, runtime } = await openInboxWorld();
   expect(await runtime.runPromise(handOver({ name: "huge.jpg", mimeType: "image/jpeg", size: 6 * 1024 * 1024, data: "" }, "Photos"))).toBe(true);
   await until(alpha, runtime, Adding, (s) => s.thing !== 0 && s.into === 0);
@@ -1165,7 +1165,7 @@ it("Refuses oversized file handoffs into a new draft with NoRoom (spec/app/inbox
   expect([addingState.refused, (await runtime.runPromise(Writing.use((m) => m.get()))).open]).toEqual(["NoRoom", false]);
 });
 
-it("Deduplicates ReplyAll recipients case-insensitively and drops invalid addresses (spec/app/inbox/drafts.md, \"A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told\")", async () => {
+it(`Deduplicates ReplyAll recipients case-insensitively and drops invalid addresses (spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told")`, async () => {
   const { alpha, runtime } = await openInboxWorld();
   expect(await runtime.runPromise(begin({
     kind: "ReplyAll",
@@ -1178,7 +1178,7 @@ it("Deduplicates ReplyAll recipients case-insensitively and drops invalid addres
   expect([replyState.letter.recipients, replyWords.to, replyWords.cc]).toEqual([2, ["Sam@okafor.example"], ["alex@okafor.example"]]);
 });
 
-it("Invalidates an open draft send review when the draft changes (spec/app/inbox/sending.md, \"A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again\")", async () => {
+it(`Invalidates an open draft send review when the draft changes (spec/app/inbox/sending.md, "A change to what is under review, or to a draft whose operation is recorded and not yet sent, stops it and says it must be looked at again")`, async () => {
   const { alpha, runtime } = await openInboxWorld();
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
@@ -1193,7 +1193,7 @@ it("Invalidates an open draft send review when the draft changes (spec/app/inbox
   }, { timeout: 3_000 });
 });
 
-it("Recovers from an externally deleted 404 Gmail draft copy and an unsure draft save (spec/app/inbox/letter.md, \"A Gmail copy read unchanged since the revision it was made on lets the draft be saved over it; one changed is a clash; one gone is saved anew\"; spec/app/inbox/drafts.md, \"Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read\")", async () => {
+it(`Recovers from an externally deleted 404 Gmail draft copy and an unsure draft save (spec/app/inbox/letter.md, "A Gmail copy read unchanged since the revision it was made on lets the draft be saved over it; one changed is a clash; one gone is saved anew"; spec/app/inbox/drafts.md, "Before a draft with a Gmail copy is saved over it, and whenever the draft is unsure of that copy, Gmail's copy is read, one read at a time, while its account may be read")`, async () => {
   const { alpha, world, runtime } = await openInboxWorld();
   await saveReplyDraft(alpha, runtime, "Draft for copy check");
   await fill("Message", "Edited after Gmail deleted copy");
@@ -1211,7 +1211,7 @@ it("Recovers from an externally deleted 404 Gmail draft copy and an unsure draft
   expect(told()).toContain("Your save did not reach Gmail");
 });
 
-it("Reports SaveNotFound when an unsure ReplaceDraft did not change Gmail's copy (spec/app/inbox/drafts.md, \"What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses\")", async () => {
+it(`Reports SaveNotFound when an unsure ReplaceDraft did not change Gmail's copy (spec/app/inbox/drafts.md, "What the read finds settles an unsure draft, and the owner is told whether the lost save was found; it lets a draft be saved over a copy unchanged since it was made, or stops it at a clash; nothing is saved over either until the owner chooses")`, async () => {
   const { alpha, world, runtime } = await openInboxWorld();
   await saveReplyDraft(alpha, runtime, "Original Gmail copy");
   await fill("Message", "Updated copy whose replace is lost");
@@ -1227,7 +1227,7 @@ it("Reports SaveNotFound when an unsure ReplaceDraft did not change Gmail's copy
     .toEqual(["SaveNotFound", "Edited", true, true]);
 });
 
-it("Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, \"A draft's operation is reviewed as the draft is, on its From account, once it is wholly kept on the phone, while nothing else is under way and no unknown outcome is unseen\")", async () => {
+it(`Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, "A draft's operation is reviewed as the draft is, on its From account, once it is wholly kept on the phone, while nothing else is under way and no unknown outcome is unseen")`, async () => {
   const { alpha, runtime } = await openInboxWorld();
   await saveReplyDraft(alpha, runtime, "Send with Gmail draft id");
   const cloud = await runtime.runPromise(Cloud);
@@ -1249,7 +1249,7 @@ it("Sends a draft saved in Gmail with its draftId (spec/app/inbox/sending.md, \"
   expect([Boolean(sendProposals[0]?.draftId), Boolean(sendProposals[0]?.expectedDigest)]).toEqual([true, true]);
 });
 
-it("Persists a suggestion inserted into a shelved draft across restart (spec/app/inbox/suggestion.md, \"What goes in is the text shown, where it was aimed, as the owner confirmed it, once\")", async () => {
+it(`Persists a suggestion inserted into a shelved draft across restart (spec/app/inbox/suggestion.md, "What goes in is the text shown, where it was aimed, as the owner confirmed it, once")`, async () => {
   const { alpha, world, close, runtime } = await openInboxWorld();
   await press("Compose");
   await until(alpha, runtime, Writing, (s) => s.open);
@@ -1278,7 +1278,7 @@ it("Persists a suggestion inserted into a shelved draft across restart (spec/app
   expect(persistedWords).toBe("Initial note.\n\nAppended from Alpha.");
 });
 
-it("Dispatches a held Archive after restart once accounts restore its grant (spec/app/inbox/sending.md, \"A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed\")", async () => {
+it(`Dispatches a held Archive after restart once accounts restore its grant (spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed")`, async () => {
   const { alpha, world, close, runtime } = await openInboxWorld();
   await choose("Standup notes");
   await menu("Archive", "Mail options");

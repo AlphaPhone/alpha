@@ -1,7 +1,8 @@
 // spec/app/calendar/index.md, "Rows shown are for the day the calendar is anchored to, from a source it may read"; spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type RequestsStore, createRequestsStore } from "./requests.ts"
-import { type KeptNumbers, type ShownStore, createShownStore, unreadableNumbers } from "./shown.ts"
+import { Time } from "../runtime/index.vibe"
+import { type KeptNumbers, type ShownStore, createShownStore, exactNumbers, startAt } from "./shown.ts"
 
 /** Scoped per-runtime store of Calendar events read from Phone and Google. */
 export service Shown: ShownStore {}
@@ -9,18 +10,30 @@ export service Shown: ShownStore {}
 /** Scoped per-runtime store of agent Calendar approval requests. */
 export service Requests: RequestsStore {}
 
-/** Where the numbers Calendar gave events are kept, so that a deletion or a form kept across a restart names the event it was for; what is there and cannot be read is set aside beside it first. */
+/**
+ * Where the numbers Calendar gave events are kept, so that a deletion or a form kept across a restart names the event it
+ * was for. What is there and is not numbers a JavaScript number holds exactly is set aside beside it first. Where the
+ * store cannot be read, nothing is written over it and nothing kept under its numbers is let go, and the next start reads
+ * it again.
+ */
 const numbersKey = "alpha.calendar.numbers"
-const decodeNumbers = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({ last: Schema.Number, numbers: Schema.Array(Schema.Tuple([Schema.String, Schema.Number])) })))
+const decodeNumbers = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({
+  last: Schema.Number,
+  numbers: Schema.Array(Schema.Union([Schema.Tuple([Schema.String, Schema.Number]), Schema.Tuple([Schema.String, Schema.Number, Schema.Number])])),
+})))
 
 // spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm"
 const shownLayer = Layer.effect(Shown, effect {
   const kv = try KeyValueStore.KeyValueStore
-  const stored = kv.get(numbersKey) catch () => undefined
-  const read: KeptNumbers | undefined = stored === undefined ? undefined : decodeNumbers(stored) catch () => undefined
+  const now = try (try Time).now()
+  const got: { readonly stored: string | undefined } | undefined = effect { return { stored: try kv.get(numbersKey) } } catch () => undefined
+  const stored = got?.stored
+  const decoded: KeptNumbers | undefined = stored === undefined ? undefined : decodeNumbers(stored) catch () => undefined
+  const read = decoded === undefined ? undefined : exactNumbers(decoded)
   if (stored !== undefined && read === undefined) try ignore(kv.set(`${numbersKey}.unreadable`, stored))
-  const kept = stored === undefined ? undefined : read ?? unreadableNumbers
-  const store = createShownStore(kept, (numbers) => runFork(ignore(kv.set(numbersKey, JSON.stringify(numbers)))))
+  const kept = startAt(read, now)
+  const keep = (numbers: KeptNumbers) => runFork(ignore(kv.set(numbersKey, JSON.stringify(numbers))))
+  const store = createShownStore(kept, got === undefined ? undefined : keep)
   try Effect.addFinalizer(() => sync(() => { store.reset() }))
   return store
 })
