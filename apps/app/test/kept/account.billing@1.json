@@ -2,6 +2,10 @@
   "key": "alpha/app/account/billing@1",
   "spec": "spec/app/account/billing.md",
   "shape": "b47ddb972ae21838",
+  "sealed": {
+    "shape": "b47ddb972ae21838",
+    "state": "5346531ab6d15a54"
+  },
   "state": {
     "review": {
       "tag": "NoPurchaseReview"

@@ -2,6 +2,10 @@
   "key": "alpha/app/wallet/index@1",
   "spec": "spec/app/wallet/index.md",
   "shape": "6056077e16c1d338",
+  "sealed": {
+    "shape": "6056077e16c1d338",
+    "state": "429338d1146f06e0"
+  },
   "state": {
     "showing": false,
     "standing": {

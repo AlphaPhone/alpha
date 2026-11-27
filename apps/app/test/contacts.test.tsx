@@ -22,6 +22,7 @@ import home from "../src/home/index.tsx";
 import { untimed } from "../src/runtime/reactor.vibe";
 import { placeOf } from "../src/voice/voice.vibe";
 import { button, chatAction, closeAll, drawn, fill, filledPhoneKeypad, hardware, later, only, open as openAlpha, press, underAct, until } from "./alpha.tsx";
+import { prepared } from "./fakes/notes.ts";
 import { alphaImage as image, type Scene } from "./fakes/scene.ts";
 
 underAct();
@@ -548,7 +549,8 @@ describe("Talk on an Alpha image", () => {
     await until(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On");
 
     for (const [turn, view] of [[1, "Phone"], [2, "Contacts"], [3, "Messages"]] as const) {
-      world.ask.nextReplyChunks = [`[NAVIGATE:${view}] Opening ${view}.`];
+      world.ask.nextReplyChunks = [`Opening ${view}.`];
+      world.ask.nextActions = (metadata) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), view.toLowerCase(), false)];
       world.voice.emitLocal?.("liveCaptureTranscript", {
         captureId: world.voice.activeMicSession,
         final: { turnId: `comms-nav-${turn}`, text: `Open ${view}`, mode: "device" },

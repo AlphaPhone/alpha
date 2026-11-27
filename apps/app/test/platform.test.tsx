@@ -367,12 +367,14 @@ it("Keep my phone's state across restarts: a kept value Alpha can no longer read
 
 /**
  * One durable record (`reacting(…, { keep })`) and every shape it was kept in on develop: `state` is what today's build
- * writes under `key`, `shape` the fingerprint of today's decode, `kept` the paths of the owner's data a restart keeps,
- * and `earlier` each earlier shape, as a build of that time wrote it.
+ * writes under `key`, `shape` the fingerprint of today's decode, `sealed` the shape and the fingerprint of the `state`
+ * last written, `kept` the paths of the owner's data a restart keeps, and `earlier` each earlier shape, as a build of
+ * that time wrote it.
  */
 interface KeptRecord {
   readonly key: string;
   readonly shape: string;
+  readonly sealed?: { readonly shape: string; readonly state: string };
   readonly state: Readonly<Record<string, unknown>>;
   readonly kept?: readonly string[];
   readonly memoryOnly?: readonly string[];
@@ -401,6 +403,23 @@ function shapeOf(key: string) {
   const lines = fs.readFileSync(path.join(import.meta.dirname, "../gen", `${generatedName(key)}.ts`), "utf8").split("\n");
   const checked = lines.flatMap((line, at) => (/^export function (parseState|inv|always\w*)\(/.test(line) ? [lines.slice(at, lines.indexOf("}", at) + 1).join("")] : []));
   return createHash("sha256").update(checked.join("").replace(/\s+/g, "")).digest("hex").slice(0, 16);
+}
+
+/** The fingerprint of a kept state, whatever the order of its fields. */
+const sealOf = (state: unknown) => createHash("sha256").update(JSON.stringify(state, (_, value: unknown) => (
+  typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => (a < b ? -1 : 1))) : value
+))).digest("hex").slice(0, 16);
+
+/**
+ * Why a record's `sealed` no longer names its `state` and `shape`, or nothing when it does. Today's `state` may be written
+ * again only for the shape it was sealed in, for a record with no seal yet, or once the state it replaces is in `earlier`:
+ * a state rewritten for a new shape with the one it replaced dropped is refused, and the new seal is named only once it is kept.
+ */
+function unsealed({ key, shape, sealed, state, earlier = [] }: KeptRecord) {
+  const seal = { shape, state: sealOf(state) };
+  if (sealed?.shape === seal.shape && sealed.state === seal.state) return undefined;
+  if (sealed === undefined || sealed.state === seal.state || sealed.shape === shape || earlier.some((one) => sealOf(one.state) === sealed.state)) return `${key}: set its "sealed" to ${JSON.stringify(seal)}`;
+  return `${key}: its "state" was written again for shape ${shape}, and the state sealed for shape ${sealed.shape} (${sealed.state}) is not in "earlier". Take that state from git, move it into "earlier", bring it forward in the record's migration, and run this test again for the new seal`;
 }
 
 const valueAt = (value: unknown, dotted: string) => dotted.split(".").reduce<unknown>((one, name) => (typeof one === "object" && one !== null ? (one as Record<string, unknown>)[name] : undefined), value);
@@ -444,6 +463,8 @@ it("Keep my phone's state across restarts: every shape a durable record was ever
     const { parseState, initial } = await machineOf(record.key);
     const shape = shapeOf(record.key);
     if (shape !== record.shape) problems.push(`${record.key}: its kept shape changed (now ${shape}, test/kept has ${record.shape}). Move its "state" into "earlier", bring that earlier shape forward in the record's migration, then write today's "state" and "shape"`);
+    const seal = unsealed(record);
+    if (seal !== undefined) problems.push(seal);
     if (parseState({ ...Object.fromEntries((record.memoryOnly ?? []).map((name) => [name, initial[name]])), ...record.state }) === undefined) problems.push(`${record.key}: the "state" in test/kept is not today's shape`);
   }
   const recorded = new Set(keptRecords.map(({ key }) => key));

@@ -75,6 +75,7 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
   const [risen, setRisen] = useState<Risen>({ view: undefined, depth: 0, overHome: false });
   // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": only a tab other than Contacts, chosen on Contacts, returns to Phone (45f6bed30 prototype/phone-adapter.ts:263-270), and the mark lasts until the view next changes.
   const tabReturnRef = useRef(false);
+  const markedLayerRef = useRef<HTMLDivElement | null>(null);
   const slidRef = useRef<Risen["slide"]>(undefined);
   const slide = risen.slide;
   const showing = shell?.trail.at(-1);
@@ -82,6 +83,11 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
   // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
   const holdLayer = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": going Home takes the layer away, so a layer drawn again after Home holds no mark from before it.
+    if (markedLayerRef.current !== node) {
+      markedLayerRef.current = node;
+      tabReturnRef.current = false;
+    }
     if (slide !== undefined && slidRef.current !== slide) {
       slidRef.current = slide;
       const fromTabs = slide.from === "Contacts" && slide.to === "Phone" && tabReturnRef.current;

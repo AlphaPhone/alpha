@@ -2,6 +2,10 @@
   "key": "alpha/app/telegram/notices@1",
   "spec": "spec/app/telegram/notices.md",
   "shape": "a071bd3fa79b1e7b",
+  "sealed": {
+    "shape": "a071bd3fa79b1e7b",
+    "state": "985361e51d64c29d"
+  },
   "state": {
     "authenticated": true,
     "notifyAllowed": true,

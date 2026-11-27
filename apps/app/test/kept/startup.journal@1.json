@@ -2,6 +2,10 @@
   "key": "alpha/app/startup/journal@1",
   "spec": "spec/app/startup/journal.md",
   "shape": "5cf69cbaf1b3e127",
+  "sealed": {
+    "shape": "5cf69cbaf1b3e127",
+    "state": "a58e32bb4a8a7ca9"
+  },
   "state": {
     "entries": [
       {

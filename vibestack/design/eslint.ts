@@ -98,7 +98,7 @@ export function designSystem<Plugin>({ tailwind, tokens, entryPoint }: { tailwin
     ...(extraRadii ? [{ pattern: `${variants}rounded(?:-[a-z]{1,2})?-(?:${extraRadii})!?$`, message: `"$0" is a radius the tokens do not define. ${radius}` }] : []),
     { pattern: `${variants}shadow-[[()].+[\\])]!?$`, message: `"$0" is an arbitrary shadow. ${shadow}` },
     ...(extraShadows ? [{ pattern: `${variants}shadow-(?:${extraShadows})!?$`, message: `"$0" is a shadow the tokens do not define. ${shadow}` }] : []),
-    { pattern: `${variants}font-serif!?$`, message: `"$0" is a font the tokens do not define. Use a font token: ${names(tokens.font, "font-")}.` },
+    ...("serif" in tokens.font ? [] : [{ pattern: `${variants}font-serif!?$`, message: `"$0" is a font the tokens do not define. Use a font token: ${names(tokens.font, "font-")}.` }]),
     { pattern: `${variants}(?:drop-shadow-\\[.+\\]|\\[(?:box-shadow|filter):.+\\])$`, message: `"$0" is an arbitrary shadow or filter. Use a token: ${names(tokens.shadow, "shadow-")}, ${names(tokens.dropShadow, "drop-shadow-")}.` },
     ...declared,
   ]

@@ -2,6 +2,10 @@
   "key": "alpha/app/inbox/drafts@1",
   "spec": "spec/app/inbox/drafts.md",
   "shape": "163af6fb34531340",
+  "sealed": {
+    "shape": "163af6fb34531340",
+    "state": "47909671a012d318"
+  },
   "state": {
     "session": 3,
     "open": false,

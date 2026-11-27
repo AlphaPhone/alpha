@@ -2,6 +2,10 @@
   "key": "alpha/app/inbox/sending@1",
   "spec": "spec/app/inbox/sending.md",
   "shape": "95a060bdf4b18452",
+  "sealed": {
+    "shape": "95a060bdf4b18452",
+    "state": "918e987711227abb"
+  },
   "state": {
     "session": 1,
     "of": 1,

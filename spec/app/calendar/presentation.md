@@ -62,6 +62,11 @@ build named the event page by its source's summary and fell back to Agent
 Calendar where the source had none (v119 45f6bed30,
 apps/app/src/prototype/agent-calendar-adapter.ts:166 and 273; demo frame
 v100-077 shows Eliza Calendar, the summary eliza gives its own calendar).
+The agent's own calendar is the one it lists as "primary", where eliza
+writes a new event; only where it lists none by that name is it the first
+calendar the agent marks primary, or else the first it lists. So with
+Google connected, whose own primary calendar the agent lists too, the
+agent's own calendar keeps its own summary.
 The card of a change the agent asks for names the calendar its request
 names the same way: the agent's own calendar by that summary, and another
 calendar by the summary the agent lists for it, or as the request names
@@ -75,7 +80,9 @@ each card it built. A read of the agent's events that comes back
 unavailable takes those events away but keeps the names the agent listed,
 since eliza answers its own calendar's empty days as unavailable while it
 still lists that calendar; only the agent's next list, or another owner
-signing in, replaces them.
+signing in or signing out, replaces them. A sign-out forgets them, so a
+card whose own read of the list then fails says Agent Calendar, never the
+name the owner before was shown.
 
 ```quint
 pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed

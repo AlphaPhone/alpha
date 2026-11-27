@@ -2,6 +2,10 @@
   "key": "alpha/app/notes/editor@1",
   "spec": "spec/app/notes/editor.md",
   "shape": "bfa4eac725464283",
+  "sealed": {
+    "shape": "bfa4eac725464283",
+    "state": "00dfb92681020e00"
+  },
   "state": {
     "owner": 1,
     "note": 0,

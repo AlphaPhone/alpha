@@ -402,7 +402,11 @@ ends, as that session's Mute finalized the speech up to then and sent it
 the microphone again and keeps those words and their gap: speech that
 starts on the reopened microphone joins them, and they are sent once, when
 the gap ends, as that session kept the utterance and its timer across the
-capture Unmute opened (voice-assistant-session.ts:612-622 and 722-735). A
+capture Unmute opened (voice-assistant-session.ts:612-622 and 722-735).
+Mute pressed again while that microphone is still opening keeps them too:
+they are still sent once, when the gap ends, as that session's Mute kept the
+utterance whether or not its capture had opened (voice-assistant-session.ts:
+593-622). A
 gap that ends while the reopened microphone is still closing ends the turn
 as it closes, and one that ends while it is still opening ends the turn as
 soon as it is open. Stop, or the relay's capture ending,
@@ -1060,8 +1064,9 @@ pure def sometimesSecondQuietRetry(v: Voice): bool = v.retries == 2 and v.retryA
 ### An active voice conversation may ask the shell to open Home or any admitted screen
 
 Place 1 names Home and every higher place names an admitted app. A
-completed reply's prepared view takes precedence over its textual navigation
-tag. A streaming preview cannot move the shell. An admitted navigation
+completed reply moves the shell only by what its actions prepared, a view or
+a page, never by the words of the reply. A streaming preview cannot move the
+shell. An admitted navigation
 belongs to the current voice turn and the source route that it was sent
 from. Once admitted, its claim remains until the shell's route is observed
 or the shell declines to move.

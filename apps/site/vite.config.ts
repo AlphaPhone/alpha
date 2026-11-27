@@ -62,7 +62,8 @@ function prerender(): Plugin {
         const policyShell = shell
           .replace(/<title>[^<]*<\/title>/, () => renderToStaticMarkup(createElement("title", null, title)))
           .replace(/<meta name="description"[^>]*>/, () => renderToStaticMarkup(createElement("meta", { name: "description", content: title })))
-          .replace(/<meta property="og:title"[^>]*>/, () => renderToStaticMarkup(createElement("meta", { property: "og:title", content: title })))
+          .replace(/<meta property="og:description"[^>]*>/, () => renderToStaticMarkup(createElement("meta", { property: "og:description", content: title })))
+          .replace(/<meta property="og:title"[^>]*>/,() => renderToStaticMarkup(createElement("meta", { property: "og:title", content: title })))
           .replace(/<meta property="og:url"[^>]*>/, () => renderToStaticMarkup(createElement("meta", { property: "og:url", content: canonical })))
           .replace(/<link rel="canonical"[^>]*>/, () => renderToStaticMarkup(createElement("link", { rel: "canonical", href: canonical })));
         const html = renderToString(createElement(LegalPage, { page: policy }));

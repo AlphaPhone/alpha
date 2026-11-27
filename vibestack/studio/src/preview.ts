@@ -43,35 +43,45 @@ type PluginFactory = () => unknown;
 interface PreviewEntry {
   ready: Promise<PreviewInfo>;
   server?: PreviewServer;
+  allowedOrigins: Set<string>;
 }
 
 const VIRTUAL_ENTRY = "/@studio-preview/main.tsx";
 const VIRTUAL_THEME = "virtual:studio-preview-theme.css";
 const VIRTUAL_SB_TEST = "\0virtual:studio-storybook-test";
+const LOCAL_ORIGIN_RE = /^http:\/\/(?:localhost|127\.0\.0\.1):\d+$/i;
+const LOCAL_HOST_RE = /^(?:localhost|127\.0\.0\.1):\d+$/i;
 const servers = new Map<string, PreviewEntry>();
 let exitHooked = false;
 
-const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i;
-const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i;
+function firstHeader(headers: Record<string, string | string[] | undefined> | undefined, name: string): string | undefined {
+  const value = headers?.[name];
+  return Array.isArray(value) ? value[0] : value;
+}
 
-function isSafeRelativeFile(relFile: string): boolean {
-  if (!relFile || relFile.includes("\0") || relFile.includes("\\") || relFile.includes(":")) return false;
-  const clean = relFile.replace(/^\/+/, "");
-  if (!clean || clean.startsWith("/") || clean.split("/").some((part) => part === "" || part === "." || part === "..")) return false;
-  return true;
+function isAllowedOrigin(origin: string | undefined, allowedOrigins: Set<string>): boolean {
+  if (!origin) return false;
+  return allowedOrigins.size > 0 ? allowedOrigins.has(origin) : LOCAL_ORIGIN_RE.test(origin);
 }
 
 function siblingMetaFile(root: string, relFile: string): string | null {
-  if (!isSafeRelativeFile(relFile)) return null;
-  const realRoot = fs.realpathSync(root);
+  if (!relFile || relFile.includes("\0") || relFile.includes("\\")) return null;
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    return null;
+  }
   const clean = relFile.replace(/^\/+/, "");
   const stem = clean.replace(/\.[jt]sx?$/, "");
   for (const ext of [".meta.tsx", ".meta.ts"]) {
-    const candidate = `${stem}${ext}`;
-    const resolved = path.resolve(realRoot, candidate);
+    const resolved = path.resolve(realRoot, `${stem}${ext}`);
     if (!resolved.startsWith(realRoot + path.sep)) continue;
+    if (!fs.existsSync(resolved)) continue;
     try {
-      if (fs.existsSync(resolved) && fs.realpathSync(resolved).startsWith(realRoot + path.sep)) return candidate;
+      const realCandidate = fs.realpathSync(resolved);
+      if (!realCandidate.startsWith(realRoot + path.sep)) continue;
+      return path.relative(realRoot, realCandidate).split(path.sep).join("/");
     } catch {
       continue;
     }
@@ -249,8 +259,7 @@ function previewHtml(root: string, reqUrl: string): string {
   const theme = new URL(reqUrl, "http://127.0.0.1").searchParams.get("theme");
   const htmlClass = theme === "dark" || theme === "light" ? ` class="${theme}"` : "";
   const tokens = readProjectTokens(root);
-  const rawInlineCss = tokens ? `${tokensCss(tokens)}html,body{background:var(--background);color:var(--foreground);}` : "";
-  const inlineCss = rawInlineCss.replace(/<\/style/gi, "<\\/style");
+  const inlineCss = tokens ? `${tokensCss(tokens)}html,body{background:var(--background);color:var(--foreground);}` : "";
   return [
     "<!doctype html>",
     `<html lang="en"${htmlClass}>`,
@@ -268,13 +277,17 @@ function previewHtml(root: string, reqUrl: string): string {
   ].join("\n");
 }
 
-function previewEntryCode(): string {
+function previewEntryCode(allowedOrigins: Set<string>): string {
+  const originsLiteral = JSON.stringify([...allowedOrigins]);
   return `
-import React, { Component, useEffect, useState } from "react";
+import React, { Component, useEffect, useRef, useState } from "react";
 import * as ReactDomClient from "react-dom/client";
 import "${VIRTUAL_THEME}";
 
 const mountRoot = ReactDomClient.createRoot || ReactDomClient.default?.createRoot;
+const ALLOWED_ORIGINS = new Set(${originsLiteral});
+const LOCAL_ORIGIN_RE = /^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):\\d+$/i;
+const isAllowedOrigin = (origin) => typeof origin === "string" && (ALLOWED_ORIGINS.size > 0 ? ALLOWED_ORIGINS.has(origin) : LOCAL_ORIGIN_RE.test(origin));
 
 const SKIP_NAMES = new Set(["PreviewApp", "PreviewBoundary", "Fragment", "Suspense", "StrictMode", "Provider", "Consumer"]);
 
@@ -322,27 +335,7 @@ class PreviewBoundary extends Component {
   }
 }
 
-const LOOPBACK_ORIGIN_RE = /^http:\\/\\/(?:localhost|127\\.0\\.0\\.1)(?::\\d+)?$/i;
-let parentTargetOrigin = (() => {
-  try {
-    const ref = document.referrer ? new URL(document.referrer).origin : "";
-    return LOOPBACK_ORIGIN_RE.test(ref) ? ref : null;
-  } catch {
-    return null;
-  }
-})();
-function postToParent(payload) {
-  if (!window.parent || window.parent === window) return;
-  window.parent.postMessage(payload, parentTargetOrigin || "*");
-}
-function isSafeComponentPath(file) {
-  if (typeof file !== "string" || !file || file.includes("\\\\") || file.includes(":")) return false;
-  const clean = file.replace(/^\\/+/, "");
-  if (!clean || !/\\.[jt]sx?$/.test(clean)) return false;
-  return !clean.split("/").some((part) => !part || part === "." || part === "..");
-}
-
-function bindArgs(raw, propNames) {
+function bindArgs(raw, propNames, postToParent) {
   const out = {};
   const src = raw && typeof raw === "object" ? raw : {};
   for (const [k, v] of Object.entries(src)) {
@@ -362,6 +355,16 @@ function bindArgs(raw, propNames) {
 
 function PreviewApp() {
   const params = new URLSearchParams(window.location.search);
+  const initialOrigin = params.get("origin");
+  const parentOriginRef = useRef(isAllowedOrigin(initialOrigin) ? initialOrigin : null);
+  const postToParent = (msg) => {
+    const target = parentOriginRef.current;
+    if (target) {
+      window.parent.postMessage(msg, target);
+      return;
+    }
+    for (const origin of ALLOWED_ORIGINS) window.parent.postMessage(msg, origin);
+  };
   const [spec, setSpec] = useState(() => ({
     file: params.get("file") || "",
     name: params.get("name") || "",
@@ -382,10 +385,8 @@ function PreviewApp() {
 
   useEffect(() => {
     const onMsg = (ev) => {
-      if (ev.source !== window.parent) return;
-      if (!LOOPBACK_ORIGIN_RE.test(ev.origin)) return;
-      if (parentTargetOrigin && ev.origin !== parentTargetOrigin) return;
-      parentTargetOrigin = ev.origin;
+      if (ev.source !== window.parent || !isAllowedOrigin(ev.origin)) return;
+      parentOriginRef.current = ev.origin;
       const data = ev.data;
       if (!data || typeof data !== "object" || data.type !== "studio:preview") return;
       setSpec((prev) => ({
@@ -407,16 +408,12 @@ function PreviewApp() {
     if (!spec.file || !spec.name) return;
     let cancelled = false;
     const key = spec.file + "#" + spec.name;
-    if (!isSafeComponentPath(spec.file)) {
-      setLoaded({ key, Comp: null, metaArgs: {}, error: "Refused unsafe component path: " + spec.file });
-      return;
-    }
     const clean = spec.file.replace(/^\\/+/, "");
     Promise.all([
       import(/* @vite-ignore */ "/" + clean),
       fetch("/@studio-preview/meta?file=" + encodeURIComponent(clean))
         .then((r) => (r.ok ? r.json() : { metaFile: null }))
-        .then((info) => (info && typeof info.metaFile === "string" && isSafeComponentPath(info.metaFile) ? import(/* @vite-ignore */ "/" + info.metaFile).catch(() => null) : null))
+        .then((info) => (info && info.metaFile ? import(/* @vite-ignore */ "/" + info.metaFile).catch(() => null) : null))
         .catch(() => null),
     ]).then(([mod, metaMod]) => {
       if (cancelled) return;
@@ -457,7 +454,7 @@ function PreviewApp() {
   }, [spec.inspect, spec.children, spec.name]);
 
   const Comp = loaded.Comp;
-  const bound = { ...loaded.metaArgs, ...bindArgs(spec.args, spec.props) };
+  const bound = { ...loaded.metaArgs, ...bindArgs(spec.args, spec.props, postToParent) };
   return React.createElement(
     "div",
     { className: "relative min-h-screen p-6" },
@@ -483,7 +480,7 @@ mountRoot(document.getElementById("root")).render(React.createElement(PreviewApp
 `;
 }
 
-function previewPlugin(root: string, dirs: string[], useTailwind: boolean): PreviewPlugin {
+function previewPlugin(root: string, dirs: string[], useTailwind: boolean, allowedOrigins: Set<string>): PreviewPlugin {
   const themeFile = path.join(root, "__studio_preview_theme.css");
   const entryId = `\0${VIRTUAL_ENTRY}`;
   return {
@@ -491,31 +488,37 @@ function previewPlugin(root: string, dirs: string[], useTailwind: boolean): Prev
     enforce: "pre",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const header = (name: string) => {
-          const v = req.headers?.[name];
-          return Array.isArray(v) ? v[0] : v;
-        };
-        const host = header("host");
-        if (host && !LOOPBACK_HOST.test(host)) {
+        const addr = server.httpServer?.address();
+        const boundPort = addr && typeof addr === "object" ? addr.port : undefined;
+        const host = firstHeader(req.headers, "host")?.toLowerCase();
+        const validHost = Boolean(
+          host && (boundPort !== undefined ? host === `127.0.0.1:${boundPort}` || host === `localhost:${boundPort}` : LOCAL_HOST_RE.test(host)),
+        );
+        if (!validHost) {
           res.statusCode = 403;
           res.setHeader("content-type", "text/plain; charset=utf-8");
-          res.end("Forbidden");
+          res.end("use the local preview address");
           return;
         }
-        const origin = header("origin");
-        if (origin && !LOOPBACK_ORIGIN.test(origin)) {
+        const origin = firstHeader(req.headers, "origin");
+        if (origin !== undefined && origin !== `http://${host}` && !isAllowedOrigin(origin, allowedOrigins)) {
           res.statusCode = 403;
           res.setHeader("content-type", "text/plain; charset=utf-8");
-          res.end("Forbidden");
+          res.end("cross-origin requests are not allowed");
           return;
         }
-        if (header("sec-fetch-site") === "cross-site") {
-          res.statusCode = 403;
-          res.setHeader("content-type", "text/plain; charset=utf-8");
-          res.end("Forbidden");
-          return;
+        const fetchSite = firstHeader(req.headers, "sec-fetch-site");
+        if (fetchSite === "cross-site") {
+          const referer = firstHeader(req.headers, "referer");
+          let refererOrigin: string | undefined;
+          try { refererOrigin = referer ? new URL(referer).origin : undefined; } catch { refererOrigin = undefined; }
+          if (!isAllowedOrigin(refererOrigin, allowedOrigins)) {
+            res.statusCode = 403;
+            res.setHeader("content-type", "text/plain; charset=utf-8");
+            res.end("cross-site requests are not allowed");
+            return;
+          }
         }
-        res.setHeader("x-content-type-options", "nosniff");
         const pathname = (req.url ?? "/").split("?")[0];
         if (pathname === "/@studio-preview/meta") {
           const file = new URL(req.url ?? "/", "http://127.0.0.1").searchParams.get("file") ?? "";
@@ -528,7 +531,6 @@ function previewPlugin(root: string, dirs: string[], useTailwind: boolean): Prev
           void server.transformIndexHtml(req.url ?? "/", previewHtml(root, req.url ?? "/")).then((html) => {
             res.statusCode = 200;
             res.setHeader("content-type", "text/html; charset=utf-8");
-            res.setHeader("content-security-policy", "frame-ancestors 'self' http://localhost:* http://127.0.0.1:*; base-uri 'none'; object-src 'none'");
             res.end(html);
           }, next);
           return;
@@ -543,7 +545,7 @@ function previewPlugin(root: string, dirs: string[], useTailwind: boolean): Prev
       return undefined;
     },
     load(id) {
-      if (id === entryId) return previewEntryCode();
+      if (id === entryId) return previewEntryCode(allowedOrigins);
       if (id === themeFile) return loadThemeCss(root, dirs, useTailwind);
       if (id === VIRTUAL_SB_TEST) return STORYBOOK_TEST_SHIM;
       return undefined;
@@ -589,19 +591,13 @@ async function startEmbeddedPreview(root: string, entry: PreviewEntry): Promise<
   }
   const tailwindPlugin = extractPluginFactory(tailwindMod);
   const vibelangPlugin = extractPluginFactory(vibelangMod);
-  const plugins: unknown[] = [previewPlugin(root, dirs, Boolean(tailwindPlugin))];
+  const plugins: unknown[] = [previewPlugin(root, dirs, Boolean(tailwindPlugin), entry.allowedOrigins)];
   if (vibelangPlugin) plugins.push(vibelangPlugin());
   plugins.push(reactPlugin());
   if (tailwindPlugin) plugins.push(tailwindPlugin());
 
   const alias = reactAliases(root, dirs);
-  const repoRoot = path.resolve(studioRoot, "..", "..");
-  const allow = [...new Set([
-    root,
-    ...dirs.filter((dir) => dir !== studioRoot && dir !== repoRoot),
-    path.join(studioRoot, "node_modules"),
-    path.join(repoRoot, "node_modules"),
-  ].filter((dir) => fs.existsSync(dir)))];
+  const allow = [...new Set(dirs.filter((dir) => fs.existsSync(dir)))];
   try {
     const server = await createViteServer({
       root,
@@ -639,12 +635,18 @@ async function startEmbeddedPreview(root: string, entry: PreviewEntry): Promise<
 }
 
 /** Lazily start an embedded Vite/React preview server for `root`, or return `{ url: null, mode: "none" }`. */
-export function ensurePreview(root: string, components?: ComponentIndex): Promise<PreviewInfo> {
+export function ensurePreview(root: string, components?: ComponentIndex, allowedOrigins: readonly string[] = []): Promise<PreviewInfo> {
   if (!hasRunnableComponents(root, components)) return Promise.resolve({ url: null, mode: "none" });
   const existing = servers.get(root);
-  if (existing) return existing.ready;
+  if (existing) {
+    for (const origin of allowedOrigins) existing.allowedOrigins.add(origin);
+    return existing.ready;
+  }
   hookProcessExit();
-  const entry: PreviewEntry = { ready: Promise.resolve({ url: null, mode: "none" }) };
+  const entry: PreviewEntry = {
+    ready: Promise.resolve({ url: null, mode: "none" }),
+    allowedOrigins: new Set(allowedOrigins),
+  };
   entry.ready = startEmbeddedPreview(root, entry);
   servers.set(root, entry);
   return entry.ready;

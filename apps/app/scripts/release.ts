@@ -13,6 +13,7 @@ import {
   readApkBuildFlags, readApkSignerDigest, readbackInventory, snapshotAndroidArtifact,
 } from "@elizaos/os";
 import { Data, Effect } from "effect";
+import type { verify } from "./android.ts";
 import * as Channel from "../gen/release.ts";
 import {
   type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelHealthy, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable,
@@ -179,11 +180,14 @@ const whole = (text: string, name: string) => {
   return number;
 };
 
-/** What every row of the verification's APK manifest blocks, together; none at all is a blocker of its own. */
+/**
+ * What every release row of the verification's APK manifest (`pnpm android verify`) blocks, together; none at all is a
+ * blocker of its own. The debug APK beside it is never distributed, so its debug signer blocks nothing here.
+ */
 function recordedBlockers(file: string, platform: string | undefined, signed: boolean) {
-  const recorded = JSON.parse(readFileSync(file, "utf8")) as { readonly apks?: readonly unknown[] };
+  const recorded = JSON.parse(readFileSync(file, "utf8")) as Partial<Pick<ReturnType<typeof verify>, "results">>;
   const review = { reviewedSigner: reviewedSigner(), ...(platform === undefined ? {} : { image: { platformCertificateSha256: platform } }) };
-  const rows = (recorded.apks ?? []).map((row) => blockersOf(apkReleaseBlockers(row, review), signed));
+  const rows = (recorded.results ?? []).filter((row) => row.mode === "release").map((row) => blockersOf(apkReleaseBlockers(row, review), signed));
   const all = rows.reduce<Blockers>((sum, row) => ({
     mocks: sum.mocks || row.mocks, audit: sum.audit || row.audit, signer: sum.signer || row.signer, runtime: sum.runtime || row.runtime,
     notices: sum.notices || row.notices, voice: sum.voice || row.voice, platform: sum.platform || row.platform, upstream: sum.upstream || row.upstream,
