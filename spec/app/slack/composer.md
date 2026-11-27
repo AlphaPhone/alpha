@@ -114,7 +114,7 @@ pure def workspaceRevoked(c: Composer, workspace: int, by: Actor): Composer =
     saved: c.saved.select(e => e.target.workspace != workspace),
     alphaRequests: c.alphaRequests.select(r => r.target.workspace != workspace),
     sendOp: if (sameSend and sendingBusy(c)) A::conclude(c.sendOp, false, false) else c.sendOp,
-    readback: if (sameSend) { ...c.readback, status: R::Idle } else c.readback,
+    readback: if (sameSend) R::drop(c.readback) else c.readback,
   }
 ```
 
@@ -318,7 +318,7 @@ pure def restart(c: Composer): Composer = {
   ...initial, connectedWorkspaces: c.connectedWorkspaces, saved: c.saved, clock: c.clock,
   sendTarget: c.sendTarget,
   sendOp: if (sendingBusy(c)) A::conclude(c.sendOp, false, false) else c.sendOp,
-  readback: { ...c.readback, status: R::Idle },
+  readback: R::drop(c.readback),
   alphaRequests: c.alphaRequests,
 }
 ```

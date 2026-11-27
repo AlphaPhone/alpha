@@ -354,7 +354,7 @@ effect function fetchedBrowser(request: Fetch): Library.Event!!(PhotosPort | Cat
   const members = new Set(album?.owned?.memberIds ?? [])
   const query = request.query.toLocaleLowerCase()
   const rows = live.filter((item) => browserBelongs(item, album?.target, members) && (request.filter === "Favorites" ? item.favorite === true
-    : request.filter === "Videos" ? item.mimeType.startsWith("video/") : request.filter === "Matching" ? item.name.toLocaleLowerCase().includes(query) : request.filter !== "People"))
+    : request.filter === "Videos" ? item.mimeType.startsWith("video/") : request.filter === "Matching" ? item.name.toLocaleLowerCase().includes(query) : true))
     .map((item): Row => ({ kind: "browser", item }))
   const allIds = try cache.index(rows)
   const state = try machine.get()
@@ -656,7 +656,7 @@ const lifecycle = started(effect {
     if (try hasHandoff()) {
       const current = try photos.get()
       if (current.tab === "Albums") try ignore(photos.send({ type: "showTab", tab: "Library" }, "Owner"))
-      else if (current.filter !== "Everything") try ignore(photos.send({ type: "narrow", narrowing: "Everything", query: "", person: 0 }, "Owner"))
+      else if (current.filter !== "Everything") try ignore(photos.send({ type: "narrow", narrowing: "Everything", query: "" }, "Owner"))
     }
     if (Option.isSome(phone)) try ignore(tryPromise(() => phone.value.watchLibrary(true)))
   })

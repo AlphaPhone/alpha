@@ -96,7 +96,7 @@ describe("Contacts on an Alpha image", () => {
     await press("Retry");
     await until(alpha, alpha.runtime, Messages, (state) => state.pane === "New" && state.newDraft.recipient > 0);
     expect(to()).toBe("+14155550100");
-    // spec/app/messages/index.md, "The current New address names the Messages stage beside Ask Alpha"
+    // spec/app/messages/index.md, "Story: Start a new message"
     await enabled("Back to texting Maya Chen");
     expect(document.querySelector('section[aria-label="Ask Alpha"] header')?.textContent).toContain("Maya Chen · Messages");
     const saved = world.secrets.get(slot);

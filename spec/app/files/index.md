@@ -19,7 +19,7 @@ as an archive, and the browser build keeps no file library of its own.
 - [Shared](./shared.md): the file vocabulary and the free-name rule
 
 A place opened from the start of Files, and a file's preview, rise over
-what they were opened from as Alpha's earlier build drew them, and Back
+what they were opened from, and Back
 shows it again at once. Before Files has its
 first answer, it shows its header, never a blank screen.
 
@@ -261,7 +261,7 @@ pure def entered(trail: List[int], inCategory: bool, category: F::Kind, s: Files
   val asked = if (reading and search.searching) List(Search({ ticket: search.query.ticket, where: there, filter: search.filter })) else List()
   if (reading and not(trail.length() == 0 and not(inCategory)))
     { state: { ...placed, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: trail, category: category, inCategory: inCategory })).concat(asked) }
-  else { state: { ...placed, listing: F::drop(s.listing) }, out: asked }
+  else { state: { ...placed, listing: R::drop(s.listing) }, out: asked }
 
 pure def arrived(m: Moved): Moved =
   val storage = R::ask(m.state.storage)
@@ -279,7 +279,7 @@ pure def canEnter(s: Files, by: Actor): bool = by == Phone and not(s.open)
 pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCategory, s.category, { ...s, open: true }))
 
 pure def shut(open: bool, s: Files): Moved =
-  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), tally: untallied, listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
+  { state: { ...s, open: open, storage: R::drop(s.storage), volumes: List(), tally: untallied, listing: R::drop(s.listing), items: List(), partial: false, picked: List(),
       trash: false, details: 0, handed: false,
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
@@ -734,7 +734,7 @@ asks for a filter or an open only (`direct-files-only-v1`): the agent
 refuses a change by voice and has the owner ask for it in the chat, where
 its card shows. A page open the agent keeps for review on that turn still
 shows its card, as Browser has it, and the turn still says its Files
-result beside that card, as v119 never hushed a direct turn, while Talk's
+result beside that card, while Talk's
 notice follows that card ([Voice](../voice/index.md)). An attached document does not authorize a direct action. The agent gets a result receipt without the
 opened file's contents. An open counts only when that folder loaded or
 that file could be shown.
@@ -933,8 +933,7 @@ pure def sometimesTheAgentFiltered(s: Files): bool = S::finding(s.search) == S::
 A share, move, deletion or new folder the agent proposes while Files is not
 on screen cannot be reviewed there, since the approvals area builds a Files
 card only from what Files shows. The request instead shows the notice
-"Open Files to review this action." with Decline only, as the earlier Alpha
-did, and nothing runs. When the owner opens Files, the area reads the request
+"Open Files to review this action." with Decline only, and nothing runs. When the owner opens Files, the area reads the request
 again. If it is still open, unexpired, from this enrollment and an answer to
 the latest message sent, the area builds its card afresh for Files as it now
 shows, and approving it holds to that screen as every card does. A request

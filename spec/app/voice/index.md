@@ -17,7 +17,7 @@ Alpha is raised; voice asks it to move and hears where it went.
 ### Voice holds the conversation's phase, its session and turn, the microphone, what was heard, the reply being spoken, and the recorder, permission and route it shares
 
 The conversation is idle, starting, listening, transcribing, thinking,
-speaking, paused, stopping, or failed. A session counts conversations and a
+speaking, stopping, or failed. A session counts conversations and a
 turn counts what was said in one; every answer from the voice service names
 them, and an answer to an earlier one is refused. The microphone is off,
 asked for, opening, on or closing. Voice also tracks whether the speech
@@ -164,6 +164,11 @@ the conversation. Stop discards or drains the worker's outstanding audio
 under the same authority, and a stopped or replaced owner gets no late
 transcript. The on-device speech route needs no network. The transcript
 is still sent to the agent as a text turn using its configured backend.
+
+```quint
+pure def alwaysIdleVoiceHoldsNoMicrophone(v: Voice): bool =
+  v.phase == Idle implies v.mic == Off
+```
 
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
 
@@ -731,6 +736,11 @@ place while either may still reach the agent. The recorded user and reply
 rows appear under the identities the agent confirms, on the latest page
 of that conversation. Opening older history keeps its place.
 
+```quint
+pure def alwaysSentTurnsBelongToASession(v: Voice): bool =
+  v.sent > 0 implies v.session > 0
+```
+
 ### What was heard but not sent is never counted as sent
 
 The owner sees it as "Heard so far, not sent". A turn still being heard,
@@ -1052,6 +1062,11 @@ phone's result only once the agent proposes a Files action. A result
 position only refers to an existing Files listing. It uses the same spoken
 navigation claim. Stop and the owner's navigation can retire the request
 before the file action.
+
+```quint
+pure def alwaysNavigationClaimRequiresTalking(v: Voice): bool =
+  v.claim != 0 implies talking(v)
+```
 
 ### A navigation claim is released when the shell does not open its destination
 

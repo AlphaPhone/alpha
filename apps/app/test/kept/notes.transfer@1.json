@@ -1,7 +1,7 @@
 {
   "key": "alpha/app/notes/transfer@1",
   "spec": "spec/app/notes/transfer.md",
-  "shape": "8bf09db6c79bb4a2",
+  "shape": "aa36202eba37ec10",
   "state": {
     "owner": 0,
     "job": "NoJob",
@@ -21,5 +21,31 @@
     "hidden": false,
     "notice": "Quiet",
     "waiting": "Quiet"
-  }
+  },
+  "earlier": [
+    {
+      "from": "629c6c38df",
+      "until": "c2bc8c0dde",
+      "state": {
+        "owner": 0,
+        "job": "NoJob",
+        "last": "NoJob",
+        "pick": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "note": 0,
+        "revision": 0,
+        "writing": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "visit": 0,
+        "from": 0,
+        "hidden": false,
+        "notice": "Quiet",
+        "waiting": "Quiet"
+      }
+    }
+  ]
 }

@@ -4,9 +4,8 @@ The always-on listener of an Alpha image, as Alpha shows it. The listener
 is part of the image, not of Alpha: it is turned on only in its own consent
 screen, holds the microphone only with the owner's consent and a fresh
 lease on the microphone indicator, and wakes Alpha when it hears it named.
-Alpha reads its status, can pause it or turn it off, and opens a turn of
-the spoken conversation ([Voice](./index.md)) when a wake or a hardware
-press asks for one. On stock Android there is no listener.
+Alpha reads its status and can pause it or turn it off. On stock Android
+there is no listener.
 
 ## Story: See and control the listener
 
@@ -14,7 +13,7 @@ press asks for one. On stock Android there is no listener.
 > turn it off from Alpha, and be told plainly when it may still be
 > listening.
 
-### Alpha keeps whether this is an Alpha image, its read of the listener's status and the last report, an action in flight, a lost indicator, a stop it could not confirm, and a wake waiting
+### Alpha keeps whether this is an Alpha image, its read of the listener's status and the last report, an action in flight, a lost indicator, and a stop it could not confirm
 
 The listener reports whether it is on, holds the microphone, has the
 owner's consent, has a fresh indicator lease, lost its indicator, or is
@@ -25,14 +24,14 @@ import read as Rd from "../../kit/read"
 
 type Report = { on: bool, mic: bool, consent: bool, fresh: bool, lost: bool, paused: bool, reason: str }
 type Act = NoAct | Pausing | TurningOff
-type Listener = { image: bool, reads: Rd::Read, consentScreen: Rd::Read, report: Report, known: bool, acting: Act, lost: bool, mayBeOn: bool, invoked: bool, turns: int }
+type Listener = { image: bool, reads: Rd::Read, consentScreen: Rd::Read, report: Report, known: bool, acting: Act, lost: bool, mayBeOn: bool }
 
 pure val quietReport: Report = { on: false, mic: false, consent: false, fresh: false, lost: false, paused: false, reason: "" }
 
 pure val initial: Listener =
-  { image: false, reads: Rd::unread, consentScreen: Rd::unread, report: quietReport, known: false, acting: NoAct, lost: false, mayBeOn: false, invoked: false, turns: 0 }
+  { image: false, reads: Rd::unread, consentScreen: Rd::unread, report: quietReport, known: false, acting: NoAct, lost: false, mayBeOn: false }
 
-type Effect = ReadStatus({ ticket: int }) | Pause({ pausing: int }) | TurnOff({ stopping: int }) | OpenConsent({ opening: int }) | StartVoice
+type Effect = ReadStatus({ ticket: int }) | Pause({ pausing: int }) | TurnOff({ stopping: int }) | OpenConsent({ opening: int })
 
 type Asked = { state: Listener, out: List[Effect] }
 
@@ -45,7 +44,6 @@ pure val reportValues: Set[Report] =
     .union(Set({ ...quietReport, on: true, consent: true }))
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val openingValues = ticketValues
-pure val lValues = Set(initial, { ...initial, image: true, invoked: true })
 ```
 
 ### Alpha shows the listener as unavailable, unknown, off, listening, waiting, paused, stopped for a lost indicator, or "The microphone may be on"
@@ -79,7 +77,7 @@ pure def alwaysListeningIsShownOnlyWithConsentAndAFreshLease(l: Listener): bool 
 ```quint
 pure def canAdmit(l: Listener, image: bool): bool = l.image != image
 
-pure def admit(l: Listener, image: bool): Listener = { ...l, image: image, invoked: l.invoked and image }
+pure def admit(l: Listener, image: bool): Listener = { ...l, image: image }
 ```
 
 ### Alpha reads the status when Privacy is opened or returns to the foreground, never during a stop, and shows only the newest answer
@@ -187,39 +185,4 @@ pure def sometimesListening(l: Listener): bool = shown(l) == Listening
 pure def sometimesPaused(l: Listener): bool = shown(l) == Paused and l.reads.ticket >= 2
 
 pure def sometimesIndicatorLost(l: Listener): bool = shown(l) == IndicatorLost and l.report.on
-```
-
-## Story: Wake Alpha by voice or with a button
-
-> As the owner, I want saying Alpha's name, or a press of the assistant
-> button, to open a turn of the conversation, unless I am in the middle of
-> something it would interrupt.
-
-### A wake or a hardware press waits until Alpha can act on it
-
-```quint
-pure def canInvoke(l: Listener): bool = l.image and not(l.invoked)
-
-pure def invoke(l: Listener): Listener = { ...l, invoked: true }
-```
-
-### It opens one turn, unless the page is hidden, a dialog or a connection prompt is open, or a turn is already active
-
-```quint
-pure def canTake(l: Listener, hidden: bool, dialog: bool, prompt: bool, active: bool): bool =
-  l.invoked and not(hidden or dialog or prompt or active)
-
-pure def take(l: Listener, hidden: bool, dialog: bool, prompt: bool, active: bool): Asked =
-  { state: { ...l, invoked: false, turns: l.turns + 1 }, out: List(StartVoice) }
-
-pure def lawSomethingInTheWayKeepsTheWakeWaiting(l: Listener, hidden: bool, dialog: bool, prompt: bool, active: bool): bool =
-  (hidden or dialog or prompt or active) implies not(canTake(l, hidden, dialog, prompt, active))
-
-pure def stepOneTurnPerWake(before: Listener, after: Listener, out: List[Effect]): bool =
-  out.foldl(0, (n, e) => match e { | StartVoice => n + 1 | _ => n }) == after.turns - before.turns
-    and (after.turns > before.turns implies (before.invoked and not(after.invoked) and after.turns == before.turns + 1))
-
-pure def alwaysTurnsAreCounted(l: Listener): bool = l.turns >= 0 and (l.invoked implies l.image)
-
-pure def sometimesAWakeOpenedATurn(l: Listener): bool = l.turns >= 1 and l.image
 ```

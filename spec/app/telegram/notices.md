@@ -31,7 +31,6 @@ type Effect =
   | PostNotice({ chat: int, message: int })
   | WithdrawChat({ chat: int })
   | WithdrawAll
-  | OpenChat({ chat: int, message: int })
 type Noticed = { state: Notices, out: List[Effect] }
 
 pure val initial: Notices = {
@@ -42,7 +41,6 @@ pure val initial: Notices = {
 pure val ticketValues = Set(1, 2, 3, 4, 5)
 pure val pointValues = Set(1, 2)
 pure val chatValues = Set(0, 1, 2)
-pure val messageValues = Set(1, 2)
 pure val incomingValues = Set(
   { chat: 1, message: 1, kind: DirectMessage, isOwn: false, mentioned: false },
   { chat: 1, message: 2, kind: DirectMessage, isOwn: true, mentioned: false },
@@ -84,12 +82,12 @@ pure def watchChanged(s: Notices, authenticated: bool, notifyAllowed: bool): Not
   val nowOn = authenticated and notifyAllowed
   if (not(authenticated))
     {
-      state: { ...initial, check: { ...s.check, status: R::Idle }, posts: s.posts },
+      state: { ...initial, check: R::drop(s.check), posts: s.posts },
       out: if (was or s.upChats.size() > 0) List(UnscheduleSync, WithdrawAll) else List(),
     }
   else if (not(nowOn))
     {
-      state: { ...s, authenticated: true, notifyAllowed: false, check: { ...s.check, status: R::Idle }, upChats: Set() },
+      state: { ...s, authenticated: true, notifyAllowed: false, check: R::drop(s.check), upChats: Set() },
       out: if (was or s.upChats.size() > 0) List(UnscheduleSync, WithdrawAll) else List(),
     }
   else if (not(was))
@@ -150,15 +148,7 @@ pure def frontChatChanged(s: Notices, chat: int): Noticed =
     out: if (clear) List(WithdrawChat({ chat: chat })) else List(),
   }
 
-pure def canTapped(s: Notices, chat: int, message: int): bool =
-  watching(s) and chat > 0 and message > 0 and s.upChats.contains(chat)
-
-pure def tapped(s: Notices, chat: int, message: int): Noticed = {
-  state: { ...s, upChats: s.upChats.exclude(Set(chat)) },
-  out: List(OpenChat({ chat: chat, message: message })),
-}
-
-pure def restart(s: Notices): Notices = { ...s, check: { ...s.check, status: R::Idle }, frontChat: 0 }
+pure def restart(s: Notices): Notices = { ...s, check: R::drop(s.check), frontChat: 0 }
 ```
 
 ### No notice posts before baseline or for a suppressed chat; reading withdraws that chat's notice and sign-out withdraws all

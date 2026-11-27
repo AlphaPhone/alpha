@@ -170,6 +170,13 @@ Schedule names the last included day. Later prefetched events remain available
 when their day is opened. An empty standalone Schedule without a connected
 calendar says Not connected.
 
+```quint
+pure def scheduleLastMonth(month: int): int = month + 1
+
+pure def lawScheduleCoversThisAndNextMonth(month: int): bool =
+  scheduleLastMonth(month) == month + 1 and scheduleLastMonth(month) <= windowLastMonth(month)
+```
+
 ## Story: Hide what I do not want to see
 
 > As the owner, I want a calendar I hid to stay out of Calendar and Home.

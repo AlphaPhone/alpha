@@ -8,6 +8,13 @@ rules.
 - [Startup](./startup/): how Alpha comes up, asks for access and recovers
 - [Home](./home/): the launcher, its tiles and the cards
 - [Assistant](./assistant/): Ask Alpha, its conversation, composer and cards
+- [Voice](./voice/): voice sessions, listening, speech recognition and spoken turns
+- [Browser](./browser/): tabs, navigation, bookmarks, downloads and agent browsing
+- [Digests](./digests/): scheduled digest inbox and delivered summaries
+- [Notices](./notices/): in-app alerts, unread counts and dismissal
+- [Approvals](./approvals/): owner review of agent proposals and leases
+- [Passwords](./passwords/): stored credentials and vault entries
+- [Workflows](./workflows/): scheduled and on-demand workflows, runs and hosted results
 - [Settings](./settings/): the phone's facts, preferences, agent activity and reset
 - [Inbox](./inbox/): Gmail's list, a message, drafts and the agent's operations
 - [Telegram](./telegram/): the owner's Telegram user account, chats, conversation, composer, notices and agent actions

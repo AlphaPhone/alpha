@@ -78,7 +78,7 @@ const visible = started(effect {
     if (owner <= 0 || opening.place.tag !== "ListingDigests" || !Shell.showing(try shell.get(), "Workflows") || !(try device.showing())) {
       try view.publish(empty)
       try ignore(model.send({ type: "closePanel" }))
-      if ((try model.get()).owner !== owner) try ignore(model.send({ type: "ownerChanged", owner: 0, backgroundOn: false, noticesOn: false }))
+      if ((try model.get()).owner !== owner) try ignore(model.send({ type: "ownerChanged", owner: 0, backgroundOn: false }))
       return
     }
     const identity = launchOwnerAt() catch () => undefined
@@ -94,7 +94,7 @@ const visible = started(effect {
     try view.publish(bound === 0 ? empty : { owner, delivery: result })
     const scheduled = result?.support === "nativeScheduled"
     const backgroundOn = scheduled && result.backgroundEnabled
-    if ((try model.get()).owner !== bound) try ignore(model.send({ type: "ownerChanged", owner: bound, backgroundOn, noticesOn: false }))
+    if ((try model.get()).owner !== bound) try ignore(model.send({ type: "ownerChanged", owner: bound, backgroundOn }))
     if (bound === 0) return
     const checks = scheduled ? "BackgroundChecks" : "NoChecks"
     try ignore(model.send({ type: "openPanel", checks }))

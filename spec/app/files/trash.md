@@ -98,7 +98,7 @@ pure def take(job: Job, s: Trash): Moved =
   val effect = if (job.kind == Binning) Bin({ ticket: attempt.id, items: job.items })
     else if (job.kind == Restoring) Restore({ ticket: attempt.id, entries: job.entries })
     else Erase({ ticket: attempt.id, entries: job.entries })
-  { state: { ...s, attempt: attempt, job: job, done: List(), listing: F::drop(s.listing), marked: List(), details: 0 }, out: List(effect) }
+  { state: { ...s, attempt: attempt, job: job, done: List(), listing: R::drop(s.listing), marked: List(), details: 0 }, out: List(effect) }
 ```
 
 ### Deleted items go in at once when the Trash is free, and otherwise wait their turn; an approved request is not kept waiting but refused
@@ -264,7 +264,7 @@ Files is told whether Alpha may read the storage, and so is the Trash.
 
 ```quint
 pure def unseen(open: bool, allowed: bool, s: Trash): Trash =
-  { ...s, open: open, allowed: allowed, listing: F::drop(s.listing), erasing: V::dismiss(s.erasing), marked: List(), details: 0,
+  { ...s, open: open, allowed: allowed, listing: R::drop(s.listing), erasing: V::dismiss(s.erasing), marked: List(), details: 0,
     entries: s.entries.select(e => s.job.entries.includes(e) or s.binned.includes(e)) }
 
 pure def looking(open: bool, allowed: bool, s: Trash): Moved =
@@ -563,7 +563,7 @@ restart is refused.
 pure def canRestart(s: Trash, by: Actor): bool = by == Phone
 
 pure def restart(s: Trash, by: Actor): Trash =
-  { ...s, open: false, attempt: F::cut(s.attempt), job: idle, waiting: List(), listing: F::drop(s.listing), entries: List(),
+  { ...s, open: false, attempt: A::cutOff(s.attempt), job: idle, waiting: List(), listing: R::drop(s.listing), entries: List(),
     erasing: V::dismiss(s.erasing), binned: List(), undo: U::free, marked: List(), details: 0 }
 
 pure def stepARestartLeavesNothingToAnswer(before: Trash, via: str, after: Trash): bool =

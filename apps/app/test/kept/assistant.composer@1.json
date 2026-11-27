@@ -1,7 +1,7 @@
 {
   "key": "alpha/app/assistant/composer@1",
   "spec": "spec/app/assistant/composer.md",
-  "shape": "08f1441ea5643cc7",
+  "shape": "90778b7431182cb5",
   "state": {
     "binding": {
       "owner": 1,
@@ -30,7 +30,6 @@
       "mail": false,
       "transcript": false,
       "shown": false,
-      "question": false,
       "quote": 0,
       "editing": 0
     },
@@ -40,7 +39,6 @@
       "mail": false,
       "transcript": false,
       "shown": false,
-      "question": false,
       "quote": 0,
       "editing": 0
     },
@@ -93,6 +91,60 @@
           "mail": false,
           "transcript": false,
           "shown": false,
+          "quote": 0,
+          "editing": 0
+        },
+        "offeredAt": 0,
+        "source": 0,
+        "clear": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "long": false
+      }
+    },
+    {
+      "from": "c516f4a164",
+      "until": "c2bc8c0dde",
+      "state": {
+        "binding": {
+          "owner": 1,
+          "conversation": 2
+        },
+        "slot": "Closed",
+        "read": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "draft": {
+          "sync": "Kept",
+          "edits": 0,
+          "carried": 0,
+          "base": 0
+        },
+        "writing": 0,
+        "failing": false,
+        "hold": 0,
+        "away": "Free",
+        "marked": false,
+        "unsettled": false,
+        "editor": {
+          "text": false,
+          "files": 0,
+          "mail": false,
+          "transcript": false,
+          "shown": false,
+          "question": false,
+          "quote": 0,
+          "editing": 0
+        },
+        "held": {
+          "text": false,
+          "files": 0,
+          "mail": false,
+          "transcript": false,
+          "shown": false,
+          "question": false,
           "quote": 0,
           "editing": 0
         },

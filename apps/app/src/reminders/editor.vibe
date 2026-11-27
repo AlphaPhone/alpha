@@ -137,8 +137,8 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
     const state = try editor.get()
     if (on !== state.hasRepeat && Editor.canToggleRepeat(state, on)) {
       try contained(editor.send({ type: "toggleRepeat", on }), "toggling reminder repeat")
-    } else if (Editor.canEditNotes(state)) {
-      try contained(editor.send({ type: "editNotes", ok: true }), "changing reminder recurrence")
+    } else if (Editor.canEditDetails(state)) {
+      try contained(editor.send({ type: "editDetails" }), "changing reminder recurrence")
     }
   }
   if (patch.subtasks !== undefined) {
@@ -147,8 +147,8 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
       try contained(editor.send({ type: "addSubtask" }), "adding reminder subtask")
     } else if (patch.subtasks.length < prev.subtasks.length && Editor.canRemoveSubtask(state)) {
       try contained(editor.send({ type: "removeSubtask" }), "removing reminder subtask")
-    } else if (Editor.canEditNotes(state)) {
-      try contained(editor.send({ type: "editNotes", ok: true }), "marking subtask edit dirty")
+    } else if (Editor.canEditDetails(state)) {
+      try contained(editor.send({ type: "editDetails" }), "marking subtask edit dirty")
     }
   }
   if (
@@ -157,7 +157,7 @@ export effect function updateEditorDraft(patch: Partial<ReminderEditorFields>): 
     || (patch.alertMinutes !== undefined && patch.alertMinutes !== prev.alertMinutes)
   ) {
     const state = try editor.get()
-    if (Editor.canEditNotes(state)) try contained(editor.send({ type: "editNotes", ok: true }), "marking draft dirty")
+    if (Editor.canEditDetails(state)) try contained(editor.send({ type: "editDetails" }), "marking draft dirty")
   }
   try persistEditorDraft(next)
 }

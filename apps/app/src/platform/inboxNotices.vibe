@@ -1,4 +1,4 @@
-// spec/app/inbox/notices.md, "Story: Hear about new mail"; spec/app/inbox/notices.md, "Story: Open my message from a notice"
+// spec/app/inbox/notices.md, "Story: Open my message from a notice"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
 import { createMailBackground, NoticeBridgeFailed, type MailBackgroundNative } from "@elizaos/plugin-inbox-client"
 import { registered } from "./device.vibe"
 

@@ -77,7 +77,7 @@ pure val syncedValues = Set(
 )
 ```
 
-### A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did
+### A new alarm snoozes for ten minutes until the owner picks another length
 
 ```quint
 pure val defaultSnooze = 10

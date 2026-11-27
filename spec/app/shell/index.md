@@ -9,7 +9,6 @@ inside the shell and moves through it.
 - [Focus](./focus.md): where focus goes when the screen changes under the owner
 - [Gestures](./gestures.md): what a swipe on the page means
 - [Haptics](./haptics.md): touch feedback
-- [Landing](./landing.md): coming back to Alpha from a provider's consent page
 
 ## Story: Move between Home and the apps
 

@@ -130,7 +130,7 @@ pure def screenUpdated(s: AgentTelegram, authenticated: bool, shareAllowed: bool
     ...initial,
     carrying: s.carrying, readbacks: s.readbacks,
     attempt: if (s.attempt.outcome == A::Sent) A::conclude(s.attempt, false, false) else s.attempt,
-    readback: { ...s.readback, status: R::Idle },
+    readback: R::drop(s.readback),
   }
   else { ...s, authenticated: true, sensitive: sensitive, shareAllowed: shareAllowed, pane: pane, activeChat: chat }
 ```
@@ -176,11 +176,6 @@ pure def proposeMutation(s: AgentTelegram, turn: int, chat: int, message: int, t
   val presented = V::present(rev)
   val p = { turn: turn, chat: chat, message: message, tool: tool, revision: presented.revision }
   { state: { ...s, review: presented, pending: p }, out: List(ProposeMutation({ proposal: p })) }
-
-pure def canMessageChanged(s: AgentTelegram, by: Actor): bool = by == Device and s.review.showing
-
-pure def messageChanged(s: AgentTelegram, by: Actor): AgentTelegram =
-  { ...s, review: V::revise(s.review) }
 
 pure def canApproveMutation(s: AgentTelegram, turn: int, revision: int, by: Actor): bool =
   by == Owner and s.authenticated and not(busy(s)) and s.review.showing
@@ -266,7 +261,6 @@ pure def leadsToMutationEnds(s: AgentTelegram, later: AgentTelegram): bool =
 pure val fair_answered = "weak"
 
 pure def sometimesMutationConfirmed(s: AgentTelegram): bool = s.told == Done and s.attempt.outcome == A::Confirmed
-pure def sometimesMutationStale(s: AgentTelegram): bool = s.told == Stale
 pure def sometimesUnknownReadBackDone(s: AgentTelegram): bool = s.told == Done and s.attempt.outcome == A::Unknown and s.readbacks == 1
 pure def sometimesAmbientContextActive(s: AgentTelegram): bool =
   s.authenticated and not(s.sensitive) and s.shareAllowed and s.pane == ChatPane and s.activeChat > 0

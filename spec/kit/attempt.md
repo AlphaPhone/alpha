@@ -63,3 +63,31 @@ pure def lawAConfirmedAttemptIsNeverRepeated(id: int): bool =
 pure def lawARetryKeepsItsNumber(id: int): bool =
   dispatch(record({ id: id, outcome: Refused })).id == id
 ```
+
+### An attempt is in flight while recorded or sent; withdrawing refuses a recorded one, and cutting off leaves an in-flight one unknown
+
+```quint
+pure def inFlight(a: Attempt): bool = a.outcome == Recorded or a.outcome == Sent
+
+pure def withdraw(a: Attempt): Attempt = if (a.outcome == Recorded) { ...a, outcome: Refused } else a
+
+pure def cutOff(a: Attempt): Attempt = if (inFlight(a)) { ...a, outcome: Unknown } else a
+```
+
+### A withdrawn recorded attempt is not dispatched, and a cut-off in-flight attempt ends unknown
+
+```quint
+pure def lawAWithdrawnAttemptIsNotDispatched(id: int, currentOutcome: Outcome): bool =
+  val a = { id: id, outcome: currentOutcome }
+  val w = withdraw(a)
+  (currentOutcome == Recorded implies (w.outcome == Refused and not(inFlight(w)) and not(canDispatch(w))))
+    and (currentOutcome != Recorded implies w == a)
+    and w.id == id
+
+pure def lawACutOffAttemptEndsUnknown(id: int, currentOutcome: Outcome, offered: int): bool =
+  val a = { id: id, outcome: currentOutcome }
+  val c = cutOff(a)
+  (inFlight(a) implies (c.outcome == Unknown and not(inFlight(c)) and ended(c) and not(canRecord(c)) and not(canDispatch(c)) and not(canConclude(c, offered))))
+    and (not(inFlight(a)) implies c == a)
+    and c.id == id
+```

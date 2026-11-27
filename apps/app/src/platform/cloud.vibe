@@ -217,7 +217,7 @@ function plugged(relay: Relay, wifi: WiFi.Shape): Omit<Account, "client" | "clie
     const reply = timeout(tryPromise({
       try: (signal) => relay.request({ ...sent, ...binding, signal }),
       catch: (cause) => binding.expectedSessionCredentialId !== undefined && cause instanceof CloudRefused && cause.failure === "reauth-required"
-        ? refusal(428, undefined)
+        ? refusal(heldAnswer("HeldForBillingReauth").status, undefined)
         : undelivered(cause),
     }), patience) catch effect (cause) => match (cause) {
       when Unsent: throw cause;

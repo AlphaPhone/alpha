@@ -16,7 +16,7 @@ underAct();
 afterEach(closeAll);
 
 const steady = "spec/app/notes/actions.md, \"The owner opens the menu over the note the editor shows saved, with nothing else of Notes over it\"";
-const fresh = "spec/app/notes/editor.md, \"More over a new note offers Share, Pin and Delete, as v119's did\"";
+const fresh = "spec/app/notes/editor.md, \"More over a new note offers Share, Pin and Delete\"";
 
 const rendered = (assert: () => unknown) => vi.waitFor(async () => {
   await drawn(() => undefined);

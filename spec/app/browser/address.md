@@ -20,8 +20,8 @@ address bar and the find bar belong to the page too.
 
 ```quint
 import read as R from "../../kit/read"
+import shared.* from "./shared"
 
-type Kind = Normal | Private
 type Phase = Blank | Loading | Shown | Failed | Stopped
 type Way = Address | Query | Again | Backward | Onward
 type Effect = Go({ load: int, way: Way }) | Halt({ load: int }) | Visit({ load: int }) | Find({ ticket: int }) | FindNext({ forward: bool }) | ClearFind
@@ -35,8 +35,6 @@ pure val initial: Page = {
   kind: Normal, phase: Blank, load: 0, secure: false, behind: 0, ahead: 0, refused: false,
   finding: false, find: R::unread, matches: 0, position: 0,
 }
-
-pure def forget(r: R::Read): R::Read = { ...r, status: R::Idle }
 
 pure def isGo(e: Effect): bool = match e { | Go(g) => true | _ => false }
 ```
@@ -98,7 +96,7 @@ bar. A refusal leaves the page as it was and says why under the address bar.
 
 ```quint
 pure def started(p: Page): Page =
-  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: forget(p.find), matches: 0, position: 0 }
+  { ...p, phase: Loading, load: p.load + 1, secure: false, refused: false, finding: false, find: R::drop(p.find), matches: 0, position: 0 }
 
 pure def canSubmit(p: Page, i: Input): bool = not(i.blank)
 
@@ -296,7 +294,7 @@ pure def alwaysTheSecureMarkIsForAShownPage(p: Page): bool = p.secure implies p.
 
 Only the phone's Browser hears from Android that a page came over HTTPS
 with a certificate it accepted. A page shown anywhere else, such as a
-browser frame on a computer, has no mark, as in Sunday's v119.
+browser frame on a computer, has no mark.
 
 ```quint
 pure def showsTheLock(p: Page, native: bool): bool = native and p.secure and p.phase == Shown
@@ -361,7 +359,7 @@ pure def sometimesPrivatePage(p: Page): bool = p.kind == Private and p.phase == 
 
 ### A tab with no page says "Search or address" in its bar, a private tab as a normal one, and only the private mark tells them apart
 
-As in Sunday's v119, the bar of a tab with no page shows the muted hint
+The bar of a tab with no page shows the muted hint
 "Search or address", never "New tab" or "New private tab". A private tab
 carries its private mark before the hint.
 
@@ -379,7 +377,7 @@ pure def lawEveryTabHasTheSameHint(p: Page): bool = addressHint(p) == addressHin
 ### The find bar opens over a shown page
 
 On Android, choosing Find with no shown page keeps the menu open and asks
-the owner to load a page. As on Sunday's v119 phone, the page keeps its full
+the owner to load a page. The page keeps its full
 size while the find bar is open, and the phone draws it below Alpha, so the
 find bar is drawn over it with its ring and its shadow. Only Alpha's controls
 drawn over the page are Alpha's to touch: the find bar and the rest of Alpha's
@@ -400,7 +398,7 @@ pure def canTypeFind(p: Page, empty: bool): bool = p.finding
 
 pure def typeFind(p: Page, empty: bool): Step =
   val asked = R::ask(p.find)
-  if (empty) { state: { ...p, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
+  if (empty) { state: { ...p, find: R::drop(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
   else { state: { ...p, find: asked, matches: 0, position: 0 }, out: List(Find({ ticket: asked.ticket })) }
 ```
 
@@ -440,7 +438,7 @@ pure def matchSelected(p: Page, ticket: int, count: int, position: int): Page = 
 ```quint
 pure def canCloseFind(p: Page): bool = p.finding
 
-pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: forget(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
+pure def closeFind(p: Page): Step = { state: { ...p, finding: false, find: R::drop(p.find), matches: 0, position: 0 }, out: List(ClearFind) }
 ```
 
 ### The find bar is open only over a shown page, and matches are only counted while it is open

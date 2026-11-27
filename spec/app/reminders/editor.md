@@ -130,6 +130,11 @@ pure def canEditNotes(e: Editor): bool = e.open
 pure def editNotes(e: Editor, ok: bool): Editor =
   { ...e, notesValid: ok, draft: D::edit(e.draft) }
 
+pure def canEditDetails(e: Editor): bool = e.open
+
+pure def editDetails(e: Editor): Editor =
+  { ...e, draft: D::edit(e.draft) }
+
 pure def canSetList(e: Editor, listId: int): bool = e.open and listId >= 1 and listId != e.listId
 
 pure def setList(e: Editor, listId: int): Editor =
@@ -218,7 +223,7 @@ pure def canClose(e: Editor): bool = e.open and e.draft.sync != D::Saving
 pure def close(e: Editor): Editor = { ...initial, savedCount: e.savedCount }
 
 pure def reopen(e: Editor): Editor =
-  if (e.open and e.draft.sync == D::Saving) { ...e, draft: { ...e.draft, sync: D::Edited } }
+  if (e.open) { ...e, draft: D::interrupt(e.draft) }
   else e
 ```
 

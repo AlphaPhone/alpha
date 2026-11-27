@@ -345,7 +345,7 @@ effect function prompted(need: Need): Event!!Telephony {
   return { type: "accessReported", need, grant: grantOf(need === "SmsAccess" ? status?.permissions.sms : status?.permissions.contacts) }
 }
 
-// spec/app/messages/index.md, "Keep clipboard feedback on the selected message's menu"
+// spec/app/messages/index.md, "Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here"
 effect function copySelected(): void!!(Inbox | CarrierSetup) {
   const inbox = try Inbox
   const held = try inbox.get()
@@ -468,7 +468,7 @@ function newRecipientScope(state: Messages.Messages): NewRecipientScope | undefi
   return { visit, recipient, contacts: state.book.grant === "Granted" }
 }
 
-// spec/app/messages/index.md, "The current New address names the Messages stage beside Ask Alpha"
+// spec/app/messages/index.md, "Story: Start a new message"
 const nameNewRecipient = started(effect {
   const machine = try Messages.Machine
   const shell = try Shell

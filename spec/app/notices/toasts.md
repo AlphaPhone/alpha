@@ -7,9 +7,8 @@ long each one stays, which waits for which, and where it is shown.
 A toast with Undo has no time of its own: it names the change it offers to
 take back (the area that raised it and its number there), and stays until
 that area withdraws it, because the change can no longer be undone, or
-Undo is tapped. How long the change stays undoable is the area's: for a
-deletion it is the [deletion notice](./deletions.md)'s window, which it
-sets from `duration` here at the scale this layer reads. A toast only
+Undo is tapped. How long the change stays undoable is the area's: it
+sets the window from `duration` here at the scale this layer reads. A toast only
 passes the tap on.
 
 ## Story: Read a toast before it goes

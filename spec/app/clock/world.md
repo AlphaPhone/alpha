@@ -73,8 +73,6 @@ pure def canApplySync(s: WorldClock, synced: List[int]): bool =
   synced.length() <= maxCities and synced.every(c => c > 0) and uniqueCities(synced)
 
 pure def applySync(s: WorldClock, synced: List[int]): WorldClock = { cities: synced }
-
-pure def reopen(s: WorldClock): WorldClock = s
 ```
 
 ### Cities stay positive, unique, and bounded, and multiple cities and reordering are reachable

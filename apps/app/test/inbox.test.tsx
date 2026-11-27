@@ -113,7 +113,7 @@ async function openInbox(world: Scene) {
   return opened;
 }
 
-it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Hear about new mail\"; spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
+it("Open or ask about the exact Android mail notice (spec/app/inbox/notices.md, \"Story: Open my message from a notice\"; spec/app/inbox/notices.md, \"Ask Alpha from a notice checks the same email again before spending the tap\")", async () => {
   const world = { ...scene(), phone: true, image: true };
   const notices: InboxNoticeScene = { spent: [], released: [] };
   world.inbox.notices = notices;
@@ -564,7 +564,7 @@ it("Open and close Cloud sign-in without leaving Inbox (spec/app/inbox/index.md,
   expect(sheet()).toBeNull();
 });
 
-it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\"; spec/app/inbox/index.md, \"The owner authorizes Gmail in Google and Inbox checks access on return\")", async () => {
+it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Connect Gmail and keep to its grant\")", async () => {
   const world = { ...scene(), phone: true };
   const consent = { authUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=alpha-fixture", requests: [] as string[][], opened: [] as string[] };
   world.inbox.consent = consent;

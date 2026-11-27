@@ -56,7 +56,7 @@ pure val initial: Preview = {
 ### The caption and Details show facts for the exact document held
 
 The caption gives the file's media type and says it was selected on this
-device, as v119 did, then its location when the file comes from a known
+device, then its location when the file comes from a known
 storage folder; its size and date are in Details. A picked document may
 only have its name and type. The facts belong to the grant for the file
 and revision the preview still shows.
@@ -72,7 +72,7 @@ A viewer closing takes its listeners with it, and tells Recent which file
 it showed. The file is read for its viewer, and a PDF page is drawn by the
 worker, each for the revision shown. Email hands the selected file to
 [Inbox](../inbox/adding.md) for its one review before attachment. Ask Alpha goes to
-the [shell](../shell/), Transcribe to Notes, Open elsewhere to Android's
+the [shell](../shell/), Open elsewhere to Android's
 chooser, and Lost, Select again and Forget to [Recent](./recent.md).
 
 ```quint
@@ -82,7 +82,6 @@ type Effect =
   | Draw({ ticket: int, item: int, revision: int, page: int })
   | OfferEmail({ ticket: int, viewer: int, item: int, revision: int, account: int })
   | AskAlpha({ viewer: int, item: int, revision: int })
-  | Transcribe({ item: int })
   | OpenElsewhere({ viewer: int, item: int, revision: int, writable: bool })
   | ShareFile({ viewer: int, item: int, revision: int })
   | ActOnStoredFile({ viewer: int, item: int, revision: int, operation: StorageAction, name: str })
@@ -122,8 +121,8 @@ Recent hands over a file the owner chose.
 pure def closing(s: Preview): List[Effect] = if (showing(s)) List(Closed({ viewer: s.viewer, item: s.item })) else List()
 
 pure def emptied(viewer: int, s: Preview): Preview =
-  { ...s, viewer: viewer, reachable: false, content: F::drop(s.content), playing: false, secret: false,
-    drawing: F::drop(s.drawing) }
+  { ...s, viewer: viewer, reachable: false, content: R::drop(s.content), playing: false, secret: false,
+    drawing: R::drop(s.drawing) }
 
 pure def canShow(s: Preview, file: int, kind: Kind, revision: int, siblings: List[str], by: Actor): bool = file > 0
 
@@ -267,7 +266,7 @@ pure def canChanged(s: Preview, revision: int, by: Actor): bool = by == Phone an
 
 pure def changed(s: Preview, revision: int, by: Actor): Moved =
   val content = R::ask(s.content)
-  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: F::drop(s.drawing) },
+  { state: { ...s, revision: revision, content: content, playing: false, secret: false, drawing: R::drop(s.drawing) },
     out: List(Read({ ticket: content.ticket, item: s.item, revision: revision })) }
 ```
 
@@ -286,10 +285,10 @@ pure def sometimesAPhotoCouldNotBeRead(s: Preview): bool = s.content.status == R
 ## Story: Act on the file I am looking at
 
 > As the owner, I want to see a file's details, share it in Android, ask
-> Alpha about it, rename it in Files, put it in an email, transcribe a
-> recording into Notes, open it in another app, or forget it.
+> Alpha about it, rename it in Files, put it in an email, open it in
+> another app, or forget it.
 
-### Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here
+### Ask Alpha and Open elsewhere hand the file on and change nothing here
 
 Ask Alpha uses the file the owner reviewed and only while its viewer,
 revision and grant still match. When the provider proves the full file is
@@ -298,16 +297,10 @@ read text or the already drawn PDF page. A failed exact read or changed
 file cannot be replaced with a preview. The excerpt is marked in its
 filename and must pass the same sensitive text check.
 
-Transcribe is offered for a recording or a video.
-
 ```quint
 pure def canAskAlpha(s: Preview, by: Actor): bool = by == Owner and loaded(s) and not(s.secret)
 
 pure def askAlpha(s: Preview, by: Actor): Moved = { state: s, out: List(AskAlpha({ viewer: s.viewer, item: s.item, revision: s.revision })) }
-
-pure def canTranscribe(s: Preview, by: Actor): bool = by == Owner and usable(s) and s.kind == Media
-
-pure def transcribe(s: Preview, by: Actor): Moved = { state: s, out: List(Transcribe({ item: s.item })) }
 
 pure def canOpenElsewhere(s: Preview, by: Actor): bool = by == Owner and usable(s)
 
@@ -565,7 +558,7 @@ pure def sometimesAFileMustBeSelectedAgain(s: Preview): bool = showing(s) and no
 pure def canRestart(s: Preview, by: Actor): bool = by == Phone
 
 pure def restart(s: Preview, by: Actor): Moved =
-  { state: { ...emptied(0, s), attempt: F::cut(s.attempt), renaming: 0 }, out: closing(s) }
+  { state: { ...emptied(0, s), attempt: A::cutOff(s.attempt), renaming: 0 }, out: closing(s) }
 
 pure def stepARestartLeavesNothingToAnswer(before: Preview, via: str, after: Preview): bool =
   via == "restart" implies

@@ -3,13 +3,12 @@
 The owner's notes, kept by the resident agent: the list with its folders and
 pins, and what the agent may propose here. What [a note](./note.md) is,
 [the notes from before](./previous.md) on this phone, writing one in
-[the editor](./editor.md) with [its actions menu](./actions.md) and
-[a document as its source](./source.md), opening [a link note](./linkNote.md),
+[the editor](./editor.md) with [its actions menu](./actions.md),
+opening [a link note](./linkNote.md),
 allowing [the microphone](./microphone.md), [recording](./recording.md) and
-[using a voice note](./voice.md), [importing and exporting](./transfer.md),
+[using a voice note](./voice.md), [importing and exporting](./transfer.md), and
 [Recently deleted](./trash.md) with
-[finishing a voice note's deletion](./voiceDeletion.md), and
-[the agent's own reading](./agent.md) each have their own spec.
+[finishing a voice note's deletion](./voiceDeletion.md) each have their own spec.
 
 The list never changes a note itself. It writes one change at a time to the
 agent's store, and every write in Notes names the revision it builds on, so
@@ -17,7 +16,7 @@ the store refuses one that another writer overtook. The list then reads the
 store again, so what it shows is always what the store holds.
 
 A note, a voice note, a link note, the notes from before and Recently deleted
-each rise over the list as Alpha's earlier build drew them, and the list stays
+each rise over the list, and the list stays
 under them as it was, scrolled where the owner left it; Back takes the page
 away at once. Before the list has first been read, Notes shows its header
 over an empty list, never a blank screen.
@@ -72,7 +71,7 @@ pure val initial: Notes = {
 pure def hasNote(rows: List[Row], id: int): bool = rows.some(r => r.id == id)
 pure def hasFolder(folders: List[Folder], id: int): bool = folders.some(f => f.id == id)
 pure def nameTaken(folders: List[Folder], name: str): bool = folders.some(f => f.name == name)
-pure def writing(s: Notes): bool = inFlight(s.writing)
+pure def writing(s: Notes): bool = A::inFlight(s.writing)
 ```
 
 ### What the list asks of the world
@@ -604,7 +603,7 @@ pure def sometimesKeptFromAnotherApp(s: Notes): bool =
 
 > As the owner, I want the resident agent to suggest how to organise my
 > notes or what to write, but never to change anything I have not seen and
-> approved. Its own finding and reading of notes is [the agent's](./agent.md).
+> approved.
 
 ### The agent proposes a change, one at a time, and only one that makes sense
 
@@ -800,8 +799,8 @@ again.
 pure def canOwnerChanged(s: Notes, owner: int, by: Actor): bool = by == Phone and owner != s.owner and owner >= 0
 
 pure def ownerChanged(s: Notes, owner: int, by: Actor): Notes =
-  { ...s, owner: owner, read: dropped(s.read), version: 0, rows: List(), folders: List(), shelf: 0, filter: 0,
-    retired: List(), again: false, writing: cutOff(s.writing), change: nothing, fromProposal: false,
+  { ...s, owner: owner, read: R::drop(s.read), version: 0, rows: List(), folders: List(), shelf: 0, filter: 0,
+    retired: List(), again: false, writing: A::cutOff(s.writing), change: nothing, fromProposal: false,
     proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), agentTurn: 0,
     selection: NoSelection, selected: List(), selectionResult: NotReported, removed: 0 }
 ```
@@ -848,8 +847,8 @@ is never used again.
 pure def canRestart(s: Notes, by: Actor): bool = by == Phone
 
 pure def restart(s: Notes, by: Actor): Notes =
-  { ...s, rows: List(), folders: List(), filter: 0, read: dropped(s.read), again: false,
-    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), writing: cutOff(s.writing),
+  { ...s, rows: List(), folders: List(), filter: 0, read: R::drop(s.read), again: false,
+    proposal: nothing, proposed: false, declined: false, review: V::dismiss(s.review), writing: A::cutOff(s.writing),
     agentTurn: 0, selection: NoSelection, selected: List(), selectionResult: NotReported, removed: 0 }
 
 pure def stepNoLateAnswerAfterRestart(before: Notes, via: str, after: Notes): bool =

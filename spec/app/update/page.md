@@ -3,7 +3,7 @@
 One page of Alpha while an update is pending. A page that opens during an
 update does not mount its editors: it shows "Updating Alpha…" until the
 update settles. A page already open freezes navigation, has every area save
-its drafts, and answers [Install](./install.md) ready or not. Afterwards it
+its drafts, and answers the updater ready or not. Afterwards it
 unfreezes, reconnects after a cancel, and explains a refusal.
 
 ## Story: Open Alpha while an update is pending

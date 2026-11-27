@@ -131,9 +131,9 @@ pure def save(k: Keeping, pages: List[Page]): Keeping = { ...k, draft: D::save(k
 pure def canSaved(k: Keeping, ticket: int): bool = D::canLand(k.draft) and ticket == k.saves
 
 pure def saved(k: Keeping, ticket: int, ok: bool, landed: bool, held: int): Keeping =
-  if (not(ok)) { ...k, draft: F::interrupt(k.draft) }
+  if (not(ok)) { ...k, draft: D::interrupt(k.draft) }
   else if (landed) { ...k, draft: D::land(k.draft), stored: true, saved: k.carrying, current: true }
-  else { ...k, draft: D::collide(k.draft, held), current: false, loading: F::drop(k.loading) }
+  else { ...k, draft: D::collide(k.draft, held), current: false, loading: R::drop(k.loading) }
 
 pure def canKeepMine(k: Keeping): bool = D::canChoose(k.draft)
 
@@ -201,9 +201,9 @@ pure def alwaysNothingIsSavedWhileTheDraftIsDeleted(k: Keeping): bool = deleting
 ### Closing the scan drops the reading and the offer; a restart also leaves the save and the deletion cut off as they truly stand
 
 ```quint
-pure def close(k: Keeping): Keeping = { ...k, loading: F::drop(k.loading), overwrite: V::dismiss(k.overwrite) }
+pure def close(k: Keeping): Keeping = { ...k, loading: R::drop(k.loading), overwrite: V::dismiss(k.overwrite) }
 
-pure def restart(k: Keeping): Keeping = { ...close(k), discard: F::cut(k.discard), draft: F::interrupt(k.draft) }
+pure def restart(k: Keeping): Keeping = { ...close(k), discard: A::cutOff(k.discard), draft: D::interrupt(k.draft) }
 
 pure def alwaysTheOfferIsNotAhead(k: Keeping): bool = k.overwrite.shown <= k.overwrite.revision
 ```

@@ -48,7 +48,7 @@ pure val initial: Trash = {
 }
 
 pure def has(entries: List[Entry], id: int): bool = entries.some(e => e.id == id)
-pure def busy(s: Trash): bool = inFlight(s.attempt) or inFlight(s.audio)
+pure def busy(s: Trash): bool = A::inFlight(s.attempt) or A::inFlight(s.audio)
 pure val noEntry: Entry = { id: 0, at: 0, revision: 0, recording: 0 }
 pure def entryOf(s: Trash, id: int): Entry = s.entries.select(e => e.id == id).nthOr(0, noEntry)
 pure def recordingsOf(entries: List[Entry]): List[int] = entries.select(e => e.recording > 0).listMap(e => e.recording)
@@ -498,7 +498,7 @@ pure def stepWrittenDownBeforeCarriedOut(before: Trash, via: str, after: Trash, 
 pure def stepARecordingGoesAfterItsNote(before: Trash, via: str, after: Trash, out: List[Effect]): bool =
   out.every(e => match e {
     | ErasesAudio(x) => via == "finished" and after.attempt.outcome == A::Confirmed and x.recordings == before.recordings
-        and x.recordings != List() and x.ticket == before.attempt.id and not(inFlight(before.audio))
+        and x.recordings != List() and x.ticket == before.attempt.id and not(A::inFlight(before.audio))
     | _ => true
   })
 ```
@@ -533,7 +533,7 @@ pure def stepNoRoomWritesNothing(before: Trash, via: str, after: Trash): bool =
 
 pure def alwaysTheFullQuestionIsAboutTheOpenNote(s: Trash): bool =
   (s.question == AskFull implies (s.target > 0 and s.refused > 0 and s.holding == s.target))
-    and (s.holding > 0 implies ((inFlight(s.attempt) and s.act == Discard and s.subject == s.holding) or s.question == AskFull))
+    and (s.holding > 0 implies ((A::inFlight(s.attempt) and s.act == Discard and s.subject == s.holding) or s.question == AskFull))
 ```
 
 ### A deletion always names the note it deletes, and the revision
@@ -550,7 +550,7 @@ pure def alwaysADeletionNamesItsNote(s: Trash): bool =
 
 ```quint
 pure def alwaysNoQuestionWhileTheOwnerActs(s: Trash): bool =
-  (inFlight(s.attempt) and s.act != Sweep) implies s.question == NoQuestion
+  (A::inFlight(s.attempt) and s.act != Sweep) implies s.question == NoQuestion
 ```
 
 ### A recording is erased only after its action ended, under that action's number, and only for an owner
@@ -561,8 +561,8 @@ and unsent when another owner takes the phone.
 
 ```quint
 pure def alwaysOneEffectAtATime(s: Trash): bool =
-  not(inFlight(s.attempt) and inFlight(s.audio)) and s.audio.id <= s.attempt.id
-    and (inFlight(s.attempt) implies isOwner(s.owner)) and s.audio.outcome != A::Recorded
+  not(A::inFlight(s.attempt) and A::inFlight(s.audio)) and s.audio.id <= s.attempt.id
+    and (A::inFlight(s.attempt) implies isOwner(s.owner)) and s.audio.outcome != A::Recorded
 ```
 
 ### A question can go stale, Recently deleted can be emptied, notes can expire, and a voice note's recording can be erased or left unknown
@@ -599,8 +599,8 @@ pure def canRestart(s: Trash, by: Actor): bool = by == Phone
 
 pure def restart(s: Trash, by: Actor): Trash =
   { ...s, showing: false, entries: List(), opened: 0, question: NoQuestion, review: V::dismiss(s.review), holding: 0,
-    read: dropped(s.read), pending: false, attempt: cutOff(s.attempt), unsure: s.unsure or s.attempt.outcome == A::Sent,
-    audio: cutOff(s.audio) }
+    read: R::drop(s.read), pending: false, attempt: if (s.attempt.outcome == A::Recorded) s.attempt else A::cutOff(s.attempt), unsure: s.unsure or s.attempt.outcome == A::Sent,
+    audio: A::cutOff(s.audio) }
 
 pure def stepARestartKeepsTheAction(before: Trash, via: str, after: Trash): bool =
   via == "restart" implies and {
@@ -684,11 +684,11 @@ pure def stepBackClosesOneLayer(before: Trash, via: str, after: Trash): bool =
 pure def canOwnerChanged(s: Trash, owner: int, by: Actor): bool = by == Phone and owner != s.owner and owner >= 0
 
 pure def ownerChanged(s: Trash, owner: int, by: Actor): Trash =
-  { ...s, owner: owner, showing: false, read: dropped(s.read), entries: List(), opened: 0, holding: 0,
+  { ...s, owner: owner, showing: false, read: R::drop(s.read), entries: List(), opened: 0, holding: 0,
     question: NoQuestion, target: 0, refused: 0, loose: 0, review: V::dismiss(s.review),
     act: Sweep, subject: 0, revision: 0, asOf: 0, recordings: List(),
     pending: false, unsure: false, failed: false,
-    attempt: if (s.attempt.outcome == A::Recorded) A::plan(s.attempt.id) else cutOff(s.attempt), audio: cutOff(s.audio) }
+    attempt: if (s.attempt.outcome == A::Recorded) A::plan(s.attempt.id) else A::cutOff(s.attempt), audio: A::cutOff(s.audio) }
 ```
 
 ### Nothing is done for an owner but the one the phone has now, and no answer for the owner before is taken

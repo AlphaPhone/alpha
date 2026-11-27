@@ -1,5 +1,4 @@
 // spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
-import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Auth from "../../gen/app__telegram__auth.effect.vibe"
 import * as Conversation from "../../gen/app__telegram__conversation.effect.vibe"
 import * as Notices from "../../gen/app__telegram__notices.effect.vibe"
@@ -193,25 +192,9 @@ effect function postNotice(chat: number, message: number): void!!(TelegramStore 
   try say(`Telegram · ${title}: ${excerpt}`)
 }
 
-effect function openNoticeChat(chat: number): void!!(TelegramStore | Conversation.Machine | Shell) {
-  const ctx = try loadChatContext(chat)
-  if (ctx === undefined) return
-  const { snap, dialog } = ctx
-  const kind = dialog === undefined ? "DirectMessage" : chatKindOf(dialog, snap.chats)
-  const canPost = dialog?.can_post ?? true
-  const shell = try Shell
-  if (!showing(try shell.get(), "Telegram")) {
-    try contained(shell.send({ type: "openView", view: "Telegram" }), "open telegram from notice")
-  }
-  const conv = try Conversation.Machine
-  if (Conversation.canOpenChat(try conv.get(), chat, kind, canPost, true)) {
-    try contained(conv.send({ type: "openChat", chat, kind, canPost, front: true }), "open telegram chat from notice")
-  }
-}
-
 function carry(
   fx: Out,
-): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine | Notices.Machine | Shell | Toasts | Said, []> {
+): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine | Conversation.Machine | Notices.Machine | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ScheduleSync" }: run("sync", startLiveSync());
     when { tag: "UnscheduleSync" }: stop("sync");
@@ -227,7 +210,6 @@ function carry(
     when { tag: "WithdrawAll" }: run("withdraw-all", effect {
       try (try TelegramStore).update((snap) => ({ ...snap, notices: [] }))
     });
-    when { tag: "OpenChat", let chat }: run(`open-chat ${chat}`, openNoticeChat(chat));
   }
 }
 

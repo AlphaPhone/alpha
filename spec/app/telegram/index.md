@@ -106,7 +106,7 @@ pure def canSessionAuthenticated(s: ChatList, credentialRev: int): bool =
 pure def sessionAuthenticated(s: ChatList, credentialRev: int): Moved =
   val base = {
     ...initial, authenticated: true, credentialRev: credentialRev,
-    list: { ...s.list, status: R::Idle }, muteOp: A::plan(s.muteOp.id),
+    list: R::drop(s.list), muteOp: A::plan(s.muteOp.id),
   }
   asking(0, base)
 
@@ -114,7 +114,7 @@ pure def canSessionEnded(s: ChatList): bool = s.authenticated
 
 pure def sessionEnded(s: ChatList): ChatList = {
   ...initial, credentialRev: s.credentialRev,
-  list: { ...s.list, status: R::Idle }, muteOp: A::plan(s.muteOp.id),
+  list: R::drop(s.list), muteOp: A::plan(s.muteOp.id),
 }
 
 pure def stepSignOutWipesEverything(before: ChatList, via: str, after: ChatList): bool =
@@ -242,7 +242,7 @@ pure def muteAnswered(s: ChatList, id: int, chat: int, muted: bool, ok: bool, kn
 pure def restart(s: ChatList): ChatList =
   val restores = s.authenticated and s.keptPages > 0 and s.kept == s.selected and s.keptCredential == s.credentialRev
   {
-    ...s, list: { ...s.list, status: R::Idle }, further: false, failure: Fine,
+    ...s, list: R::drop(s.list), further: false, failure: Fine,
     pages: if (restores) s.keptPages else 0, total: if (restores) s.keptTotal else 0,
     cursor: 0, spent: Set(), saved: restores,
     muteOp: if (s.muteOp.outcome == A::Sent) A::conclude(s.muteOp, false, false) else s.muteOp,

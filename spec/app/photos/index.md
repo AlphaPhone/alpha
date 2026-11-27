@@ -17,21 +17,16 @@ where; Notices shows Undo and says when it is gone.
 A photo opened full screen fades in over the grid and an album rises over the
 albums, as Alpha's earlier build drew them; Back takes them away at once.
 Before Photos has its first answer, it shows its header, never a blank
-screen or a spinner.
-
-## Story: Scan text from a selected image
-
-> As the owner, I want to read text from one image I choose, with on-device
-> recognition and a review over Photos. Dismissing the review returns to the
-> same library. The image is only used in the [scan review](../files/scan.md)
-> unless I explicitly save something from it.
+screen or a spinner. Scanning text from a selected image opens the on-device
+[scan review](../files/scan.md) over Photos and returns to the same library
+when dismissed.
 
 ## Domain
 
 ### What Photos shows
 
-The Library tab lists photos and videos, narrowed to favourites, videos, a
-person or a search; the Albums tab lists albums, and an album opened from it
+The Library tab lists photos and videos, narrowed to favourites, videos, or a
+search; the Albums tab lists albums, and an album opened from it
 lists its items. Either list is read a page at a time from the phone's
 library, at a revision the phone numbers: each change to the library has a
 higher one. A browser's library consists of captures and images saved in
@@ -54,7 +49,7 @@ import changes as C from "./changes"
 import albums as AL from "./albums"
 
 type Tab = Library | Albums
-type Filter = Everything | Favorites | Videos | People | Matching
+type Filter = Everything | Favorites | Videos | Matching
 type Density = Spacious | Regular | Compact
 ```
 
@@ -74,7 +69,7 @@ type Effect =
   | OpenSettings
   | ReadCameraAlbums({ photo: int, ticket: int })
   | DropCamera({ photo: int })
-  | Fetch({ ticket: int, tab: Tab, filter: Filter, query: str, person: int, album: int, page: bool, own: bool, only: Set[int] })
+  | Fetch({ ticket: int, tab: Tab, filter: Filter, query: str, album: int, page: bool, own: bool, only: Set[int] })
   | WriteAlbum({ attempt: int, change: AL::AlbumChange, album: int, name: str, items: Set[int], basis: int, by: Actor })
   | ChangeItems({ attempt: int, change: C::Change, items: Set[int], basis: int, by: Actor })
 ```
@@ -85,7 +80,7 @@ The access Android granted, and whether it covers videos; whether Photos is
 showing, from the lock screen with the captures it may show; the read of
 what it shows, whether the phone said its library is locked, whether a
 further page was asked for and whether there is one, and the revision
-answered; the tab, filter, search, person and album; the items listed,
+answered; the tab, filter, search and album; the items listed,
 those of them Alpha's camera took, those that are favourites, and the albums
 listed; the selection; the albums' dialog and change; and the run of
 changes. None of it is kept through a restart: the phone holds the library.
@@ -94,7 +89,7 @@ changes. None of it is kept through a restart: the phone holds the library.
 type Photos = {
   access: P::Permission, videos: bool, visible: bool, secure: bool, only: Set[int],
   library: R::Read, locked: bool, paging: bool, more: bool, revision: int,
-  tab: Tab, filter: Filter, query: str, person: int, album: int, density: Density,
+  tab: Tab, filter: Filter, query: str, album: int, density: Density,
   rows: Set[int], mine: Set[int], starred: Set[int], albums: Set[int], cameraItem: int,
   selecting: bool, selected: Set[int], cameraAlbum: int, cameraAlbumTicket: int, choosingImage: bool, imageChoice: int,
   shelf: AL::Shelf, job: C::Run,
@@ -105,7 +100,7 @@ type Done = { state: Photos, out: List[Effect] }
 pure val initial: Photos = {
   access: P::unasked, videos: false, visible: true, secure: false, only: Set(),
   library: R::unread, locked: false, paging: false, more: false, revision: 0,
-  tab: Library, filter: Everything, query: "", person: 0, album: 0, density: Regular,
+  tab: Library, filter: Everything, query: "", album: 0, density: Regular,
   rows: Set(), mine: Set(), starred: Set(), albums: Set(), cameraItem: 0,
   selecting: false, selected: Set(), cameraAlbum: 0, cameraAlbumTicket: 0, choosingImage: false, imageChoice: 0,
   shelf: AL::initial, job: C::initial,
@@ -159,7 +154,6 @@ pure val attemptValues = Set(1, 2, 3)
 pure val revisionValues = Set(1, 2)
 pure val basisValues = Set(1, 2)
 pure val queryValues = Set("", "beach")
-pure val personValues = Set(0, 4)
 pure val densityValues = Set(Spacious, Regular, Compact)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4, 81)
@@ -251,7 +245,7 @@ pure def fetching(page: bool, out: List[Effect], s: Photos): Done =
   val permittedView = if (cameraVisit(s)) clearCameraAlbum(s) else clearCameraVisit(s)
   if (s.visible)
     emit((if (cameraVisit(s)) out else out.concat(dropCamera(s))).append(Fetch({
-      ticket: asked.ticket, tab: s.tab, filter: s.filter, query: s.query, person: s.person, album: s.album,
+      ticket: asked.ticket, tab: s.tab, filter: s.filter, query: s.query, album: s.album,
       page: page, own: not(P::allows(s.access)), only: s.only,
     })), { ...permittedView, library: asked, paging: page })
   else emit(out, s)
@@ -462,26 +456,25 @@ pure def canShowTab(s: Photos, tab: Tab, by: Actor): bool =
 
 pure def showTab(s: Photos, tab: Tab, by: Actor): Done =
   listing(List(), {
-    ...s, tab: tab, album: 0, filter: Everything, query: "", person: 0,
+    ...s, tab: tab, album: 0, filter: Everything, query: "",
     rows: Set(), mine: Set(), starred: Set(), selecting: false, selected: Set(),
   })
 ```
 
-### The owner, or the agent, narrows the Library to favourites, videos, a person or a search, without changing it
+### The owner, or the agent, narrows the Library to favourites, videos, or a search, without changing it
 
-A filter or a search only reads. A search has its words and People its
-person; the agent may narrow the grid the owner is looking at, and gets
-nothing of it.
+A filter or a search only reads. A search has its words; the agent may narrow
+the grid the owner is looking at, and gets nothing of it.
 
 ```quint
-pure def canNarrow(s: Photos, narrowing: Filter, query: str, person: int, by: Actor): bool =
+pure def canNarrow(s: Photos, narrowing: Filter, query: str, by: Actor): bool =
   (by == Owner or by == Agent) and unlocked(s) and s.tab == Library and s.shelf.dialog == AL::NoDialog
-    and ((narrowing == Matching) iff query != "") and ((narrowing == People) iff person > 0)
+    and ((narrowing == Matching) iff query != "")
     and (narrowing == Videos implies s.videos)
-    and (narrowing != s.filter or query != s.query or person != s.person)
+    and (narrowing != s.filter or query != s.query)
 
-pure def narrow(s: Photos, narrowing: Filter, query: str, person: int, by: Actor): Done =
-  listing(List(), { ...s, filter: narrowing, query: query, person: person })
+pure def narrow(s: Photos, narrowing: Filter, query: str, by: Actor): Done =
+  listing(List(), { ...s, filter: narrowing, query: query })
 ```
 
 ### An album opens from the albums listed, and closes back to them
@@ -522,7 +515,7 @@ pure def canShowView(s: Photos, secure: bool, only: Set[int], by: Actor): bool =
 
 pure def showView(s: Photos, secure: bool, only: Set[int], by: Actor): Done =
   if (secure)
-    listing(List(), { ...s, visible: true, secure: true, only: only, tab: Library, album: 0, filter: Everything, query: "", person: 0 })
+    listing(List(), { ...s, visible: true, secure: true, only: only, tab: Library, album: 0, filter: Everything, query: "" })
   else listing(List(), { ...s, visible: true, secure: false, only: Set() })
 
 pure def alwaysNothingShownWhileHidden(s: Photos): bool =
@@ -547,7 +540,7 @@ pure def sometimesEmpty(s: Photos): bool = s.visible and s.library.status == R::
 
 pure def sometimesNothingFound(s: Photos): bool = s.filter == Matching and s.library.status == R::Loaded and s.rows.size() == 0
 
-pure def sometimesLoading(s: Photos): bool = s.visible and s.library.status == R::Loading and s.filter == People
+pure def sometimesLoading(s: Photos): bool = s.visible and s.library.status == R::Loading and s.filter == Favorites
 
 pure def sometimesFailed(s: Photos): bool = s.visible and s.library.status == R::Failed and not(s.locked)
 ```

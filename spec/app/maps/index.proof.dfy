@@ -24,8 +24,6 @@ lemma namePlace_ensures(m: Maps, name: string)
   ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysTheQuietFixIsTheFinders(namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysALocateOwedWasAsked(namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysOnlyAPlaceOrRouteIsReadable(namePlace(m, name).state))
-  ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysAReadAnswersAQuestion(namePlace(m, name).state))
-  ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysAQuestionIsAboutWhatIsShown(namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysTheTripKeepsItsRules(namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> alwaysTheConnectionKeepsItsRules(namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> stepAnotherPlaceForgetsTheOldRoute(m, "namePlace", namePlace(m, name).state))
@@ -79,7 +77,7 @@ lemma namePlace_ensures(m: Maps, name: string)
   ensures (inv(m) ==> canNamePlace(m, name) ==> stepEachReadIsSentOnce(m, namePlace(m, name).state, namePlace(m, name).out))
   ensures (inv(m) ==> canNamePlace(m, name) ==> stepAChangeVoidsTheQuestion(m, namePlace(m, name).state))
   ensures (inv(m) ==> canNamePlace(m, name) ==> stepNoPlaceToTheAgentWithoutApproval(m, "namePlace", namePlace(m, name).state, namePlace(m, name).out))
-
+  ensures (inv(m) ==> canNamePlace(m, name) ==> stepAChangeAdvancesTheRevision(m, namePlace(m, name).state))
 {
   if inv(m) && canNamePlace(m, name) {
     app__maps__places_lawNamingSavesOnce_ensures(m.saved, m.place, name);
@@ -112,8 +110,6 @@ lemma forgetPlace_ensures(m: Maps)
   ensures (inv(m) ==> canForgetPlace(m) ==> alwaysTheQuietFixIsTheFinders(forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> alwaysALocateOwedWasAsked(forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> alwaysOnlyAPlaceOrRouteIsReadable(forgetPlace(m).state))
-  ensures (inv(m) ==> canForgetPlace(m) ==> alwaysAReadAnswersAQuestion(forgetPlace(m).state))
-  ensures (inv(m) ==> canForgetPlace(m) ==> alwaysAQuestionIsAboutWhatIsShown(forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> alwaysTheTripKeepsItsRules(forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> alwaysTheConnectionKeepsItsRules(forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> stepAnotherPlaceForgetsTheOldRoute(m, "forgetPlace", forgetPlace(m).state))
@@ -167,7 +163,7 @@ lemma forgetPlace_ensures(m: Maps)
   ensures (inv(m) ==> canForgetPlace(m) ==> stepEachReadIsSentOnce(m, forgetPlace(m).state, forgetPlace(m).out))
   ensures (inv(m) ==> canForgetPlace(m) ==> stepAChangeVoidsTheQuestion(m, forgetPlace(m).state))
   ensures (inv(m) ==> canForgetPlace(m) ==> stepNoPlaceToTheAgentWithoutApproval(m, "forgetPlace", forgetPlace(m).state, forgetPlace(m).out))
-
+  ensures (inv(m) ==> canForgetPlace(m) ==> stepAChangeAdvancesTheRevision(m, forgetPlace(m).state))
 {
   if inv(m) && canForgetPlace(m) {
     app__maps__places_lawForgettingKeepsTheRest_ensures(m.saved, m.place);

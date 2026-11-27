@@ -8,8 +8,7 @@ the account it names: recorded on the phone before its one request goes
 out, and ending confirmed, refused or unknown. Each is first
 [reviewed](../../kit/review.md); archive and Trash are then held for an
 [undo](../../kit/undo.md) window. Marking read or unread is
-[its own](./marking.md), and what Alpha may change itself is
-[its own](./agent.md).
+[its own](./marking.md).
 
 What is reviewed comes with each event: the draft [as the composer holds
 it](./letter.md), or the messages chosen in the [list](./index.md) with

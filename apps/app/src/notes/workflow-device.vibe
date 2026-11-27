@@ -1,4 +1,4 @@
-// spec/app/workflows/steps.md, "Story: Describe a step"; spec/app/notes/agent.md, "Story: Let the agent find and read my notes"
+// spec/app/workflows/steps.md, "Story: Describe a step"
 import { NOT_DISPATCHED, type DeviceOperation, type ExecutorCall } from "@elizaos/agent"
 import { noteLimits, projectNoteForModel, reconstructNoteContent, sameJson, type StickyNote } from "@elizaos/plugin-notes-client"
 import { validateWorkflowReadResult, type WorkflowNoteRow, type WorkflowNotesReadOperation, type WorkflowReadResult } from "@elizaos/plugin-workflow-client"

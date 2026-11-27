@@ -6,9 +6,8 @@ save at a time. When someone else saved the note meanwhile, or deleted it,
 the owner chooses what to keep. Deleting the open note goes through
 [Recently deleted](./trash.md) and is answered here. The rules of the draft
 itself are [the kit's](../../kit/draft.md); the list that opens the editor
-is [Notes](./index.md); sharing, reminders and the note's source are
-[the actions menu](./actions.md), [a document source](./source.md) and
-[a link note](./linkNote.md).
+is [Notes](./index.md); sharing and the note's source are
+[the actions menu](./actions.md) and [a link note](./linkNote.md).
 
 ## Story: Write a note
 
@@ -50,7 +49,6 @@ pure val initial: Editor = {
 pure def held(e: Editor): bool = e.note > 0 or e.fresh
 pure def writable(kind: Kind): bool = kind == Text or kind == Checklist
 pure def waiting(e: Editor): bool = held(e) and D::unsaved(e.draft)
-pure def unsent(d: D::Draft): D::Draft = { ...d, sync: D::Edited }
 
 pure def letGo(owner: int, e: Editor): Editor =
   { ...e, owner: owner, note: 0, fresh: false, made: 0, folder: 0, draft: D::blank, showing: false, failed: false,
@@ -206,8 +204,8 @@ pure def saved(e: Editor, ticket: int, verdict: Verdict, revision: int, id: int,
     { ...e, draft: landed, failed: false, note: if (e.fresh) id else e.note, fresh: false, made: 0, folder: 0,
       full: e.full and D::unsaved(landed) }
   else if (verdict == Collided) { ...e, draft: D::collide(e.draft, revision), failed: false, asked: false, binning: false, pinning: Unasked }
-  else if (verdict == Gone) { ...e, draft: unsent(e.draft), gone: true, failed: false, asked: false, binning: false, pinning: Unasked }
-  else { ...e, draft: unsent(e.draft), failed: true, asked: false, binning: false, pinning: Unasked }
+  else if (verdict == Gone) { ...e, draft: D::interrupt(e.draft), gone: true, failed: false, asked: false, binning: false, pinning: Unasked }
+  else { ...e, draft: D::interrupt(e.draft), failed: true, asked: false, binning: false, pinning: Unasked }
 ```
 
 ### When a save found a newer revision, only the owner chooses whose to keep
@@ -287,7 +285,7 @@ A new note that holds only the title it started with, with no words and no
 items, has nothing of the owner's: it is never saved, and closing it lets it
 go as Discard does, so no note titled only New note is made and no draft of
 it waits. Pinning or sharing it from More makes it the owner's ("More over
-a new note offers Share, Pin and Delete, as v119's did"), and then it is
+a new note offers Share, Pin and Delete"), and then it is
 saved. Closing forgets a share, a deletion or a pin the owner asked for.
 
 ```quint
@@ -299,7 +297,7 @@ pure def close(e: Editor): Editor = if (D::unsaved(e.draft)) { ...e, showing: fa
 ### Only the owner discards an unsaved draft, or a new note open in the editor, and never one being saved
 
 Delete in More over a new note discards it this way, with nothing asked
-first, as v119's Delete let go of a new note it had never saved.
+first.
 
 ```quint
 pure def canDiscardDraft(e: Editor, by: Actor): bool =
@@ -402,18 +400,18 @@ pure def sometimesStorageFull(e: Editor): bool = e.full and e.showing
 pure def sometimesANewNoteInAFolder(e: Editor): bool = e.fresh and e.folder > 0 and e.draft.sync == D::Saving
 ```
 
-### More over a new note offers Share, Pin and Delete, as v119's did
+### More over a new note offers Share, Pin and Delete
 
-v119 drew More over every note it held, a new one too, and its menu
-offered Share, Pin and Delete before the note's first save. Delete discards
+More is drawn over every note, including a new one, and its menu
+offers Share, Pin and Delete before the note's first save. Delete discards
 the new note ("Only the owner discards an unsaved draft, or a new note open
 in the editor, and never one being saved"). Pin or Unpin is part of the new
 note's draft, allowed only while the new note is open and editable and no
 save is on its way; it is kept on the phone and saved with its words as any
 edit is ("The owner types, adds or ticks an item, and each change is kept on
 the phone at once"), and saved at once, so its first save makes the note
-pinned, as v119 saved it pinned. Share saves the draft first: asking counts
-as an edit, the owner's save is sent at once, and once that save lands with
+pinned. Share saves the draft first: asking counts as an
+edit, the owner's save is sent at once, and once that save lands with
 nothing left unsaved, the phone opens the actions menu over the saved note
 with its share panel ([the actions menu](./actions.md), "The phone opens
 the share the owner asked for on a new note, once its first save lands"),
@@ -466,7 +464,7 @@ was found deleted meanwhile. Asking either sends the owner's save at once when t
 not gone yet. Nothing is shared or deleted before the save lands: once the
 editor shows the note saved, with nothing left unsaved, the phone opens the
 share over the saved revision ("More over a new note offers Share, Pin and
-Delete, as v119's did") or hands the note, at the revision saved, to
+Delete") or hands the note, at the revision saved, to
 Recently deleted as the owner's Delete does ("Only the owner deletes the
 open note, only once everything typed is saved and no save is on its way,
 and only when Recently deleted can take it"). The phone hands it over once
@@ -650,7 +648,7 @@ pure def canRestart(e: Editor, by: Actor): bool = by == Phone
 pure def restart(e: Editor, readable: bool, by: Actor): Editor =
   if (D::unsaved(e.draft))
     { ...e, showing: false, full: false, unreadable: e.unreadable or not(readable) or e.full, asked: false, binning: false, pinning: Unasked,
-      draft: if (e.draft.sync == D::Saving) unsent(e.draft) else e.draft }
+      draft: if (e.draft.sync == D::Saving) D::interrupt(e.draft) else e.draft }
   else letGo(e.owner, e)
 
 pure def stepARestartKeepsTheDraft(before: Editor, via: str, after: Editor): bool =
