@@ -109,8 +109,8 @@ export function AssistantMessage({ author, text, quote, attachments = [], childr
       ) : null}
       {quote ? <p className="line-clamp-2 border-l-2 border-border pl-3 text-sm break-words text-muted-foreground">{quote}</p> : null}
       {text ? (
-        <div className="flex max-w-full items-start gap-2.5">
-          {owner ? null : <span aria-hidden className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>}
+        <div data-alpha-agent-line="" className="flex max-w-full items-start gap-2.5">
+          {owner ? null : <span aria-hidden data-alpha-agent-mark="" className="mt-0.75 flex size-4.5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-alpha text-alpha-foreground"><Mark aria-hidden className="size-full shrink-0 scale-[1.18]" /></span>}
           <div className="relative max-w-full">
             {actions && (
               <button
