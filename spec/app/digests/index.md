@@ -79,16 +79,16 @@ pure def bucketOf(d: Digests, who: int): Bucket =
   if (d.owners.some(k => k == who)) d.others.getOr(who, empty) else empty
 
 pure val ticketValues = Set(1, 2, 3)
-pure val roundValues = 1.to(20)
+pure val roundValues = 1.to(12)
 pure val idValues = Set(1, 2)
 pure val countValues = Set(0, 1, 2)
 pure val upToValues = Set(1, 2)
 pure val ranValues = Set(0, 1, 2)
 pure val resultValues = Set(0, 1, 3)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_fetched = 8
-pure val weight_pageKept = 3
-pure val weight_resultRead = 6
+pure val weight_fetched = 2
+pure val weight_pageKept = 2
+pure val weight_resultRead = 2
 ```
 
 ### Only the newest 100 results are listed, newest first

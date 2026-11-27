@@ -157,14 +157,16 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
     await trail("Phone,Contacts");
     await tab("Recents");
     await trail("Phone");
-    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Contacts opens and Ask Alpha rises with no tap in between, and Back then slides as v119's back() did (45f6bed30 prototype/model.js:6018, :5770-5776).
-    await shell({ type: "openView", view: "Contacts" });
-    await trail("Phone,Contacts");
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Ask Alpha rises and Contacts opens with no tap in between, and Back then slides as v119's back() did (45f6bed30 prototype/model.js:6018, :5770-5776).
     await shell({ type: "raise", detent: "Sheet" });
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await until(alpha, alpha.runtime, Comms, (s) => s.height === "SheetOpen");
+    await shell({ type: "openCommsView", view: "Contacts" });
+    await trail("Phone,Contacts");
+    await until(alpha, alpha.runtime, Comms, (s) => s.stage.length > 0);
     await hardware("back");
     await trail("Phone");
-    expect(slides()).toEqual(["translateX(-18%)"]);
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)"]);
   });
 
   it("swaps at once while an emergency call is live, as v119 never staged one", async () => {

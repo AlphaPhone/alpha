@@ -1,8 +1,5 @@
 // spec/app/assistant/composer.md, "A draft the earlier Alpha kept for the conversation is taken once into an unused slot, and one it was sending comes back for review"; spec/app/platform/adoption.md, "Story: Keep what the earlier Alpha kept"
-import { ownerAt } from "../platform/owner.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { ask } from "../platform/remote.vibe"
-import { type Place, adopt, earlierSlot } from "../platform/adoption.vibe"
+import { Agent, type Place, adopt, ask, earlierSlot, ownerAt } from "../platform/index.vibe"
 
 module web {
   /** The earlier Alpha bounded a draft's text in UTF-8 bytes. */

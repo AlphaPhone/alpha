@@ -1,6 +1,6 @@
 // spec/app/platform/index.md, "Story: Know roughly where my phone is without GPS"; spec/app/platform/index.md, "A network position is asked only when one is needed now, reused for fifteen minutes, and kept for an hour while the same networks are seen"; spec/app/platform/index.md, "With too few networks seen, the plugin asks for the position of the phone's address alone, and that answer is never confirmed unchanged"; spec/app/platform/index.md, "A network position is taken only where it lies on the globe, has an accuracy, and is neither from the future nor over an hour old"
 import { confirmedUnchanged, lookupOf, positionTaken, retryAfter, stands } from "../../gen/app__platform.effect.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Time } from "../runtime/index.vibe"
 
 module held {
   import { Capacitor, registerPlugin } from "@capacitor/core"

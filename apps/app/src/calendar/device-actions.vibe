@@ -11,10 +11,8 @@ import type { Action as Offer, Named } from "../../gen/app__calendar__sharing.ts
 import { advertised, namedChangeAllowed, rangeAdmitted, rangeOutcome, said, shareOffered } from "../../gen/app__calendar__sharing.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
-import { Device } from "../platform/device.vibe"
-import { PhoneCalendar, type Reviewed } from "../platform/calendar.vibe"
-import { ownerAt } from "../platform/owner.vibe"
-import { Time } from "../runtime/time.vibe"
+import { Device, PhoneCalendar, type Reviewed, ownerAt } from "../platform/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { type CalendarObject, subjectNow } from "./selection.ts"
 import { shown } from "./shown.ts"
 

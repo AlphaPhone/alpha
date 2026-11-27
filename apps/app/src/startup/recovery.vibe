@@ -183,7 +183,7 @@ const recordingRebuilds = started(effect {
   })
 }, "observing recovery page rebuilds")
 
-// spec/app/startup/recovery.md, "A page that fails to start or to draw shows one 'Something went wrong' screen over its surface"
+// spec/app/startup/recovery.md, "The failure screen stays until the owner's Reload rebuilds the page or its process dies, and a page without WebView stays as it is"
 const holdingHome = started(effect {
   const layers = try Layers.Machine
   try Stream.runForEach(Stream.changes(Stream.map((try Recovery.Machine).changes, Recovery.stuck)), effect (isStuck) => {

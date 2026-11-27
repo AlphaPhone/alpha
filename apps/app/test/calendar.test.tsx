@@ -1060,6 +1060,7 @@ describe("on a phone", () => {
     return { world, alpha, agent };
   }
 
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"; spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
   it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
     const { world, alpha, agent } = await fileTwoCalendarRequests();
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
@@ -1122,6 +1123,7 @@ describe("on a phone", () => {
     expect(world.calendar.writes).toEqual([]);
   });
 
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
     const { world, alpha, agent } = await fileTwoCalendarRequests();
     const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
@@ -1136,6 +1138,7 @@ describe("on a phone", () => {
     expect([at(ended) - at("I've proposed camera setup"), at("I've proposed lens check") > at(ended)]).toEqual([1, true]);
   });
 
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
   it("How a request ended stays at the foot when the reply that filed it draws no row (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
     const world = morning(true);
     const { alpha, agent, request, send } = await askingCalendar(world);
@@ -1156,6 +1159,7 @@ describe("on a phone", () => {
     expect(rows.at(-1)).toContain("Sent, but Calendar could not find the change.");
   });
 
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"; spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number"
   it("A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
     const world = morning(true);
     const { alpha, agent, file, request, declineInCalendar } = await askingCalendar(world);

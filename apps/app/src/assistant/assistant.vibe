@@ -524,7 +524,7 @@ effect function settleReplied(input: {
     board.rename(pageTicket, mine, result.reply.userMessageId)
   }
   board.messageNumber(result.reply.messageId)
-  if (result.reply.text !== "" || result.reply.failureKind !== undefined) board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
+  if (result.reply.text !== "" || result.reply.failureKind !== undefined || result.reply.actionResults.length > 0) board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text })
   const recordingSummary = transcript === undefined || result.reply.failureKind !== undefined
     ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chosen,
       conversationId, message: result.reply.messageId }, result.reply.text)

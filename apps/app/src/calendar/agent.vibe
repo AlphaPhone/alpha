@@ -73,11 +73,13 @@ effect function send(change: Out & { tag: "Send" }): Event!!(Agent | Attempts | 
   const reviewed = reqStore.find(change.filing)
   const now = (try pendingRequests(change.filing))?.find((one) => one.id === reviewed?.id)
   if (now === undefined || reviewed === undefined) return { type: "sent", attempt: change.attempt, confirmed: false, known: true }
-  reqStore.keep(now)
   const rows = try rowsFor(now, (try Shown).all("Google"))
   const revision = revisionOf(now, rows)
-  if (revision > (try (try Changes.Machine).get()).revision) return { type: "staleAtTap", attempt: change.attempt, revision, complete: complete(now, rows) }
-  const sent = try attemptedWith(Agent, () => resolveOf(now, "approve"), change.attempt)
+  if (revision > (try (try Changes.Machine).get()).revision) {
+    reqStore.keep(now)
+    return { type: "staleAtTap", attempt: change.attempt, revision, complete: complete(now, rows) }
+  }
+  const sent = try attemptedWith(Agent, () => resolveOf(reviewed, "approve"), change.attempt)
   if (!sent.confirmed) return { type: "sent", attempt: change.attempt, confirmed: false, known: sent.known }
   const kind = (Schema.decodeUnknownOption(Resolved)(sent.body) |> Option.getOrUndefined(%))?.kind ?? ""
   return { type: "sent", attempt: change.attempt, confirmed: kind === "succeeded", known: kind !== "blocked" && kind !== "" }

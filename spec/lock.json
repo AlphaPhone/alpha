@@ -1969,43 +1969,43 @@
       ],
       "Story: Choose how to sign in / Sign-in is closed, choosing, in the browser, at the code or at a second check": [
         "7a9d00e5bc1d",
-        "5fc9e467afb3",
+        "a7676fdb47a4",
         "13a569ef388c"
       ],
       "Story: Choose how to sign in / A typed code is secret, and what the page asks of the phone never carries the sign-in back": [
         "3ad47d173c7f",
         "18d2a6bf3b47",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Choose how to sign in / Opening sign-in shows the choice and asks the phone which ways work, from Account or from the assistant's card, never by the agent": [
         "e3b0c44298fc",
         "d32ebf603e00",
-        "fcff1fa96eed"
+        "fcee54f380e5"
       ],
       "Story: Choose how to sign in / Email is always offered, and Google and text only once the phone says they work": [
         "73120fcb1e6d",
         "24dfa9238ce7",
-        "b2721f839b63"
+        "8c47e764d59d"
       ],
       "Story: Choose how to sign in / Offline, sign-in offers nothing that needs Cloud, and says so": [
         "be7f750c5b2a",
         "0fe2c640d7fa",
-        "aa71dcd93b86"
+        "e57b719b34e6"
       ],
       "Story: Choose how to sign in / Every request takes the next number, the number moves only with a request, and what is asked of the phone names it": [
         "e3b0c44298fc",
         "678f3e71a355",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Choose how to sign in / What is in flight fits the step it was started from, and the browser visit is open exactly on the browser step": [
         "e3b0c44298fc",
         "a706d6bee34a",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Choose how to sign in / Google can be offered": [
         "e3b0c44298fc",
         "4916b2f13b87",
-        "051f77e165f9"
+        "7f0721d1d1f1"
       ],
       "## Story: Sign in when Alpha needs it": [
         "d6757e8af438"
@@ -2013,32 +2013,32 @@
       "Story: Sign in when Alpha needs it / A required sign-in opens by itself once startup has resolved, and waits for startup until then": [
         "7e4e9d825950",
         "5ec92c8f3357",
-        "e32d1fd9673b"
+        "c2d4ee423703"
       ],
       "Story: Sign in when Alpha needs it / A required sign-in has no Back on its choice": [
         "ac2ba9031594",
         "59f2ad42d4f4",
-        "244558171314"
+        "2d812d7c5d0a"
       ],
       "Story: Sign in when Alpha needs it / Saving the owner's own key ends a required sign-in, and drops any code on screen": [
         "e3b0c44298fc",
         "70a0872cd1d7",
-        "b130ea2f25f0"
+        "eafd7c2d6567"
       ],
       "Story: Sign in when Alpha needs it / A required sign-in can wait for startup": [
         "e3b0c44298fc",
         "592e3c6ff195",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in when Alpha needs it / A required sign-in can show its choice": [
         "e3b0c44298fc",
         "2075cb952aee",
-        "244558171314"
+        "2d812d7c5d0a"
       ],
       "Story: Sign in when Alpha needs it / The owner's own key can end a required sign-in": [
         "e3b0c44298fc",
         "c1cb25ef3c72",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "## Story: Sign in with a code": [
         "c89142117636"
@@ -2046,117 +2046,117 @@
       "Story: Sign in with a code / A code is sent to an address by a way this phone offers, and a code to the same address waits its minute even from the choice": [
         "e3b0c44298fc",
         "0d4d0fa0a5e3",
-        "ed0ad7eeb99a"
+        "a2911af5e9f2"
       ],
       "Story: Sign in with a code / The phone writes a typed number in international form, and leaves a number already in that form as it is": [
         "4f09243ef284",
         "6b650d88d36e",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A text goes to the number in international form, an email to the address as typed, and the same number written another way waits its minute": [
         "0efb505d1388",
         "77bc31293565",
-        "6101d2c05b46"
+        "44e762c8de7b"
       ],
       "Story: Sign in with a code / A code that went out starts a new attempt, good for ten minutes, with another offered after a minute": [
         "383a9d3157c0",
         "af2df77c6a2b",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / Another code is asked for on the code step once a minute has passed since the last went out": [
         "b845ce3d222c",
         "22b766da9ff1",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Sign in with a code / A send or resend that fails destroys nothing: the attempt, its tries, its times and where the last code went stay as they were": [
         "e3b0c44298fc",
         "9ed6d198a00c",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / An attempt begins only when a code went out or the browser asked for a second check, and the minute's wait only when a code went out": [
         "8776d0de8635",
         "5f5492d6f1e7",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A typed code is checked only while the attempt is unspent and its time is running": [
         "e3b0c44298fc",
         "f4b960941b4d",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Sign in with a code / The phone's answer hands the sign-in over, asks for a second check, counts a wrong code, or ends the attempt": [
         "594e240c8b1b",
         "b93b463e84a3",
-        "f78ede3eca81"
+        "78f7566e9c4e"
       ],
       "Story: Sign in with a code / Only a verified answer hands a sign-in over, naming its account, and only when the session can take it; otherwise the phone drops it": [
         "e3b0c44298fc",
         "7bd2ec083f2c",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Sign in with a code / A code whose ten minutes are over is spent": [
         "5f3d8600a08f",
         "2b9ef0ea25a8",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Sign in with a code / Wrong codes are counted up to five, and the fifth spends the code": [
         "e3b0c44298fc",
         "ff37797349fe",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Sign in with a code / A spent code is never checked again": [
         "e3b0c44298fc",
         "a52e358f9155",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / The code steps name an attempt, and the address is filled in only on the choice": [
         "e3b0c44298fc",
         "add4eb8be71f",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A code is only ever sent, or waited for, at an address": [
         "a0b377fc19bc",
         "6bcc3e98deff",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A code can be handed over as a sign-in": [
         "e3b0c44298fc",
         "a9144b103c16",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A sign-in verified while the session was busy is dropped, and the owner chooses again": [
         "e3b0c44298fc",
         "821650a348d0",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A code can be spent, with another still to ask for": [
         "e3b0c44298fc",
         "7e347dcc6a6b",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A send can fail and return to the choice with the address filled in": [
         "e3b0c44298fc",
         "881c576856c7",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A resend can fail and leave the code step as it was": [
         "e3b0c44298fc",
         "5ae404700362",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A wrong code can be counted": [
         "e3b0c44298fc",
         "129f87bd75ad",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / A check that did not reach Cloud keeps the code to try again": [
         "e3b0c44298fc",
         "53b25f41c7d2",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with a code / The choice can make the owner wait for another code to the same address": [
         "e3b0c44298fc",
         "953f8487502d",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "## Story: Sign in with Google": [
         "60d8ccda57b8"
@@ -2164,32 +2164,32 @@
       "Story: Sign in with Google / Google opens a new browser visit, each with its own number, and opening it again retires the one open": [
         "e3b0c44298fc",
         "82e875007a4c",
-        "213e3243a431"
+        "0c6e6c5d55db"
       ],
       "Story: Sign in with Google / Only the return of the visit that is open is used, and using it closes the visit": [
         "242b1856e957",
         "96c7dc60a8e1",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Sign in with Google / A browser return is used exactly once, and every visit opened takes the next number": [
         "e3b0c44298fc",
         "31dd75893654",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Sign in with Google / A browser visit that does not come back within ten minutes ends, and its return is then refused": [
         "e3b0c44298fc",
         "01d78f774ce1",
-        "63395714604a"
+        "5ea6f2c1dfce"
       ],
       "Story: Sign in with Google / A Google sign-in can be handed over": [
         "e3b0c44298fc",
         "3ab8c012fc96",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Sign in with Google / A browser visit can time out": [
         "e3b0c44298fc",
         "c9bdb3652d36",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "## Story: Pass a second check": [
         "2da6228d6af9"
@@ -2197,22 +2197,22 @@
       "Story: Pass a second check / A second check has its own ten minutes, however much the code before it had left": [
         "e3b0c44298fc",
         "e20059bd4b2e",
-        "008ed4d6af49"
+        "af3e0ece6f4a"
       ],
       "Story: Pass a second check / A passkey is asked of the phone, with no code to type": [
         "e3b0c44298fc",
         "aa5d2b269d6d",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Pass a second check / A second check can ask for an authenticator code, a texted code or a passkey": [
         "e3b0c44298fc",
         "9df273ef98a8",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Pass a second check / A second check that ran out returns to the choice": [
         "e3b0c44298fc",
         "002bc01c7aba",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "## Story: Change my mind": [
         "d7baa0131aca"
@@ -2220,27 +2220,27 @@
       "Story: Change my mind / Back leaves the choice, drops a code step, or asks the phone to withdraw what is in flight": [
         "737f5c419886",
         "2c4544701847",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Change my mind / A withdrawal the phone answered returns to the choice, and nothing withdrawn signs anyone in": [
         "e3b0c44298fc",
         "ace4b4230b03",
-        "ddb1fc4fed8d"
+        "fbb3dc28cd9a"
       ],
       "Story: Change my mind / An attempt is abandoned only by Back, or by the owner's own key ending a required sign-in, and only the one on screen": [
         "e3b0c44298fc",
         "80e14b2f5308",
-        "d1703262f553"
+        "c7faf576cb34"
       ],
       "Story: Change my mind / A sign-in can be withdrawn while its check is in flight": [
         "e3b0c44298fc",
         "391b280556f0",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Change my mind / A browser sign-in can be withdrawn": [
         "e3b0c44298fc",
         "b97740775d07",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "## Story: Restart in the middle of signing in": [
         "5e94c595022b"
@@ -2248,22 +2248,22 @@
       "Story: Restart in the middle of signing in / A restart ends whatever was under way and orphans an open browser visit": [
         "00a967e228d9",
         "1b5b2d5a3451",
-        "8719e8c9d1d4"
+        "41157fd07a91"
       ],
       "Story: Restart in the middle of signing in / The return of a visit orphaned by a restart signs no one in, and the owner is told once": [
         "e3b0c44298fc",
         "ca2b351e64b0",
-        "cbec6bdc3426"
+        "a0496ea6deb5"
       ],
       "Story: Restart in the middle of signing in / An owner can be told that a restart ended a Google sign-in": [
         "e3b0c44298fc",
         "3c309fe2b702",
-        "5d2afb55ce12"
+        "6a93e72e0e07"
       ],
       "Story: Restart in the middle of signing in / Erasing Alpha ends whatever was under way, forgets every address a code went to, and refuses every answer still in flight": [
         "e3b0c44298fc",
         "729b18d3f851",
-        "1e0b7752dd60"
+        "a6c27630052d"
       ]
     },
     "spec/app/approvals/operation.md": {
@@ -3145,9 +3145,13 @@
         "3c3fa2a11712"
       ],
       "Story: Act on what a reply carries / What each kind offers": [
-        "e06ca0d1cefa",
+        "e0249528e08b",
         "a2aa88535398",
         "3c3fa2a11712"
+      ],
+      "Story: Act on what a reply carries / A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it": [
+        "b75894370522",
+        "c009df4719cb"
       ],
       "Story: Act on what a reply carries / What the simulator tries": [
         "e3b0c44298fc",
@@ -3992,7 +3996,7 @@
         "7c18aaaa76e2"
       ],
       "Story: Move between Home and the apps / Opening another communications app from the stage keeps Ask Alpha open": [
-        "ca795434c670",
+        "71b510d31240",
         "a11b13e83a6c",
         "b5a32e690159"
       ],
@@ -4973,11 +4977,11 @@
         "35c19762ac41"
       ],
       "## Story: Read a reply as it was written": [
-        "b50b917d1eb1"
+        "4451f8429ccd"
       ],
-      "Story: Read a reply as it was written / Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": [
-        "205c9858fd62",
-        "2e98a7b02177"
+      "Story: Read a reply as it was written / Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text": [
+        "45932b7835d4",
+        "f34633acdde8"
       ],
       "Story: Read a reply as it was written / Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks": [
         "8a1c07a7acf9",
@@ -5270,7 +5274,7 @@
         "6884f3ebeda6"
       ],
       "Story: Find in page / The find bar opens over a shown page": [
-        "3419fa3be8f8",
+        "2c2d9e1fe544",
         "feda9a319979",
         "dfc5af5925ca"
       ],
@@ -6130,7 +6134,7 @@
         "0e590857dccd"
       ],
       "Story: Approve what the agent changes / The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": [
-        "634f5a523997",
+        "4e4a4ac3fc49",
         "4dba41fa0a3b",
         "ca86d854b012"
       ],
@@ -6205,7 +6209,7 @@
         "dbc7f8b13022"
       ],
       "Story: Approve what the agent changes / The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": [
-        "65618d9b2eab",
+        "a70389ef4a8e",
         "a5a8a82b0103",
         "3dc45ad1714b"
       ],
@@ -6454,8 +6458,8 @@
       ],
       "Story: Write an event / The form's edits always build on the revision of the event as last read": [
         "e3b0c44298fc",
-        "1cb31befcc1d",
-        "e48e07d5ba1e"
+        "d4240345682d",
+        "8464eb35a77f"
       ],
       "Story: Write an event / A form can be saved, and a change to a whole series can be sent": [
         "e3b0c44298fc",
@@ -6653,6 +6657,13 @@
       "Story: See who comes, in Alpha's words / An event's page is offered only for a Google event at a plain HTTPS address without credentials": [
         "e3b0c44298fc",
         "c1db70e4100e"
+      ],
+      "## Story: Know which calendar an event is on": [
+        "f9351a00467b"
+      ],
+      "Story: Know which calendar an event is on / The agent's calendar goes by the name the agent lists for it": [
+        "47850bb548e7",
+        "2bf3b1a46020"
       ],
       "## Story: Read the presentation of times": [
         "29fe450758c5"
@@ -7082,27 +7093,27 @@
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / Setup starts only from a write grant, for the owner signed in; a read-only grant goes on to consent for more access, and a missing one sends nothing": [
         "4f4ca13abe8a",
         "02f0a2485e51",
-        "f3b6209125e3"
+        "7d72ff4f71b5"
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / The account area's read says what Google allows now; a grant that no longer writes stops a setup under way": [
         "e3b0c44298fc",
         "95bb64819910",
-        "f3b6209125e3"
+        "7d72ff4f71b5"
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / Setup waits while Calendar reads or writes, and makes at most three control reviews, two writes and one link read": [
         "2a29dd2f974b",
-        "d4156d6ff564",
+        "02b6508b8c94",
         "6119cc4a84c7"
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / Each control review is checked against the revision this setup wrote, and its destination against the owner's writable calendars": [
         "c7b31f73a55d",
         "72c4c0b6cf04",
-        "f3b6209125e3"
+        "7d72ff4f71b5"
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / A write is sent only while the owner and the reviewed revision still hold, and its answer starts another review": [
         "9d886671febd",
         "43c5a449cde6",
-        "f3b6209125e3"
+        "7d72ff4f71b5"
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / Synced needs a clean read back of the linked events; held or many conflicts are named": [
         "e3b0c44298fc",
@@ -7111,8 +7122,8 @@
       ],
       "Story: Link a Google calendar I can write to, and be told it is synced only when it is / The owner can cancel setup, and an answer still out then links nothing": [
         "e3b0c44298fc",
-        "656016892f40",
-        "f3b6209125e3"
+        "e9e80a63aa59",
+        "7d72ff4f71b5"
       ],
       "## Story: See whether my agent's Calendar reaches Google": [
         "644187a26323"
@@ -7141,7 +7152,7 @@
       ],
       "Story: Disconnect Google from Calendar without leaving sync running / A pause is confirmed only when the control answered paused at a revision past the one reviewed": [
         "e3b0c44298fc",
-        "0f4802de28c8",
+        "fb637908a07a",
         "6119cc4a84c7"
       ],
       "Story: Disconnect Google from Calendar without leaving sync running / While setup is running it has no ending or pause yet, its counters never go negative, and its reviewed revision starts at none": [
@@ -7657,7 +7668,7 @@
       ],
       "Domain / What the simulator tries": [
         "e3b0c44298fc",
-        "f7d9cf458d9e"
+        "ce78ce0f83ce"
       ],
       "## Story: Open the camera": [
         "f1bf9a0b53d9"
@@ -8461,7 +8472,7 @@
       ],
       "Domain / What the simulator tries": [
         "e3b0c44298fc",
-        "3812207260fd",
+        "629e4e2c69f9",
         "430e52443fe3"
       ],
       "## Story: Browse my contacts": [
@@ -8722,58 +8733,58 @@
       ],
       "Story: See my digests / Digests holds the owner, the panel, the inbox round, the results kept for this owner and those kept for others, the notice, the two switches, and the result in focus": [
         "3ddb77c49656",
-        "487da09998ef",
+        "a30176415f62",
         "9e081d8f7523"
       ],
       "Story: See my digests / Only the newest 100 results are listed, newest first": [
         "e3b0c44298fc",
         "d65fe628ad8b",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: See my digests / The panel opens with what this phone can check, and opening it drops the result notice, whose result it shows": [
         "15982f968cea",
         "30bdbe46729a",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: See my digests / Closing the panel drops a notice that came while it was open, since its result was seen": [
         "e3b0c44298fc",
         "aeadfebccd96",
-        "c526ccce02aa"
+        "105fd96b889e"
       ],
       "Story: See my digests / Opening a result reads what ran, when, from which source, and how it ended": [
         "e3b0c44298fc",
         "35c08c0e6a7b",
-        "6046fc4e4f50"
+        "37652c949bbf"
       ],
       "Story: See my digests / Opening a result notice opens the panel on that result, for the owner it was for": [
         "222496953d4c",
         "8d3b7c2fa05f",
-        "3baf1e2dad97"
+        "e3ca8fdf2985"
       ],
       "Story: See my digests / Ask Alpha about a result hands that result to Ask Alpha": [
         "ee95ceaadec4",
         "f0d8290ab18e",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: See my digests / Background checks and notifications are asked one at a time each and shown as the platform last took them": [
         "26fc41552a58",
         "59fdd438baee",
-        "7482b16d4e7d"
+        "174208ba3bfa"
       ],
       "Story: See my digests / Notifications turned off by the agent drop the result notice": [
         "e3b0c44298fc",
         "ce8a921d834e",
-        "46cc576e37e5"
+        "88b746ce5db9"
       ],
       "Story: See my digests / A switch shows what the agent took, and one whose answer was lost is shown as not confirmed": [
         "e3b0c44298fc",
         "c70472318354",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: See my digests / Results can be none yet, a switch can be refused or left unconfirmed, the panel can offer no switch, and a result can be opened from its notice": [
         "e3b0c44298fc",
         "8103a97682ef",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "## Story: Receive results without losing or repeating one": [
         "4706c3c683a0"
@@ -8781,52 +8792,52 @@
       "Story: Receive results without losing or repeating one / Results are fetched one page at a time for the owner signed in, from after the last one kept, while the panel is open or background checks are on": [
         "44b54487e982",
         "f5473c56f450",
-        "3baf1e2dad97"
+        "e3ca8fdf2985"
       ],
       "Story: Receive results without losing or repeating one / A page of the round's owner, numbered on from the last kept, is kept on the phone before anything else happens, and a page already kept is acknowledged again": [
         "424062e6c18d",
         "3d61a42d618a",
-        "1c030d413da5"
+        "04d414561383"
       ],
       "Story: Receive results without losing or repeating one / Once a page is kept, the agent is told, and a notice is wanted for the newest result if notifications are on and the phone may post": [
         "8d277dee74a3",
         "e24ea3ee6ffa",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / The agent's answer to the round's acknowledgement ends the round, and a lost one is repeated by the next": [
         "e3b0c44298fc",
         "067637b0fd39",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / Results are acknowledged, announced and shown on Home only once kept, and only for the owner they belong to": [
         "ac30c752d4b6",
-        "a95b7477a977",
-        "1ad72caf4bac"
+        "b2095a8b66c1",
+        "81f725f8bea1"
       ],
       "Story: Receive results without losing or repeating one / Every acknowledgement and keep names the current round and its owner, and every notice a result kept and never announced before": [
         "0d118ba88a9a",
         "29d3a25602b0",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / What is kept for an owner is never lost: nothing kept or announced goes back while they are signed in, and their results wait for them while another owner is": [
         "e3b0c44298fc",
         "245581c87cd4",
-        "c3d1e3faadf4"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / Home shows the newest kept result of the owner that ran, finished or failed, through a restart; a result that did not run never replaces it, and a page of another owner never reaches it": [
         "e3b0c44298fc",
         "100d5ac4e22f",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / A round in progress always ends": [
         "a30d8436ab16",
         "0369cada0f26",
-        "f7676bb1687e"
+        "36b919b85e85"
       ],
       "Story: Receive results without losing or repeating one / Home can have a brief, a failed one, and a result that did not run after it; a page can fail to be kept, an acknowledgement be repeated, a notice be wanted quietly, and a result arrive with notifications off": [
         "e3b0c44298fc",
-        "bf103827b2f1",
-        "a6625fed9a19"
+        "a0115d6778c7",
+        "2a6e8fcb420c"
       ],
       "## Story: Keep digests to their owner and through a restart": [
         "4aa8cd9d55ea"
@@ -8834,22 +8845,22 @@
       "Story: Keep digests to their owner and through a restart / A restart closes the panel and ends the round in progress; what was kept and acknowledged stays, and a switch awaiting its answer is not confirmed": [
         "e3b0c44298fc",
         "3c57b5812109",
-        "7679e7d81bf9"
+        "1da8f58c040c"
       ],
       "Story: Keep digests to their owner and through a restart / When another owner signs in, the previous owner's results are put aside and the new owner's results and confirmed switches are taken up": [
         "65b8b55bd94c",
-        "ed634230b59f",
-        "158ab81b8ac4"
+        "e92d1d4d6f27",
+        "90324f2a6e57"
       ],
       "Story: Keep digests to their owner and through a restart / Android supplies one verified view of retained results and background checks": [
         "9a8f1a4014c4",
         "343c67b59a3c",
-        "a3535a767692"
+        "2e9b53c5944a"
       ],
       "Story: Keep digests to their owner and through a restart / An owner's results can wait for them while another owner is signed in": [
         "e3b0c44298fc",
-        "2b14add8022b",
-        "f7676bb1687e"
+        "225c688505cd",
+        "36b919b85e85"
       ]
     },
     "spec/app/workflows/request.md": {
@@ -9056,17 +9067,17 @@
       ],
       "Story: Keep my digest schedules / Discard drops only a change never sent; one that may have reached the agent is let go only once its record was read": [
         "e3b0c44298fc",
-        "e920f2f865a2",
+        "5108bdccb74f",
         "6be3f7e94cfe"
       ],
       "Story: Keep my digest schedules / A change is kept honestly, asks for a schedule the agent can keep, and is sent with exactly what was reviewed": [
         "888710454cee",
-        "a59e10ac021f",
+        "675bb19594e1",
         "0ecfa3f86c73"
       ],
       "Story: Keep my digest schedules / A schedule can be created as an evening brief, paused, not saved and retried, or discarded before it was sent": [
         "e3b0c44298fc",
-        "4d0e9e55c427",
+        "10c08e4b543b",
         "607b3b140e75"
       ],
       "## Story: Run a missed digest": [
@@ -9084,7 +9095,7 @@
       ],
       "Story: Run a missed digest / A Run now with no answer is settled by the agent's record: run, or free to be offered again once a newer occurrence or none remains to run; or let go as unknown": [
         "e3b0c44298fc",
-        "1e0bdd9bbf58",
+        "42ab67876842",
         "2b7ee5ea3198"
       ],
       "Story: Run a missed digest / The phone never runs a digest: it only asks the agent, once per occurrence the owner confirmed": [
@@ -9094,7 +9105,7 @@
       ],
       "Story: Run a missed digest / A missed digest can be run, refused and offered again, and a lost Run now let go": [
         "e3b0c44298fc",
-        "892eb2a32bfe",
+        "adf9e69f2ddb",
         "38c06f0742fe"
       ],
       "## Story: Keep schedules to their owner and through a restart": [
@@ -9160,7 +9171,7 @@
       ],
       "Story: Consent to a source for a while / Consent lasts at most 720 hours from when it was given, and covers only what its kind may cover": [
         "e3b0c44298fc",
-        "a179c4a1ba41",
+        "6182daecd056",
         "28292e9b4b02"
       ],
       "Story: Consent to a source for a while / The scope under review stays within what its source kind may cover": [
@@ -9370,7 +9381,7 @@
       ],
       "Story: Change my files / What the simulator tries": [
         "e3b0c44298fc",
-        "6f93a20b1dcf",
+        "1fa664b60330",
         "a2b4bf599cf9"
       ],
       "Story: Change my files / A change fits its items: a new name is free in the folder, one item is renamed, and nothing moves into itself, into a folder inside itself, to where it already is, or to another volume": [
@@ -9613,47 +9624,47 @@
       "Story: Browse my storage / What Files asks of the phone and tells other areas": [
         "7c0af7205734",
         "7fc7d35c8ed3",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / What the simulator tries": [
         "e3b0c44298fc",
         "b000e7d07a09",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / Files is closed, unsupported, not yet allowed, denied, at the top, reading, unavailable or showing a place": [
         "d04a00b5ad5a",
-        "2e26142f3dfb",
+        "ec4b2c4b57cb",
         "a43d044dc04d"
       ],
       "Story: Browse my storage / Allow goes to the permission flow while Android was never asked, and to Android's Settings after": [
         "1f2483f5da89",
         "bae374ee912f",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Browse my storage / An agent request still waiting is told it failed when its reading is dropped or replaced": [
         "6cdfcbbe97c9",
         "e8c74dca9427",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Browse my storage / Arriving at a place reads it afresh with nothing selected, and the filter on is asked again there, only while Files is open and allowed": [
         "e3b0c44298fc",
         "092085ea3633",
-        "03ca59ad66a5"
+        "17d94ec4f45c"
       ],
       "Story: Browse my storage / Opening Files reads the storage and the place it left, and leaving Files drops every read, the selection, the confirmation and the sheets": [
         "cebfafc2d32d",
         "d1efb25a2a44",
-        "ef82beb19a26"
+        "08ead66c1ee7"
       ],
       "Story: Browse my storage / When the phone says Alpha may read the storage the place is read, and when it takes access away, or says the storage cannot be reached at all, everything read is dropped": [
         "e3b0c44298fc",
         "9784f8e4966b",
-        "710c74af6cc7"
+        "4c6a7042d42a"
       ],
       "Story: Browse my storage / Without access Files reads nothing, and shows no volumes, no counts, no items, no selection, no results, no confirmation and no Move to sheet": [
         "e0f399483b98",
         "f9709d9f43c7",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / The top shows each volume with a storage bar that is never fuller than the volume, or says the storage is unavailable": [
         "e3b0c44298fc",
@@ -9663,57 +9674,57 @@
       "Story: Browse my storage / The top shows how many files each category holds and the room they take, and how many items the Trash holds, as the storage was last read": [
         "0e0104b5b8d5",
         "e627d2962ba7",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / The owner opens a volume, a category, a listed folder, a step of the path, or goes back to the top; a category lists exactly the files of its kind": [
         "e3b0c44298fc",
         "7b0fe2ccbf4c",
-        "fa08fd34bc41"
+        "71c50a806711"
       ],
       "Story: Browse my storage / Images and Videos show the phone's folder groups with their counts and open the folder chosen": [
         "a2cea6810987",
         "d66b5bf20dd2",
-        "fa08fd34bc41"
+        "71c50a806711"
       ],
       "Story: Browse my storage / The top offers the Trash, which shows until the owner goes back or anywhere else": [
         "519461a16fab",
         "ca4ac034aab5",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / Another area opens Files at Downloads: the Download folder of the main volume where the phone has one, else the Downloads category; the owner's own move to the top, a volume or a category ends that walk": [
         "488d263b17b9",
         "a8c3b474a640",
-        "fa08fd34bc41"
+        "71c50a806711"
       ],
       "Story: Browse my storage / The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed": [
         "e3b0c44298fc",
         "a518a029cfd2",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files": [
         "76ea531992b9",
         "d37417e67123",
-        "ef68df526292"
+        "da71c1045b52"
       ],
       "Story: Browse my storage / The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable": [
         "be913f674d6c",
-        "81ebe7fbc422",
-        "d4ddb1bbfd23"
+        "b90753f30ab0",
+        "7543ec289b9a"
       ],
       "Story: Browse my storage / A refresh asks the filter on again for the place showing, so what it found is never older than what the place lists": [
         "e3b0c44298fc",
         "2269d8c0703d",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Browse my storage / A place is called empty only after the phone read all of it; a reading cut short keeps what it read": [
         "2a0d67bf7a19",
         "5bce6e6f8236",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / A place that was not read lists nothing, and an open place is always being read or read": [
         "e3b0c44298fc",
         "e3601ac8b498",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Browse my storage / A read under way ends": [
         "e3b0c44298fc",
@@ -9723,7 +9734,7 @@
       "Story: Browse my storage / Files can be unsupported, not yet allowed, denied, reading, unavailable, at the top, back at the top from a missing folder, in a category, in an empty folder, and inside a folder": [
         "e3b0c44298fc",
         "58caa290f6ac",
-        "02cead745cd2"
+        "b13b180a0ae7"
       ],
       "## Story: Arrange and filter what I see": [
         "e98ee0a6c6e0"
@@ -9750,22 +9761,22 @@
       "Story: Arrange and filter what I see / The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown": [
         "ffd7c7f61b22",
         "5b6d592d5521",
-        "513079115775"
+        "fe20c7f57a4a"
       ],
       "Story: Arrange and filter what I see / Filter results and an in-flight filter belong to the place showing": [
         "eef17448e83f",
         "11a163b335cc",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Arrange and filter what I see / The owner opens a file that is listed or found, with the names beside it, and Recent remembers it": [
         "863d63d29de9",
         "392a61bd8396",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Arrange and filter what I see / A filter can find nothing and find files, and follow the owner to another place": [
         "e3b0c44298fc",
         "c81a1123e59d",
-        "4165f442c611"
+        "d0930810080d"
       ],
       "## Story: Let the agent read my files": [
         "3cae3e444588"
@@ -9773,37 +9784,37 @@
       "Story: Let the agent read my files / An explicit request to open or filter Files may act directly on the same idle Files view": [
         "b02c57c2b317",
         "8b63e91103be",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Let the agent read my files / An exact Files request from another screen may open Files once after the typed reply finishes": [
         "0e1dbfde9509",
         "8450b63c5c55",
-        "9e5560cac291"
+        "9a6d3d976cad"
       ],
       "Story: Let the agent read my files / The agent reads a folder for itself, and only its newest reading is told to it; it is told it failed without access or on a protected screen": [
         "e8e895d24cee",
         "ce630e0bc94a",
-        "14f94a899f55"
+        "5ce3925dd778"
       ],
       "Story: Let the agent read my files / The agent sets the owner's filter on Files on screen, and is told how many it found; otherwise it is told it failed": [
         "28f54a918b36",
         "7f13d0806869",
-        "fcc15b25c969"
+        "f5d12da3beca"
       ],
       "Story: Let the agent read my files / An approved filter for a named folder goes to that folder before it searches": [
         "b0dd2e5ccbb5",
         "7259612c9f63",
-        "496d59fe1244"
+        "00554b275497"
       ],
       "Story: Let the agent read my files / The agent opens a file the owner is shown, as listed or found now, when no file is open over Files; otherwise it is told it failed": [
         "e8371233204a",
         "b94b9e83857b",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Let the agent read my files / A reviewed exact path opens its file or folder; a shown position is bound to the same path at review": [
         "c0b9f39f7b23",
         "06f3b0d51ccf",
-        "fa08fd34bc41"
+        "71c50a806711"
       ],
       "Story: Let the agent read my files / The phone offers Files to an agent that takes Files' operations, and naming files by their place among the results shown only beside them; a request the phone cannot take is never shown for approval": [
         "19d16730c975",
@@ -9817,12 +9828,12 @@
       "Story: Let the agent read my files / The agent's reading and opening change nothing the owner is working on": [
         "e3b0c44298fc",
         "26a71472662d",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Let the agent read my files / The agent can be refused, be told what it found, and set a filter": [
         "e3b0c44298fc",
         "40508bbc4bb6",
-        "4165f442c611"
+        "d0930810080d"
       ],
       "## Story: Change my files": [
         "b09af6bc00dc"
@@ -9834,77 +9845,77 @@
       "Story: Change my files / The owner selects items of the place showing, all of them, or none, and a changed selection closes the sheets, telling the owner a share sheet sent nothing, and voids the delete confirmation": [
         "94dd2d5e1b33",
         "9e53ab5a52af",
-        "b447c0b91395"
+        "b35146bb0b28"
       ],
       "Story: Change my files / Deleting shows what goes to the Trash, and only a confirmation of the selection as shown hands it over": [
         "e3b0c44298fc",
         "f5f3a62592de",
-        "0c075fec308c"
+        "022336b472c8"
       ],
       "Story: Change my files / A delete confirmation that still counts shows a selection": [
         "3929810d4ad3",
         "1e225bb296b9",
-        "36da8c82f88a"
+        "06ab09bf1bc7"
       ],
       "Story: Change my files / The owner opens the Move to sheet for the selection, at the folder showing, and goes through the volumes and folders in it": [
         "2fc68818d8aa",
         "1bdd84075f62",
-        "cc9164b19278"
+        "8390496fdd91"
       ],
       "Story: Change my files / A change starts from the selection, of the folder showing, into a destination only as the Move to sheet last read it, as Changes allows it": [
         "dd8637a402a9",
         "666c949f6cbd",
-        "eae3cd173096"
+        "444e6aed198f"
       ],
       "Story: Change my files / A new folder in the destination picker uses the parent as shown and opens the new folder in that picker": [
         "54bc6635eb1f",
         "2d37bcbf634b",
-        "b9da5917d56a"
+        "23fe7744f645"
       ],
       "Story: Change my files / The storage-backed preview prepares Move to or Trash for the exact file in its loaded folder": [
         "ac9196f7b91f",
         "3b4190138aa4",
-        "05abb536543d"
+        "e0613a79fbb7"
       ],
       "Story: Change my files / The owner renames the file open in the preview as a change of Files, to a name free among the names beside it": [
         "1d7abd3bb95f",
         "50544f1069cb",
-        "b9da5917d56a"
+        "23fe7744f645"
       ],
       "Story: Change my files / A change ends as its answer says, what a move took away is told, and the place is read again": [
         "e3b0c44298fc",
         "7ab266beb9d8",
-        "532c9c0e4f43"
+        "62902e9255e8"
       ],
       "Story: Change my files / One request leaves for each change, for items listed as they are now or the file shown, and only when the owner starts, chooses or renames it, or approved it": [
         "e3b0c44298fc",
         "eb8be60cfa96",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Change my files / The owner opens the share sheet for a selection of one to a hundred files and no folder while none is open, shares from it, and Android says whether it could open it": [
         "0567f1aaf9c7",
         "943239124d18",
-        "62a6148ff300"
+        "6fb4b0e8b33e"
       ],
       "Story: Change my files / An approved request runs only in Files on screen, in the folder the owner approved, on a screen that is not protected, and on the item as it was shown; otherwise the agent is told it did not run": [
         "727d6f363a06",
         "24b0595ee198",
-        "58f4f7cc3f0f"
+        "a782107afc4e"
       ],
       "Story: Change my files / An approved request acts on its own item alone, in the folder showing, and never while Files is away": [
         "e3b0c44298fc",
         "0ca3ee0d2cb9",
-        "3c06aa39e96d"
+        "5b7bd899b7ca"
       ],
       "Story: Change my files / A reviewed batch runs once for the paths shown in the review, as one move, Trash job or Android share": [
         "b27c1ccfd68f",
         "d90857746ccb",
-        "58f4f7cc3f0f"
+        "a782107afc4e"
       ],
       "Story: Change my files / An approved new folder is created once in the exact parent shown on the approval": [
         "72bc7247d8d3",
         "15038453db6d",
-        "7413735b5589"
+        "fe56452b243e"
       ],
       "Story: Change my files / The change Files holds keeps the rules of Changes": [
         "e3b0c44298fc",
@@ -9914,7 +9925,7 @@
       "Story: Change my files / A change can be under way, a move or a copy among them, a deletion can wait for confirmation, several items can be selected, and the Move to sheet can be ready": [
         "e3b0c44298fc",
         "38efbe3d6f94",
-        "0bd3d3e0d1b3"
+        "348b8612383a"
       ],
       "## Story: Come back after a restart": [
         "9f196bebebf7"
@@ -9922,7 +9933,7 @@
       "Story: Come back after a restart / A restart closes Files, keeps the access, the place, the layout and the sort, reports a change cut off as unknown, and tells the agent its waiting requests failed": [
         "633d9a2665fd",
         "71e3eaba88d8",
-        "572f5e216daa"
+        "bffd232cfaef"
       ],
       "Story: Come back after a restart / A restart can cut a change off": [
         "e3b0c44298fc",
@@ -9935,7 +9946,7 @@
         "1532c6a00728"
       ],
       "## Story: Look at a file": [
-        "4806a84cb09f"
+        "fe23f0cb9909"
       ],
       "Story: Look at a file / The preview holds the viewer showing, the file it shows and the names beside it, what was read of it, the page drawn, the handoff to Inbox under way and what it carries": [
         "3de91b955fe5",
@@ -10149,8 +10160,8 @@
         "899f3e1a6c15"
       ],
       "Story: Find what I opened lately / Access given up never comes back": [
-        "1599bafa252a",
-        "11a119904635",
+        "8507a81ed3f7",
+        "4809f3fe13b8",
         "899f3e1a6c15"
       ],
       "Story: Find what I opened lately / A file opened from a folder is given access, listed first in place of its older row, and is the document open; the oldest row leaves a full list": [
@@ -10648,13 +10659,13 @@
       ],
       "Story: Delete into the Trash / A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown": [
         "baee89739fe8",
-        "9f86fed91079",
+        "c2770bb1b061",
         "6bca846537d2"
       ],
       "Story: Delete into the Trash / Only items the phone confirmed are reported done, and only items the job asked about": [
         "e3b0c44298fc",
         "036e4752e74c",
-        "078eac226e4f"
+        "00dc96ef62e8"
       ],
       "Story: Delete into the Trash / One job leaves at a time, under the following number, and only when the Trash was free or a job just ended": [
         "e3b0c44298fc",
@@ -10715,8 +10726,8 @@
         "ffa827ea5f10"
       ],
       "Story: See what is in the Trash / A job and a read of the list never run together": [
-        "e3b0c44298fc",
-        "c3a5e9aa8e7c",
+        "ec57ea87735d",
+        "ddfb917ed480",
         "ffa827ea5f10"
       ],
       "Story: See what is in the Trash / A list that could not be read shows nothing": [
@@ -12714,7 +12725,7 @@
         "add1610f9048"
       ],
       "Story: Keep the drafts the earlier Alpha kept / An earlier operation that never left the phone is dropped; a send whose receipt says it went marks its draft sent, one refused leaves it unsent, and any other leaves it marked as possibly sent": [
-        "2cf1eac99b27",
+        "180b9595569d",
         "d60c7591dd18",
         "4638cf14b63c"
       ],
@@ -13437,7 +13448,7 @@
         "1265f88844ad"
       ],
       "Story: Start over / Each operation takes a new number and names its account and what it acts on, and a review open is of an operation of this session not yet recorded": [
-        "e3b0c44298fc",
+        "8de7d6e0399a",
         "a5a7fde394a8",
         "c30b3124a0d1"
       ]
@@ -13511,7 +13522,7 @@
       ],
       "Story: Let my agent bring Maps forward only when I can see it / Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds": [
         "be889f7433cd",
-        "fd3329c9e275",
+        "6b75410754a6",
         "8b0164ac8854"
       ],
       "Story: Let my agent bring Maps forward only when I can see it / A waiting request and a pending open each account for an unanswered request or open": [
@@ -13545,7 +13556,7 @@
       ],
       "Story: Answer my agent's Maps question with one tap / A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again": [
         "e3b0c44298fc",
-        "d8f43a1d2100",
+        "6c674470c723",
         "b7d2bc729db2"
       ],
       "Story: Answer my agent's Maps question with one tap / A message in flight has not been delivered yet": [
@@ -13782,7 +13793,7 @@
       ],
       "Story: Serve Maps through my cloud account / Opening Maps, regaining the network or Retry reads the coverage again only when no provider is working": [
         "4fcc1bfac789",
-        "f6820a104bd1",
+        "e02b78c7f593",
         "73613f69331d"
       ],
       "Story: Serve Maps through my cloud account / Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account": [
@@ -13990,7 +14001,7 @@
       ],
       "Story: Carry my agent's Maps requests to the phone once / The relay belongs to the last accepted turn, and only that turn's end clears it": [
         "ce4c94d3c293",
-        "5f52201d60dd",
+        "abd29fab7227",
         "3aaa5263d130"
       ],
       "Story: Carry my agent's Maps requests to the phone once / An accepted turn is never negative and never ahead of the latest offer": [
@@ -14000,7 +14011,7 @@
       ],
       "Story: Carry my agent's Maps requests to the phone once / A navigation effect runs only under a returned claim, and a redelivery never runs it twice": [
         "c7dd0fc86ec8",
-        "841fae61d7bb",
+        "1d3aae3694e4",
         "3aaa5263d130"
       ],
       "Story: Carry my agent's Maps requests to the phone once / A claimed navigation holds a positive claim id": [
@@ -14077,52 +14088,52 @@
       "Story: Move between the screen's modes / The screen holds its connection, its trip, the search, the place on the card, the directions sheet, the saved places, the Calendar event it came from, the agent's question and the agent's last read": [
         "7158a9f95ec5",
         "c7305871169d",
-        "82304033cb09"
+        "de2aa6c4bb6c"
       ],
       "Story: Move between the screen's modes / What the phone is asked to do outside": [
         "e3b0c44298fc",
         "88607f50a4a8",
-        "0eee47127da7"
+        "ec6a13f179e1"
       ],
       "Story: Move between the screen's modes / The mode is navigating while there is guidance, else directions, a place, search, or browsing": [
         "e3b0c44298fc",
         "fd69422aa69c",
-        "d69322bab48c"
+        "28d9fc99596e"
       ],
       "Story: Move between the screen's modes / Choosing another place shows its card, forgets the old place's route and voids the agent's question": [
         "e3b0c44298fc",
         "5a0eaceb308e",
-        "6cf220b76d88"
+        "44d0a23332c0"
       ],
       "Story: Move between the screen's modes / Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map": [
         "9456ce7769d1",
         "cc0253d808e6",
-        "81697b5b9deb"
+        "344b01909ace"
       ],
       "Story: Move between the screen's modes / Back never leaves more than one mode": [
         "e3b0c44298fc",
         "4abbd050533c",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Move between the screen's modes / The sheet can be raised or lowered in search, on a place and on directions": [
         "807f48433fa4",
         "4573a0e747d1",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Move between the screen's modes / Directions are always for the place on the card, and a route always belongs to it": [
         "e3b0c44298fc",
         "ec586ebbc4de",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Move between the screen's modes / The card shows a place of the map, or none": [
         "6eeb7f962798",
-        "297ff6047779",
-        "690b253d1e31"
+        "bb2711dc8668",
+        "7b0dac15d292"
       ],
       "Story: Move between the screen's modes / Navigation always shows its directions": [
         "e3b0c44298fc",
         "4a982b478a82",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Search for a place": [
         "4a054304e7a0"
@@ -14130,67 +14141,67 @@
       "Story: Search for a place / The search opens from the map, and a search waits for a provider, which it asks for, and is sent once one works": [
         "a616eaf2bc86",
         "e0e6080d17fe",
-        "4c7e1fc13b12"
+        "d570fdb60f99"
       ],
       "Story: Search for a place / Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once": [
         "81271bf9e040",
         "42d88c70292e",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / Only the newest search's answer is shown: results, none, or a failure": [
         "e3b0c44298fc",
         "fcb4320a3c72",
-        "18345bd2c204"
+        "b4b498c90fe4"
       ],
       "Story: Search for a place / Recent searches are the last five, newest first, each once": [
         "422e19fdd354",
         "efebe280db64",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / The owner's Clear and another account forget the recent searches": [
         "e3b0c44298fc",
         "2d8664425353",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / Coordinates typed into Search drop a pin": [
         "b69a8bc7bec7",
         "52cec26e1685",
-        "fd93840e4260"
+        "107f19f2de77"
       ],
       "Story: Search for a place / A finger held still on the map for half a second drops a pin there, never during guidance": [
         "a1a85087fa47",
         "6bb03f7b2f4d",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / A secondary click, or a menu opened with no finger down, drops a pin there at once": [
         "1f8a694b81f6",
         "9f67cd6495a5",
-        "d1374e7769be"
+        "a3c09c3aa0d1"
       ],
       "Story: Search for a place / A query another app hands to Maps opens as a search, never over navigation": [
         "66f94fd40d58",
         "a929373b1155",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / Results answer the query typed, in an open search": [
         "e3b0c44298fc",
         "8455badadd52",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / A result opens its place": [
         "e3b0c44298fc",
         "6dbb1779cd26",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / A search can find nothing": [
         "e3b0c44298fc",
         "4538ef92e26c",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Search for a place / A search can fail": [
         "e3b0c44298fc",
         "ba3b6a6ee241",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Look at a place": [
         "bbdc2ba3a06c"
@@ -14198,62 +14209,62 @@
       "Story: Look at a place / The place on the card is saved under a name, renamed under another, or forgotten": [
         "84e0e38de1fa",
         "3fe61bb5333c",
-        "4a7370f8125b"
+        "c04a5f9a65cc"
       ],
       "Story: Look at a place / A saved place is renamed in a name field the owner opens on its card": [
         "1c9bd0cf6d74",
         "90fbd082d35f",
-        "6819f5ab7e91"
+        "e32a37affaf2"
       ],
       "Story: Look at a place / Saved places open from the map or the search": [
         "e3b0c44298fc",
         "9ee51ba83af1",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Look at a place / Saved places are kept on the phone, and are what survives a restart": [
         "f80cdab01742",
         "a518b2a8e3a8",
-        "f8dba573f0d8"
+        "5c663eeb02c1"
       ],
       "Story: Look at a place / A list this version never wrote takes the previous Alpha's places once, and keeps them": [
         "cc5b6ca3cde0",
         "7e3ec76193ac",
-        "09be038db3bc"
+        "3edf039bb396"
       ],
       "Story: Look at a place / A saved list that cannot be read is never written over, and a change is told only once it reads back": [
         "03a8432d0f30",
         "4c21bf246661",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Look at a place / Every saved place is saved once and has a name": [
         "e3b0c44298fc",
         "689a46587ca7",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Look at a place / The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app": [
         "a62345badf05",
         "8d1ab1ed98bc",
-        "6819f5ab7e91"
+        "e32a37affaf2"
       ],
       "Story: Look at a place / A copied number is told: \"Number copied\" or \"Couldn't copy\"": [
         "e3b0c44298fc",
         "cd74181df290",
-        "6819f5ab7e91"
+        "e32a37affaf2"
       ],
       "Story: Look at a place / A place's details are read from its provider once it is on the card, and shown only while it still is": [
         "a05efbead0b7",
         "c2ed7f559691",
-        "18345bd2c204"
+        "b4b498c90fe4"
       ],
       "Story: Look at a place / A place outside every region the provider covers keeps its coordinates and says so": [
         "55aef55c7d83",
         "0fffa25db324",
-        "17d837d37605"
+        "27ae8a15db91"
       ],
       "Story: Look at a place / A saved place can be on the card": [
         "e3b0c44298fc",
         "a6d699781380",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Get directions": [
         "06f452304e59"
@@ -14261,52 +14272,52 @@
       "Story: Get directions / Directions open from a place's card with a provider working, once its details are verified, and start from the phone when location is allowed": [
         "978ababb1ee5",
         "c263c75fb739",
-        "061935e82a79"
+        "e7616b133f59"
       ],
       "Story: Get directions / A route is asked from coordinates or another place, which ends a pending \"Use my location\"": [
         "29b3d608e134",
         "801452ce4123",
-        "2d5a5e4e0142"
+        "564c325e9781"
       ],
       "Story: Get directions / Directions are asked for a way of travelling the provider offers, and another way asks again from the same start": [
         "e3b0c44298fc",
         "f6694bfb9380",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Get directions / The route's answer is the trip's, and a new route is put to the owner when the agent proposed it": [
         "d8ee1fbc7741",
         "a856cff572a2",
-        "4e619cb3c363"
+        "f4a4cb1600a0"
       ],
       "Story: Get directions / The provider's routes are listed in order, and choosing one shows it and sends no new request": [
         "34171c4b6c7e",
         "6d9c9a6f0e88",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Get directions / Routes are asked for the place on screen, under the trip's newest ticket": [
         "e3b0c44298fc",
         "a235bed55bd4",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Get directions / Directions and their route need the provider they came from": [
         "e3b0c44298fc",
         "9eb93d7dff8e",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Get directions / A route can come from my location": [
         "e3b0c44298fc",
         "92c75fb10765",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Get directions / A starting point can be a place found by its name, around the phone or the last start": [
         "5e8bf56f1aa1",
         "3993fed48212",
-        "18345bd2c204"
+        "b4b498c90fe4"
       ],
       "Story: Get directions / Swapping the ends keeps each end's place and plans the reverse route": [
         "d254da4cf6c9",
         "053b436d923b",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Navigate": [
         "cd8a009d273f"
@@ -14314,138 +14325,138 @@
       "Story: Navigate / Start guides along the route shown, with location allowed": [
         "644123e3bb47",
         "3190e7eed03f",
-        "191097874aaf"
+        "0626e6a47163"
       ],
       "Story: Navigate / Guidance follows the phone until the owner moves the map, and Recenter follows it again": [
         "7c0df031a886",
         "f36275702f8a",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / Arriving with Maps away is told once on the phone": [
         "1f8ec828dac3",
         "c2d1dfd021e0",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / The phone guides with the screen off only for the journey that just started": [
         "e3b0c44298fc",
         "49dc3cad806c",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / End stops guidance and its location and goes back to the directions": [
         "e3b0c44298fc",
         "6b9aad168bf1",
-        "6b5a315501cb"
+        "78f902062ce6"
       ],
       "Story: Navigate / A fix goes to whoever holds the location": [
         "130b8b37dac7",
         "499b3bda403b",
-        "6cd4216a9365"
+        "b2f16d74d288"
       ],
       "Story: Navigate / \"Use my location\" without a fix in 15 seconds stops locating, and says so unless it was the quiet fix on opening": [
         "d1920506d76a",
         "e2ee84aedf04",
-        "f604153d865c"
+        "7f1e2fd70f05"
       ],
       "Story: Navigate / Losing the location ends what held it": [
         "e3b0c44298fc",
         "ff76a6c12fd7",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / Guidance holds the location session while it guides, and nothing else does": [
         "e3b0c44298fc",
         "976fd4743fd6",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / Only the owner, the road or Android ends guidance; a reconnect never does": [
         "9555bb5d5b78",
         "99242cf7047a",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / Guidance starts only by the owner's Start or the owner's approval": [
         "e3b0c44298fc",
         "6fc20ed4381e",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / The screen can navigate": [
         "e3b0c44298fc",
         "09e757398c45",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / The screen can show the arrival": [
         "e3b0c44298fc",
         "c9ea6e55b14b",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Navigate / Guidance can wait for a reroute": [
         "e3b0c44298fc",
         "32343573b59f",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Keep guiding away from Maps": [
         "3843f9e231d3"
       ],
       "Story: Keep guiding away from Maps / Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end": [
         "f1eb27586be0",
-        "4a3d528d3f21",
-        "195fe0a1441b"
+        "6ebc03b78f8b",
+        "596a1762e55d"
       ],
       "Story: Keep guiding away from Maps / Android confirms or loses the service of this journey": [
         "e3b0c44298fc",
         "ba5851d5bbc2",
-        "c1f1641361c0"
+        "cdc9550e466b"
       ],
       "Story: Keep guiding away from Maps / The notification of this journey opens Maps on its guidance, or stops it": [
         "51ea75b786dd",
         "e589f054098a",
-        "6367db689ea7"
+        "9925ff207b24"
       ],
       "Story: Keep guiding away from Maps / The owner is told why guidance ended when it was not by their own End": [
         "e313c41d6bbf",
         "f7310f96e109",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Keep guiding away from Maps / Guidance speaks the newest instruction with Maps on screen, once, and the instruction owed on coming back": [
         "922039bdb7ff",
         "7dbe761e0151",
-        "c7a87cc67740"
+        "14ae35e510ee"
       ],
       "Story: Keep guiding away from Maps / Guidance can go on with Maps away": [
         "e3b0c44298fc",
         "6c75a7d32c41",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Connect through my cloud account": [
         "9a34176c7919"
       ],
       "Story: Connect through my cloud account / Another account retires the trip, the search and the place, and reads the new account's coverage": [
         "e3b0c44298fc",
-        "110e5d3c4b29",
-        "03fcf54968b6"
+        "4662481777a7",
+        "d5b02db2ce0a"
       ],
       "Story: Connect through my cloud account / Another account hides every route, place and search of the last one, and ends its guidance": [
         "743df89db4d5",
         "d97a16bf18cf",
-        "514945088efa"
+        "67fd9f05924e"
       ],
       "Story: Connect through my cloud account / Opening Maps, the network returning or Retry reads the coverage when no provider works, and leaves a working one alone": [
         "0bc4dabc53c2",
-        "318f2a4dc8be",
-        "78c1a272c81a"
+        "0602c64f8182",
+        "4ea3297986b4"
       ],
       "Story: Connect through my cloud account / Cloud's wait holds the screen's requests until it ends, and its end lets them go again": [
         "e3b0c44298fc",
-        "d15402c41c8c",
-        "690b253d1e31"
+        "23113ab6590d",
+        "7b0dac15d292"
       ],
       "Story: Connect through my cloud account / The map surface says whether it was drawn, and Retry draws it again": [
         "e3b0c44298fc",
         "c103da6ecc97",
-        "6ff1bcf6fc7f"
+        "708ed282e097"
       ],
       "Story: Connect through my cloud account / The map can be broken while guiding": [
         "e3b0c44298fc",
         "0f2071be9ca3",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Use my location": [
         "d4a7c82c66ff"
@@ -14453,37 +14464,37 @@
       "Story: Use my location / Maps opens without the disclosure, and the owner's tap for their location shows it": [
         "dcd6f9fc636a",
         "74fe16f82b5a",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Use my location / Continuing past the disclosure asks Android, once, and then locates": [
         "c8904c6f0a5c",
         "fbd9de7a238b",
-        "c3547d2792df"
+        "e2ece94a5e3d"
       ],
       "Story: Use my location / \"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings": [
         "9d73fd83c6aa",
         "702409bce0c9",
-        "932db52a6643"
+        "5c9f2f8e8329"
       ],
       "Story: Use my location / Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit": [
         "72de6f6897ad",
         "fd82906c2c1c",
-        "061935e82a79"
+        "e7616b133f59"
       ],
       "Story: Use my location / Settings opens only once Android has said no": [
         "e3b0c44298fc",
         "cdb62a84b73e",
-        "2cf963e8b3bb"
+        "bed08972b483"
       ],
       "Story: Use my location / What Android reports about location is taken at once; guidance without it ends": [
         "e3b0c44298fc",
-        "2590081fd5ca",
-        "64d804008cbe"
+        "c8b87a87fb2f",
+        "dd764364d0e9"
       ],
       "Story: Use my location / Location can be refused, with Settings the way back": [
         "e3b0c44298fc",
         "ad2cc9f2de04",
-        "2cf963e8b3bb"
+        "bed08972b483"
       ],
       "## Story: Come from a Calendar event": [
         "c35aed498cca"
@@ -14491,17 +14502,17 @@
       "Story: Come from a Calendar event / An event's place opens on its card once Maps is on screen, never over navigation, and Maps remembers the event": [
         "7346398ed53f",
         "f17e5656a115",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Come from a Calendar event / Back to the event opens the event Maps came from, once, and not while navigating": [
         "e3b0c44298fc",
         "618276b83d93",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Come from a Calendar event / The way back to an event can be offered on its place": [
         "e3b0c44298fc",
         "fe0ecf22bf58",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "## Story: Let the agent help with Maps": [
         "252a1ffcf59e"
@@ -14509,82 +14520,82 @@
       "Story: Let the agent help with Maps / The agent's search shows its cards in the conversation and leaves the screen alone": [
         "e3b0c44298fc",
         "736cfc273cb3",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / A map card in the conversation opens its place on the phone's map once Maps is on screen, never over navigation": [
         "7346398ed53f",
         "dea1eba34ddb",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / While Maps is in front the agent is told what it shows, a place, a route or a search, by a handle that names it on this phone only": [
         "4c7a39454a28",
         "f491602d89f1",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / The agent may propose a route to a place from coordinates, another place or the phone, which is put to the owner when it arrives": [
         "c1552f61dea9",
         "7bf99dee6ad3",
-        "061935e82a79"
+        "e7616b133f59"
       ],
       "Story: Let the agent help with Maps / The agent may reroute the guidance the owner started, from a fix that can guide when the reroute is sent, or stop it": [
         "c606dba98f14",
         "06ff105a65b1",
-        "1645be5076bb"
+        "b4a44f22c595"
       ],
       "Story: Let the agent help with Maps / The agent may ask to read the place on the card, which is put to the owner once its last read has ended": [
         "7961ca71a2c2",
         "8f6bc843f489",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / Approving hands the agent the place shown, as a read sent once under its question's number, or starts guidance on the route shown": [
         "e3b0c44298fc",
         "b3f104a7b996",
-        "03cdaa0efe1e"
+        "0e70e5814da3"
       ],
       "Story: Let the agent help with Maps / The agent is told how its read ended: delivered, refused, or unknown when no answer can be trusted": [
         "3b7cceddae6a",
         "0beb66bfb021",
-        "8a86ab8d29c1"
+        "d648dede4206"
       ],
       "Story: Let the agent help with Maps / A read belongs to a question already asked, and a question still open has not been read": [
         "6cb0b769201e",
         "10505119ce09",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / Each read is sent once, under the number of the question it answers": [
         "e3b0c44298fc",
         "efce1c851f17",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / A read's outcome can be unknown": [
         "e3b0c44298fc",
         "6ff80199616a",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / A question is about the place or route on screen": [
         "e3b0c44298fc",
         "e314c95ddb26",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / A change to the place or route voids the owner's earlier sight of it": [
         "e3b0c44298fc",
         "5d7a26c434ea",
-        "690b253d1e31"
+        "7b0dac15d292"
       ],
       "Story: Let the agent help with Maps / No place reaches the agent without the owner's approval of that place": [
         "159a86a6573e",
         "57712782bbf2",
-        "c4d5ebe5c204"
+        "e9fee291555f"
       ],
       "Story: Let the agent help with Maps / The agent's route can await the owner's approval": [
         "e3b0c44298fc",
         "1f4422a7f22f",
-        "c4d5ebe5c204"
+        "e9fee291555f"
       ],
       "Story: Let the agent help with Maps / The agent's request to read a place can await the owner": [
         "e3b0c44298fc",
         "593435691299",
-        "c4d5ebe5c204"
+        "e9fee291555f"
       ],
       "## Story: Keep the trip's and the connection's rules": [
         "9fbc07ab48fe"
@@ -14592,12 +14603,12 @@
       "Story: Keep the trip's and the connection's rules / The trip keeps every rule of navigation": [
         "e3b0c44298fc",
         "3080b7358ebc",
-        "d7f6f59195b2"
+        "ffa0dc1f752c"
       ],
       "Story: Keep the trip's and the connection's rules / The connection keeps every rule of its own": [
         "e3b0c44298fc",
         "d3ae69807c0f",
-        "615f1fcaff25"
+        "a857854e8f36"
       ]
     },
     "spec/app/messages/sending.md": {
@@ -15391,14 +15402,14 @@
         "5d4a36d28fec"
       ],
       "Story: Write a note / The editor holds the owner, the note it is writing, its kind, its draft, the number of its last request, and the source the note links to": [
-        "e548707a2e29",
-        "998ba252314c",
+        "13f021e8a344",
+        "7927e1f755eb",
         "895f9980ad04"
       ],
       "Story: Write a note / What the editor asks of the world": [
         "59d3f303a37e",
         "a1a4b07954f6",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / What the simulator tries": [
         "e3b0c44298fc",
@@ -15407,148 +15418,158 @@
       "Story: Write a note / The owner opens a note, or starts a new one, and the agent opens the one note the owner just named, only when no unsaved draft waits and nothing else of Notes is open; the agent's note may take the place of a saved one": [
         "13c28754dee5",
         "cdcac66f6844",
-        "0c23adbf4df9"
+        "aa04eb6683e4"
       ],
       "Story: Write a note / The owner reopens the draft that waits, a new note's too": [
         "d2c5f4bbef12",
         "5fe953656faf",
-        "be0d7a23dfdc"
+        "bc5c6ca95b0d"
       ],
       "Story: Write a note / The owner types, adds or ticks an item, and each change is kept on the phone at once": [
         "1a284bebd432",
         "b5f1e7cfcb1a",
-        "f843932288a7"
+        "e62c74bd3914"
       ],
       "Story: Write a note / A save carries the revision the draft builds on, its creation number and folder, and only one save runs at a time": [
         "5fa26867d960",
         "c98f0ec9e760",
-        "c86405267db1"
+        "97808e9a1374"
       ],
       "Story: Write a note / A save lands, finds a newer revision, finds the note deleted, or fails, and only the phone's answer to the last save counts": [
         "a6090ed41448",
-        "2ca56b7b99c5",
-        "52d3d88e679d"
+        "76fae7f3e41d",
+        "24407bd47d59"
       ],
       "Story: Write a note / When a save found a newer revision, only the owner chooses whose to keep": [
         "10f107df8291",
         "4d2a69862961",
-        "7711b8f5aecf"
+        "51f3364771bf"
       ],
       "Story: Write a note / When the note was deleted meanwhile, only the owner keeps the draft as a new note or discards it": [
         "95fb33ab2e59",
         "fd5254970f12",
-        "7711b8f5aecf"
+        "51f3364771bf"
       ],
       "Story: Write a note / A new note has a creation number and no number, and never meets a conflict": [
         "e3b0c44298fc",
         "632e112b9583",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / The store says the open note changed or was removed: a note with no unsaved edits follows it, and a draft keeps its revision so its next save meets the change": [
-        "19965d9e7bf4",
-        "9c0f740d9c0a",
-        "18a987e58e65"
+        "aab0235200e7",
+        "fe1529fd4705",
+        "8d07682e21e1"
       ],
       "Story: Write a note / The revision a draft builds on never goes back while the same note is held": [
         "baf78cc5e6ee",
         "ac3eec57d132",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / Closing the editor keeps an unsaved draft for later, and lets go of a saved one": [
-        "ecb2692fae51",
-        "bfe50d714d12",
-        "559cf27c0276"
+        "25f2053c3a13",
+        "8db30314f9f0",
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / Only the owner discards an unsaved draft, or a new note open in the editor, and never one being saved": [
         "114dd75266fe",
         "355e5d63c0b1",
-        "18a987e58e65"
+        "8d07682e21e1"
       ],
       "Story: Write a note / A save in flight carries the draft's revision, creation number and folder, for the owner it was written by, and is the next save": [
         "5c3951198e95",
         "8130f69b3124",
-        "7173b00aa41d"
+        "198d0b6e38c5"
       ],
       "Story: Write a note / A new note keeps its creation number until it is saved": [
         "e3b0c44298fc",
         "2e21eb42b485",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / A conflict is settled only by the owner's choice, by discarding or dropping the draft, or by another owner taking the phone": [
         "e3b0c44298fc",
         "d7f6d14ac251",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / Unsaved edits leave the editor only by the owner's choice, or for the phone to keep for their owner": [
         "24c14924c348",
         "19d21fe22e95",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / An unsaved draft always belongs to a note of an owner": [
         "e3b0c44298fc",
         "ad051e26c2ce",
-        "cbdbf886746e"
+        "556c526effa3"
       ],
       "Story: Write a note / Only a text note or a checklist is written here, linked to a document or a page at most": [
         "46771741d5b8",
         "5ac7cfb45ed7",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / A save being made ends": [
         "e3b0c44298fc",
         "091e6d90502f",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / A note can be saved, followed to a change made elsewhere, fail and keep the draft, meet a conflict, be found deleted, and be made in a folder": [
         "e3b0c44298fc",
         "0144d6096e25",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Write a note / More over a new note offers Share, Pin and Delete, as v119's did": [
         "ee1df4f4cbe4",
-        "c9f3c903043f",
-        "64cbf5ac6a1a"
+        "f9b5b46ad9fa",
+        "1d0353781083"
+      ],
+      "Story: Write a note / More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did": [
+        "b62a211f3e38",
+        "79cacb463ce0",
+        "0b4b8396356c"
+      ],
+      "Story: Write a note / Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did": [
+        "88b70d12aaba",
+        "c155474dee54",
+        "ec40b7b68493"
       ],
       "## Story: Delete the note I am writing": [
         "f9f232eb15eb"
       ],
       "Story: Delete the note I am writing / Only the owner deletes the open note, only once everything typed is saved and no save is on its way, and only when Recently deleted can take it": [
         "eb076e673972",
-        "deeba8e113ae",
-        "87c2f6510145"
+        "01742f39f260",
+        "c140318fe4cc"
       ],
       "Story: Delete the note I am writing / A deletion ends as Recently deleted answers: the note closes once it is there, and otherwise stays open and says it was refused, could not be told, or found no room": [
         "796fb4ddc3fd",
         "15137d82ef5a",
-        "18a987e58e65"
+        "8d07682e21e1"
       ],
       "Story: Delete the note I am writing / A note is deleted only when nothing of it is unsaved or being saved, at the revision saved, and stays open until Recently deleted answers": [
         "e3b0c44298fc",
         "da7b2155a8ba",
-        "6c820adf1f47"
+        "983776c3bf73"
       ],
       "Story: Delete the note I am writing / A deletion can be under way, refused, unknown, and find Recently deleted full, with the note still open": [
         "e3b0c44298fc",
         "5f5a16654892",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "## Story: Keep my draft through a restart": [
         "54e84449cd4a"
       ],
       "Story: Keep my draft through a restart / Only the phone restarts the editor: a restart keeps the draft, and a save cut off is saved again over the same revision": [
         "1b9e2a0a8c1b",
-        "a9544c5dff01",
-        "18a987e58e65"
+        "397067028337",
+        "8d07682e21e1"
       ],
       "Story: Keep my draft through a restart / A draft that could not be read back is saved out as a file through import and export, and dropped only after that or when the owner confirms losing it": [
         "cbbd778a8f37",
         "61daaa65a540",
-        "18a987e58e65"
+        "8d07682e21e1"
       ],
       "Story: Keep my draft through a restart / A draft can wait to be recovered, a new note's too, be unreadable, saved out, and asked about before it is dropped": [
         "e3b0c44298fc",
         "7d03bb1c9461",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "## Story: Another owner never sees my draft": [
         "d5ce70f503f6"
@@ -15556,22 +15577,22 @@
       "Story: Another owner never sees my draft / When another owner takes the phone, the editor lets go of everything, and the phone keeps the draft it stored for its owner": [
         "389e028caacf",
         "4cebb62c3e91",
-        "18a987e58e65"
+        "8d07682e21e1"
       ],
       "Story: Another owner never sees my draft / The phone offers an owner the draft it kept for them": [
         "5bf1f50d0be5",
         "d4b794abc227",
-        "0f3a75db53c0"
+        "7a67622241ba"
       ],
       "Story: Another owner never sees my draft / No answer to a save or a deletion is taken after a restart or once another owner has the phone": [
         "e3b0c44298fc",
         "1235473927cb",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "Story: Another owner never sees my draft / A draft kept for its owner can come back": [
         "e3b0c44298fc",
         "0c8d474ad408",
-        "559cf27c0276"
+        "7bf2acd4c9be"
       ],
       "## Story: Leave the editor": [
         "738a03f9cb53"
@@ -15579,7 +15600,7 @@
       "Story: Leave the editor / Back closes the note; leaving Notes closes it too, lets go of a note on its way to Recently deleted, and an unsaved draft waits": [
         "e3b0c44298fc",
         "ea3829f272eb",
-        "742d820a4579"
+        "dd86d0a97556"
       ]
     },
     "spec/app/notes/index.md": {
@@ -16953,7 +16974,7 @@
       ],
       "Story: Finish deleting a voice note for good / A canonical pending receipt can be taken up in this run": [
         "1988a51fc216",
-        "dbdb17df5c3d",
+        "3435630e255b",
         "5a42d7a3c2aa"
       ],
       "Story: Finish deleting a voice note for good / The phone claims the row only when no other process holds its lease, and then looks at what is there": [
@@ -16998,8 +17019,8 @@
       ],
       "Story: Finish deleting a voice note for good / A row can be finished by the phone, left for the owner, settled by the owner, and end unknown": [
         "e3b0c44298fc",
-        "b412dc4f2afc",
-        "652fea261515"
+        "3a53a0634c1b",
+        "3d79cdd7b0a5"
       ],
       "## Story: Restart, and another owner": [
         "87d4515782b8"
@@ -19239,7 +19260,7 @@
       ],
       "Domain / What the simulator tries": [
         "e3b0c44298fc",
-        "f0a2ddfeafb9",
+        "d659c763143d",
         "20e523b43696"
       ],
       "## Story: Choose an image in the browser": [
@@ -19371,7 +19392,7 @@
       ],
       "Story: Browse the library / The grid can hold more than one page": [
         "e3b0c44298fc",
-        "a869a6679be4",
+        "aee0c598713c",
         "93f26d07a331"
       ],
       "## Story: Look at what I just took on the lock screen": [
@@ -19667,7 +19688,7 @@
         "061e671d83b1"
       ],
       "## Story: Look at a photo or video": [
-        "89dcfa4d61b6"
+        "921b3474479e"
       ],
       "Story: Look at a photo or video / An item opens from what Photos lists, and is read from the phone; from the lock screen only one of that session's captures opens": [
         "0938dc1af13e",
@@ -19877,7 +19898,7 @@
       ],
       "Story: Follow what my agent does on my screen / A feed is ready only when the phone confirms the id Alpha chose": [
         "d0c707d88cc9",
-        "d9f02f01b19c",
+        "bc628fc67265",
         "7bd36fc38904"
       ],
       "Story: Follow what my agent does on my screen / Only this feed's steps for this screen reach it, until it ends": [
@@ -19998,6 +20019,11 @@
       "Story: Keep my phone's state across restarts / A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh": [
         "203118d971a6",
         "621e9dcbe723"
+      ],
+      "Story: Keep my phone's state across restarts / A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it": [
+        "22221c0f2ceb",
+        "96fb9f088b7d",
+        "86dd1884b05b"
       ],
       "## Story: Ship only what this build allows": [
         "d5d42e4fb86a"
@@ -20668,7 +20694,7 @@
       ],
       "Story: Read what my carrier needs to activate a SIM / Identifiers are held only while the page shows them from a read that answered": [
         "e3b0c44298fc",
-        "260549795102",
+        "92452fc1f8e1",
         "798a2065e8ce"
       ],
       "Story: Read what my carrier needs to activate a SIM / The EID is its own read, asked by the owner after the identifiers and only on a phone with an eSIM, so it never delays them": [
@@ -23358,7 +23384,7 @@
       ],
       "Story: Keep my drafts through a rebuild / What the simulator tries": [
         "85e325cb0f4f",
-        "8b8662fa04aa"
+        "46dec9c927a9"
       ]
     },
     "spec/app/telegram/agent.md": {
@@ -23732,7 +23758,7 @@
         "ca99703c596b"
       ],
       "Story: Start again where Alpha left off / A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note": [
-        "3bae75bd28b6",
+        "4d87ff615418",
         "84e06bae7bfd",
         "8cb6087876ba"
       ],
@@ -23870,7 +23896,7 @@
       "Story: Install an update / An automatic update can wait to be tried again": [
         "e3b0c44298fc",
         "4880f06f3aa6",
-        "b2f316c515f5"
+        "f7075fbbe6d5"
       ],
       "Story: Install an update / Every check and every install ends, so Settings never waits on one for ever": [
         "b1a75d4a2173",
@@ -23930,7 +23956,7 @@
       ],
       "Story: Settings rows / What the simulator tries": [
         "e3b0c44298fc",
-        "e54e6a6e9edc",
+        "7a7447e4ed64",
         "92d1b4c66331"
       ]
     },
@@ -23976,7 +24002,7 @@
         "2795fea1d967",
         "bd960bdbfcfa"
       ],
-      "Story: Download the update / Every version an install targets is above the version it started from": [
+      "Story: Download the update / Every version an install targets is above the version it started from, with a download address": [
         "e3b0c44298fc",
         "6f51b717ac7a",
         "bd960bdbfcfa"
@@ -24527,7 +24553,7 @@
       ],
       "Story: Hold a spoken conversation / Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking": [
         "b93996b74545",
-        "0e29b3fe2c29",
+        "c55f068f5c67",
         "644773a3b037"
       ],
       "Story: Hold a spoken conversation / Talk started from the bar or the pill stays there with speech on the phone; with Cloud speech or while typing it brings up the sheet": [
@@ -24537,11 +24563,11 @@
       "Story: Hold a spoken conversation / Before audio first leaves the phone, the owner is shown what is sent and where, and decides": [
         "78e4bf136b02",
         "8925805f9c93",
-        "fbcf2db4a708"
+        "b11f44f76a71"
       ],
       "Story: Hold a spoken conversation / Android's answer to the prompt opens the microphone, or ends the start quietly when it was denied": [
         "31372e00fcae",
-        "86931ba9fd95",
+        "e1a38ae4865c",
         "bc61de5a45db"
       ],
       "Story: Hold a spoken conversation / The prompt hiding Alpha does not end a start that waits on it": [
@@ -24551,7 +24577,7 @@
       ],
       "Story: Hold a spoken conversation / The microphone opens for the current session only, and a microphone that cannot open fails the conversation": [
         "e3b0c44298fc",
-        "3cd86d084e87",
+        "54b25e12e8d6",
         "7f550a2fe9f5"
       ],
       "Story: Hold a spoken conversation / What the owner says is shown as it is heard": [
@@ -24560,12 +24586,12 @@
         "b657b0768f04"
       ],
       "Story: Hold a spoken conversation / When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": [
-        "e3b0c44298fc",
-        "7a87238282fd",
-        "d9c63804fabe"
+        "01ff879860c8",
+        "27b7593db90f",
+        "254c8033261c"
       ],
-      "Story: Hold a spoken conversation / What the owner said shows at once as their message, with Alpha's working dots under it, until the conversation records it": [
-        "51cbd4b4a6e2",
+      "Story: Hold a spoken conversation / What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it": [
+        "c39ba16882bd",
         "0b7b76e0ffbc",
         "d9c63804fabe"
       ],
@@ -24589,8 +24615,8 @@
         "d9c63804fabe"
       ],
       "Story: Hold a spoken conversation / A reply that needs the owner's review in chat keeps voice listening with the microphone open": [
-        "b51efccee92f",
-        "5c75149dcab7",
+        "e2fee94bdc64",
+        "035c2c11f951",
         "1ca9a2422770"
       ],
       "Story: Hold a spoken conversation / A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does": [
@@ -24684,12 +24710,12 @@
       "Story: Keep talking when speech fails / A network failure before Alpha has spoken moves the conversation to the phone at once, and the failed turn is not sent again": [
         "390056147cc7",
         "f55c4c8b3a21",
-        "ccb21044d2ec"
+        "ac27309ccaac"
       ],
       "Story: Keep talking when speech fails / A brief refusal is retried quietly after the server's wait, at most twice; a long wait or a third refusal ends voice calmly": [
         "97407b1c371b",
         "152b9c3b8f7b",
-        "fbcf2db4a708"
+        "b11f44f76a71"
       ],
       "## Story: Go where the conversation takes me": [
         "963776c9f60b"
@@ -25219,7 +25245,7 @@
       ],
       "Story: Open the run a notice names / The approval opens only if it still waits, for this owner, under the number tapped, before its deadline; otherwise the owner is told it is gone, another agent's, past its deadline, or could not be checked": [
         "e3b0c44298fc",
-        "6600253a23a2",
+        "b6a190b4564b",
         "c5616349888f"
       ],
       "Story: Open the run a notice names / A decision whose answer was lost is settled by reading the approval again": [
@@ -25298,7 +25324,7 @@
       ],
       "Story: See my automations / The list can be empty, failed, read only in part, and rows can have issues": [
         "e3b0c44298fc",
-        "16528f302b2e",
+        "a0219136b20f",
         "e997c7cadbdc"
       ],
       "## Story: Act on an automation": [
@@ -25336,12 +25362,12 @@
       ],
       "Story: Act on an automation / A change with no answer stays kept, locks the panel's changes, and is settled by the agent's record or let go by the owner once it was checked": [
         "2d42c793ddc8",
-        "455b45360d70",
+        "d1e21cb0f73d",
         "88fa1b4d7cd2"
       ],
       "Story: Act on an automation / One change is kept at a time, kept honestly, and a row holds only what the list said": [
         "886f49188095",
-        "958b9e0e5821",
+        "65eedda094ec",
         "7ae518a95584"
       ],
       "Story: Act on an automation / Only the owner's tap records the change shown, with confirmation for prompt power, removing, running, creating and editing": [
@@ -25356,7 +25382,7 @@
       ],
       "Story: Act on an automation / A removal can be settled by the list, an ended row reopened, a snooze asked, a run raced by another, and a lost run let go": [
         "e3b0c44298fc",
-        "d946f96e5a9f",
+        "8870949c3c52",
         "e997c7cadbdc"
       ],
       "## Story: Create or edit an automation on a schedule": [
@@ -25384,7 +25410,7 @@
       ],
       "Story: Create or edit an automation on a schedule / A custom schedule can be created, a workflow automation edited, and a schedule's zone differ from the phone's": [
         "e3b0c44298fc",
-        "008513614269",
+        "c6f33764e636",
         "6c794c0c37cf"
       ],
       "## Story: Keep automations through a restart and to their owner": [
@@ -25407,7 +25433,7 @@
       ],
       "Story: Keep automations through a restart and to their owner / A change can be recovered after a restart": [
         "e3b0c44298fc",
-        "cd73dfe76b66",
+        "b519250f7259",
         "e997c7cadbdc"
       ]
     },
@@ -25589,7 +25615,7 @@
       ],
       "Story: Save a workflow on the agent once / A save offered again is confirmed again and sent under its own number": [
         "e3b0c44298fc",
-        "40337408d822",
+        "1e7979a9b928",
         "d048e693dcd9"
       ],
       "Story: Save a workflow on the agent once / The draft is never edited while its save is kept, and a save is kept honestly": [
@@ -25609,7 +25635,7 @@
       ],
       "Story: Save a workflow on the agent once / A save can be applied, lost and found, offered again, or refused, and a saved workflow can be edited": [
         "e3b0c44298fc",
-        "b1e29dcf2c8e",
+        "244a9f2703bc",
         "356a3d9e4e7b"
       ],
       "## Story: Keep the builder to its owner and through a restart": [
@@ -25831,7 +25857,7 @@
       ],
       "Story: Have the agent draft a workflow / Steps drafted are always well shaped, and are held only while the prompt is open": [
         "e3b0c44298fc",
-        "bf00865a80c9",
+        "14cb578fc1b0",
         "4f2443d610bb"
       ],
       "Story: Have the agent draft a workflow / No draft is held while a generation is in flight": [
@@ -25950,7 +25976,7 @@
       ],
       "Story: Change a workflow / A change is kept honestly, names a version that was read, and is offered again only for the version it names": [
         "e3b0c44298fc",
-        "a92b24b5da6b",
+        "397b768bd98a",
         "f8b7980fca6d"
       ],
       "Story: Change a workflow / A review is shown only on the open workflow, once it has been read": [
@@ -26291,7 +26317,7 @@
       ],
       "Story: See a workflow's history / Each page adds to the runs shown, and more are offered only after a full page": [
         "67d169790cd8",
-        "8170f6f8fea0",
+        "6b38df9ea6a9",
         "c9bb36cce730"
       ],
       "Story: See a workflow's history / The history can be empty, fail, run to a second page, or be read for a removed workflow": [
@@ -26319,7 +26345,7 @@
       ],
       "Story: Read a run's sheet / An ended run's output is read aloud when there is some, until it ends or the owner stops it": [
         "e3b0c44298fc",
-        "e1df52529875",
+        "45d78e47fe6a",
         "7286d42e8daa"
       ],
       "Story: Read a run's sheet / Ask Alpha about a run hands the run to Ask Alpha": [
@@ -26334,7 +26360,7 @@
       ],
       "Story: Read a run's sheet / Speech is heard only for the open run's output, once it ended, and never without some to read": [
         "07df354e159e",
-        "8d29b1ecd88e",
+        "4988d0d973a2",
         "7286d42e8daa"
       ],
       "Story: Read a run's sheet / Each speech is asked once and silenced only while it is heard": [

@@ -71,14 +71,14 @@ export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { re
 }
 
 module legacy {
-  import { allowsTestMocks, replyTo } from "../platform/index.vibe"
+  import { allowsTestOrigin, replyTo } from "../platform/index.vibe"
 
   interface DraftPort extends EventTarget { postMessage(data: string): void }
   type Request = { kind: "read"; threadId: string | null }
     | { kind: "retire"; threadId: string | null; expected: string }
 
   export async function request(input: Request, signal: AbortSignal): Promise<unknown> {
-    if (typeof window === "undefined" || (!(import.meta.env.DEV || allowsTestMocks()) && (window.top !== window || window.location.origin !== "https://localhost"))) {
+    if (typeof window === "undefined" || (!allowsTestOrigin() && (window.top !== window || window.location.origin !== "https://localhost"))) {
       throw new Error("Installed Messages drafts are unavailable.")
     }
     const candidate = (window as Window & { alphaLegacySmsDrafts?: DraftPort }).alphaLegacySmsDrafts

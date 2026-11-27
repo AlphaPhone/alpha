@@ -18,7 +18,7 @@ afterEach(closeAll);
 const passwordMounts = () => only("home", "overlay", "notice");
 
 describe("passwords", () => {
-  it("pauses observation on sensitive pages, unlocks, adds, edits, deletes and auto-locks on timeout or background (spec/app/passwords/index.md, \"Story: Unlock my passwords\"; spec/app/passwords/index.md, \"Story: Add, change and delete a password\"; spec/app/passwords/entry.md, \"Story: Write a password entry\")", async () => {
+  it('pauses observation on sensitive pages, unlocks, adds, edits, deletes and auto-locks on timeout or background (spec/app/passwords/index.md, "Story: Unlock my passwords"; spec/app/passwords/index.md, "Story: Add, change and delete a password"; spec/app/passwords/entry.md, "Story: Write a password entry")', async () => {
     const world = scene();
     const { alpha } = await open(world, passwordMounts());
     const harness = passwordsHarness();
@@ -65,7 +65,7 @@ describe("passwords", () => {
     expect(document.documentElement.getAttribute("data-alpha-sensitive")).toBeNull();
   });
 
-  it("recovers a damaged vault only after explicit owner confirmation and checks backup v2 identity binding (spec/app/passwords/index.md, \"Story: Recover a damaged vault\")", async () => {
+  it('recovers a damaged vault only after explicit owner confirmation and checks backup v2 identity binding (spec/app/passwords/index.md, "Story: Recover a damaged vault")', async () => {
     const world = scene();
     const { alpha } = await open(world, passwordMounts());
     const harness = passwordsHarness();
@@ -91,7 +91,7 @@ describe("passwords", () => {
     expect(harness.savedSecrets.size).toBe(0);
   });
 
-  it("offers Android autofill settings and fills a password strictly for the focused Browser origin (spec/app/passwords/index.md, \"Story: Fill passwords in\")", async () => {
+  it('offers Android autofill settings and fills a password strictly for the focused Browser origin (spec/app/passwords/index.md, "Story: Fill passwords in")', async () => {
     const world = scene();
     const { alpha } = await open(world, passwordMounts());
     const harness = passwordsHarness();

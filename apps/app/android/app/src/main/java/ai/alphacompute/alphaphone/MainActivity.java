@@ -43,6 +43,7 @@ public class MainActivity extends BridgeActivity {
  private volatile boolean windowFocused;
  private volatile boolean tornDown;
  private final AtomicLong composerVisit = new AtomicLong();
+ private final NavigationOpenRequest navigationOpen = new NavigationOpenRequest();
  private InsetsState insets;
  private volatile TextAsk textAsk;
  private int closedTextAsk;
@@ -141,8 +142,14 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (receiveTextAsk(incoming) || receiveSmsDraft(incoming)) setIntent(new Intent(this, MainActivity.class));
+  if (incoming != null && AlphaNavigationService.ACTION_SHOW_MAPS.equals(incoming.getAction())) {
+   navigationOpen.offer(android.os.SystemClock.elapsedRealtime());
+  }
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
-  if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
+  if (isHome(getIntent())) {
+   SmsNoticeOpenRequest.clear();
+   navigationOpen.clear();
+  }
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
@@ -162,6 +169,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMediaEnrollmentPlugin.class);
   registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
@@ -313,6 +321,8 @@ public class MainActivity extends BridgeActivity {
 
  boolean isAssistantSurface() { return assistantVisit() != 0; }
  long composerVisit() { return composerVisit.get(); }
+ boolean consumeNavigationOpen() { return navigationOpen.consume(android.os.SystemClock.elapsedRealtime()); }
+ void clearNavigationOpen() { navigationOpen.clear(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
 
@@ -342,6 +352,9 @@ public class MainActivity extends BridgeActivity {
   }
   HostedDigestDelivery.get().capture(intent);
   InboxNoticeDelivery.get(this).capture(intent);
+  if (intent != null && AlphaNavigationService.ACTION_SHOW_MAPS.equals(intent.getAction())) {
+   navigationOpen.offer(android.os.SystemClock.elapsedRealtime());
+  }
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;
@@ -352,6 +365,7 @@ public class MainActivity extends BridgeActivity {
    textAsk = null;
    SmsDraftOpenRequest.retire(this);
    SmsNoticeOpenRequest.clear();
+   navigationOpen.clear();
   }
   super.onNewIntent(intent);
   var bridge = getBridge();

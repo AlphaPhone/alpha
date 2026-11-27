@@ -76,20 +76,3 @@ lemma goBack_ensures(s: Settings)
     assert lawEachPageIsOneStepBelowItsParent(s.page);
   }
 }
-
-lemma openPrivacyNotifications_ensures(s: Settings)
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> alwaysNothingIsAdmittedUntold(openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> alwaysEveryPageShownIsAdmitted(openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> alwaysOnePlacePerStep(openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> alwaysASensitivePageIsOnAPhone(openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepTheBuildIsToldOnce(s, openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepTheBrowserShortcutReturnsToSettings(s, "openPrivacyNotifications", openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepAClosedPageReturnsToTheRowLeft(s, "openPrivacyNotifications", openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepOpeningKeepsThePlaceBehind(s, "openPrivacyNotifications", openPrivacyNotifications(s)))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepTheWalkthroughOpensFromPrivacy(s, openPrivacyNotifications(s), []))
-  ensures (inv(s) ==> canOpenPrivacyNotifications(s) ==> stepHandingOverKeepsSettings(s, openPrivacyNotifications(s), []))
-{
-  if inv(s) && canOpenPrivacyNotifications(s) {
-    RefocusedKeepsPlaces(s.places, 0);
-  }
-}

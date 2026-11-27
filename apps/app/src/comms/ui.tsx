@@ -1,4 +1,4 @@
-// spec/app/phone/index.md, "Story: Place and review calls"; spec/app/messages/index.md, "Story: Send and receive text messages"; spec/app/contacts/index.md, "Story: Manage my address book"
+// spec/app/phone/index.md, "Story: Call a number"; spec/app/messages/index.md, "Story: See my conversations"; spec/app/contacts/index.md, "Story: Browse my contacts"
 export * from "../phone/CommsBar.tsx";
 export * from "../phone/PhoneTabs.tsx";
 export * from "../phone/CommsTarget.tsx";

@@ -183,8 +183,8 @@ const reconciled = started(effect {
 // spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
 /** Deletions kept before the reach of the one sent and the one hidden were held apart: read with each at a fresh machine's. */
 function storedDeletions(key: string, start = Held.initial) {
-  const { sendingReach, hidingReach } = Held.initial
-  return Layer.provide(Held.stored(key, start), filledStore(key, (kept) => ({ sendingReach, hidingReach, ...kept }), Held.parseState))
+  const { asked, askedReach, askedRevision, sendingReach, hidingReach, changed } = Held.initial
+  return Layer.provide(Held.stored(key, start), filledStore(key, (kept) => ({ asked, askedReach, askedRevision, sendingReach, hidingReach, changed, ...kept }), Held.parseState))
 }
 
 // spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"

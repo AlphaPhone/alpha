@@ -20,7 +20,7 @@ import { Attempts, fresh } from "../runtime/index.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
 import { type DatedReminderFields, createReminderItem, editDatedReminder, needsReschedule } from "../reminders/reminders.vibe"
 import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
-import { answer, contained, hearing, reacting, run, started, together } from "../runtime/index.vibe"
+import { answer, contained, filledStore, hearing, reacting, run, started, together } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { calendarInFront } from "./calendar.vibe"
 import { type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
@@ -702,9 +702,15 @@ const slotChecked = started(effect {
   try Stream.runForEach(Stream.changes(Stream.map(editor.changes, (s) => s.owner)), () => checkSlot())
 }, "reading the kept draft")
 
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+function storedEditor(key: string, start = Editor.initial) {
+  const { unreadable } = Editor.initial
+  return Layer.provide(Editor.stored(key, start), filledStore(key, (kept) => ({ unreadable, ...kept }), Editor.parseState))
+}
+
 /** The editor: kept on the phone across restarts, which ends what was in flight; its writes go to the phone's calendar once. */
 export const editor = together(
-  reacting(Editor, { keep: 1, open: [{ type: "restart" }], carry }),
+  reacting({ ...Editor, stored: storedEditor }, { keep: 1, open: [{ type: "restart" }], carry }),
   reread,
   elsewhere,
   scanned,

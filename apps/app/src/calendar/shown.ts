@@ -346,5 +346,8 @@ export const shown: ShownStore = {
   number: (source, key) => currentStore().number(source, key),
   lastSeen: (id) => currentStore().lastSeen(id),
   find: (id) => currentStore().find(id),
+  listed: (calendars) => currentStore().listed(calendars),
+  listedName: (calendarId) => currentStore().listedName(calendarId),
+  listedSummary: (calendarId) => currentStore().listedSummary(calendarId),
   reset: () => currentStore().reset(),
 };

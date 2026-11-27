@@ -1,4 +1,4 @@
-// spec/app/notices/index.md, "Story: See my notifications"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"
+// spec/app/notices/index.md, "Story: Open what I tapped"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"
 export * from "./collection.vibe"
 export * from "./deletions.vibe"
 export * from "./notices.vibe"

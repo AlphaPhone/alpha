@@ -34,7 +34,7 @@ async function openApprovals(world = scene(), setup?: (harness: ReturnType<typeo
 }
 
 describe("approvals", () => {
-  it("runs one approved action at a time and queues the next (spec/app/approvals/index.md, \"Story: One action at a time\"; spec/app/approvals/proposal.md, \"Story: Decide\"; spec/app/approvals/proposal.md, \"Story: Have it done once\")", async () => {
+  it('runs one approved action at a time and queues the next (spec/app/approvals/index.md, "Story: One action at a time"; spec/app/approvals/proposal.md, "Story: Decide"; spec/app/approvals/proposal.md, "Story: Have it done once")', async () => {
     const { alpha, world, harness } = await openApprovals();
 
     const firstExec = deferredExecution();
@@ -68,7 +68,7 @@ describe("approvals", () => {
     expect(harness.claimCalls).toEqual(["prop-1", "prop-2"]);
   });
 
-  it("expires a pending proposal before the owner taps Approve (spec/app/approvals/proposal.md, \"Story: Decide\"; spec/app/approvals/index.md, \"Story: One action at a time\")", async () => {
+  it('expires a pending proposal before the owner taps Approve (spec/app/approvals/proposal.md, "Story: Decide"; spec/app/approvals/index.md, "Story: One action at a time")', async () => {
     const { alpha, world, harness } = await openApprovals();
 
     await alpha.runtime.runPromise(submitProposal({
@@ -81,7 +81,7 @@ describe("approvals", () => {
     expect(harness.claimCalls).toHaveLength(0);
   });
 
-  it("caps direct allow-listed runs at four per message and requires review for the fifth or non-allow-listed (spec/app/approvals/direct.md, \"Story: Let Alpha show me things without asking each time\"; spec/app/approvals/operation.md, \"Story: Know what the agent is asking for\")", async () => {
+  it('caps direct allow-listed runs at four per message and requires review for the fifth or non-allow-listed (spec/app/approvals/direct.md, "Story: Let Alpha show me things without asking each time"; spec/app/approvals/operation.md, "Story: Know what the agent is asking for")', async () => {
     const { alpha, world } = await openApprovals();
 
     expect(classifyOperation("phone.emergency")).toBe("EmergencyCall");
@@ -105,7 +105,7 @@ describe("approvals", () => {
     await until(alpha, alpha.runtime, Approvals, (s) => entry(s, 5).stage === "Pending" && entry(s, 5).review.showing);
   });
 
-  it("forbids emergency calls immediately without creating a claim or execution (spec/app/approvals/proposal.md, \"Story: Be asked before Alpha acts\"; spec/app/approvals/operation.md, \"Story: Know what the agent is asking for\")", async () => {
+  it('forbids emergency calls immediately without creating a claim or execution (spec/app/approvals/proposal.md, "Story: Be asked before Alpha acts"; spec/app/approvals/operation.md, "Story: Know what the agent is asking for")', async () => {
     const { alpha, world, harness } = await openApprovals();
 
     let executed = false;
@@ -125,7 +125,7 @@ describe("approvals", () => {
     expect(document.body.textContent).toContain("Dial emergency services yourself");
   });
 
-  it("completes a read lease when approved and cancels leases and cards on owner switch (spec/app/approvals/lease.md, \"Story: Get the answer a read was for\"; spec/app/approvals/index.md, \"Story: Change owner with an approval in hand\"; spec/app/approvals/index.md, \"Story: Get the answer a read was for\")", async () => {
+  it('completes a read lease when approved and cancels leases and cards on owner switch (spec/app/approvals/lease.md, "Story: Get the answer a read was for"; spec/app/approvals/index.md, "Story: Change owner with an approval in hand"; spec/app/approvals/index.md, "Story: Get the answer a read was for")', async () => {
     const { alpha, world } = await openApprovals(scene(), (harness) => harness.setAnswer({ ok: true, answer: "You have 2 meetings today." }));
 
     const expires = world.now + 60_000;
@@ -148,7 +148,7 @@ describe("approvals", () => {
     await until(alpha, alpha.runtime, Approvals, (s) => entry(s, 31).stage === "Lapsed" && leaseOf(s, 31).status === "Dropped");
   });
 
-  it("reads back an in-flight change after a restart before reporting completion (spec/app/approvals/index.md, \"Story: Pick up the cards after a restart\"; spec/app/approvals/proposal.md, \"Story: Pick up after a restart\")", async () => {
+  it('reads back an in-flight change after a restart before reporting completion (spec/app/approvals/index.md, "Story: Pick up the cards after a restart"; spec/app/approvals/proposal.md, "Story: Pick up after a restart")', async () => {
     const world = scene();
     const first = await openApprovals(world);
 

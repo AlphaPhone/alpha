@@ -347,12 +347,18 @@ importers:
       '@elizaos/cloud':
         specifier: link:../../.eliza/packages/cloud
         version: link:../../.eliza/packages/cloud
+      '@elizaos/core':
+        specifier: link:../../.eliza/packages/core
+        version: link:../../.eliza/packages/core
       '@elizaos/os':
         specifier: link:../../.eliza/packages/os
         version: link:../../.eliza/packages/os
       '@elizaos/os-bridges':
         specifier: link:../../.eliza/packages/os-bridges
         version: link:../../.eliza/packages/os-bridges
+      '@elizaos/plugin-calendar-client':
+        specifier: link:../../.eliza/packages/plugin-calendar-client
+        version: link:../../.eliza/packages/plugin-calendar-client
       '@elizaos/plugin-files-client':
         specifier: link:../../.eliza/packages/plugin-files-client
         version: link:../../.eliza/packages/plugin-files-client
@@ -423,9 +429,9 @@ importers:
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
-      '@repo/deployment':
+      '@repo/cloud':
         specifier: workspace:*
-        version: link:../../packages/deployment
+        version: link:../cloud
       '@repo/eliza-harness':
         specifier: workspace:*
         version: link:../../packages/eliza-harness

@@ -49,7 +49,7 @@ import { ReminderPage } from "./ReminderPage.tsx";
 import { SourceNote } from "./SourceNote.tsx";
 import { eventKey } from "./noteOrigin.vibe";
 import { ReminderReview } from "./ReminderReview.tsx";
-import { testMocks } from "../platform/device.vibe";
+import { testMocks } from "../platform/index.vibe";
 import { allows } from "../../gen/kit__permission.ts";
 import { civilDay, dateOf, dayStart, localWallTime, minutesOf, monthStart, readWindow, shiftDays, wallDateTime, wallSpan, weekStart } from "./time.ts";
 

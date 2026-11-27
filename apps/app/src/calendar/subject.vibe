@@ -2,8 +2,8 @@
 import * as View from "../../gen/app__calendar.effect.vibe"
 import type { Calendar, Event } from "../../gen/app__calendar.effect.vibe"
 import { dayGiven, selectedEvent, sourceGiven } from "../../gen/app__calendar.effect.vibe"
-import { PhoneCalendar } from "../platform/calendar.vibe"
-import { started } from "../runtime/reactor.vibe"
+import { PhoneCalendar } from "../platform/index.vibe"
+import { started } from "../runtime/index.vibe"
 import { type CalendarObject, type CalendarSubject, admitted, giveSubject, inspectionOf, keepInspection, noSubject } from "./selection.ts"
 import { shown } from "./shown.ts"
 

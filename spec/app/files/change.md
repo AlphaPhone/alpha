@@ -67,6 +67,7 @@ pure val destValues =
     .union(Set({ folder: 5, path: List(9), names: List("a") }))
     .union(Set({ folder: 6, path: List(9), names: List() }))
     .union(Set({ folder: 7, path: List(9, 1), names: List() }))
+    .union(Set({ folder: 10, path: List(8), names: List("a") }))
 ```
 
 ### A change fits its items: a new name is free in the folder, one item is renamed, and nothing moves into itself, into a folder inside itself, to where it already is, or to another volume

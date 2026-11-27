@@ -571,6 +571,14 @@ pure def sometimesFailed(s: Photos): bool = s.visible and s.library.status == R:
 
 ```quint
 pure def sometimesPaged(s: Photos): bool = s.paging and s.library.status == R::Loaded and s.rows.size() >= 2
+
+pure val eval_witness_sometimesPaged = (
+  ("accessIs", P::Granted, false, Phone),
+  ("showView", false, Set(), Phone),
+  ("listed", 1, true, Set(1), Set(1), Set(), 0, 1, true, Phone),
+  ("loadMore", Owner),
+  ("listed", 2, true, Set(2), Set(2), Set(), 0, 1, false, Phone),
+)
 ```
 
 ## Story: Look at what I just took on the lock screen

@@ -196,8 +196,6 @@ describe(`More over a new note offers v119's Share, Pin and Delete (spec/app/not
   });
 });
 
-const waits = "spec/app/notes/editor.md, \"More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did\"";
-
 async function openRadiator(world: Scene) {
   const opened = await openNotes(world);
   await rendered(() => expect(button("Open Radiator")).toBeDefined());
@@ -208,7 +206,7 @@ async function openRadiator(world: Scene) {
 
 const edited = "Call the landlord Friday. Bedroom radiator clanks all night. Bleed it first.";
 
-describe(`More over a saved note waits for its save, as v119's did (${waits})`, () => {
+describe(`More over a saved note waits for its save, as v119's did (spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did")`, () => {
   it("keeps More and its Share and Delete enabled during a second edit and its save, and deletes only once the save lands, at the revision saved", async () => {
     const world = scene();
     const { alpha, runtime } = await openRadiator(world);
@@ -268,12 +266,10 @@ describe(`More over a saved note waits for its save, as v119's did (${waits})`, 
   });
 });
 
-const fixed = "spec/app/notes/editor.md, \"Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did\"";
-
 const radiatorPinned = (world: Scene) =>
   (world.notes.notes.find((row) => row.title === "Radiator")?.format?.data as { readonly pinned?: boolean } | undefined)?.pinned === true;
 
-describe(`More keeps v119's Share, Pin and Delete in place while a save lands under it (${fixed}; ${waits})`, () => {
+describe(`More keeps v119's Share, Pin and Delete in place while a save lands under it (spec/app/notes/editor.md, "Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did"; spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did")`, () => {
   async function withGatedRadiatorEdit(body: (ctx: { world: Scene; alpha: Awaited<ReturnType<typeof openRadiator>>["alpha"]; runtime: Awaited<ReturnType<typeof openRadiator>>["runtime"]; save: ReturnType<typeof gate> }) => Promise<void>) {
     const world = scene();
     const { alpha, runtime } = await openRadiator(world);
@@ -386,7 +382,7 @@ describe(`More keeps v119's Share, Pin and Delete in place while a save lands un
   });
 });
 
-describe(`An editor kept before a Delete or a Pin could wait on a save is read back (${waits}; ${fixed})`, () => {
+describe(`An editor kept before a Delete or a Pin could wait on a save is read back (spec/app/notes/editor.md, "More over a saved note stays offered while an edit waits to be saved or a save is on its way, and its Share and Delete wait for the save to land, as v119's did"; spec/app/notes/editor.md, "Pin over a saved note stays offered while an edit waits to be saved or a save is on its way, and waits for the save to land, as v119's did")`, () => {
   it("reads a kept editor record without binning or pinning as asking for no deletion or pin, and sets nothing aside", async () => {
     const kept = "alpha/app/notes/editor@1";
     const world = scene();
