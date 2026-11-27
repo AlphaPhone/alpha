@@ -35,6 +35,12 @@ export { scanSpec } from "./scan.ts";
 export interface Result { ok: boolean; stage: "model" | "always" | "sometimes" | "replay" | "types" | "proof" | "tests" | "traces" | "explore" | "review" | "skipped"; summary: string; detail: string; where?: string; /** The rules the result concerns, each by its spec and key. */ rules?: { file: string; key: string }[] }
 /** The Node these tools run on: the major release .nvmrc pins, and the root's `engines` floor. */
 export const NODE = 26;
+/**
+ * Whether a retried check's row says what the row already shown said. An exploration is bounded by time, not by its
+ * actions, so one that passes again agrees with a pass on the same page however many actions each took.
+ */
+const agrees = (row: Result, shown: Result) => isDeepStrictEqual(row, shown)
+  || (row.stage === "explore" && shown.stage === "explore" && row.ok && shown.ok && row.where === shown.where);
 export const show = ({ ok, stage, summary, detail }: Result) => `${stage === "skipped" ? "-" : ok ? "✓" : "✗"} ${stage.padEnd(9)} ${summary}${detail ? "\n" + detail.trimEnd() : ""}`;
 
 /** Whether `accept` can record a check: every stage but review passed, every story has rules and every rule has Quint. */
@@ -256,12 +262,13 @@ export async function check(root: string, accept: false | "reviews" | "unproved"
     const results: Result[] = [];
     let diverged = false;
     const report = (result: Result) => {
-      if (results.length < reported.length) diverged ||= !isDeepStrictEqual(result, reported[results.length]);
+      const shown = reported[results.length];
+      if (shown) diverged ||= !agrees(result, shown);
       else if (!diverged && log) {
         reported.push(result);
         log(result);
       }
-      results.push(result);
+      results.push(shown ?? result);
     };
     const confirmReported = () => {
       if (diverged || results.length < reported.length) throw new InstallationChanged();
