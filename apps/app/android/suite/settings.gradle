@@ -1,0 +1,29 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'alpha-suite'
+
+include ':alpha-ipc'
+project(':alpha-ipc').projectDir = new File(settingsDir, '../alpha-ipc')
+
+include ':alpha-app-runtime'
+project(':alpha-app-runtime').projectDir = new File(settingsDir, '../alpha-app-runtime')
+
+include ':thin-app'
+project(':thin-app').projectDir = new File(settingsDir, 'thin-app')
+
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File(settingsDir, '../../node_modules/@capacitor/android/capacitor')

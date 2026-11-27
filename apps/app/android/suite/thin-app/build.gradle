@@ -1,0 +1,70 @@
+apply plugin: 'com.android.application'
+
+def appPkg = new groovy.json.JsonSlurper().parse(file('../../../package.json'))
+def resolvedVersionCode = System.getenv('ELIZAOS_VERSION_CODE')?.isInteger()
+    ? System.getenv('ELIZAOS_VERSION_CODE').toInteger()
+    : 121
+def resolvedVersionName = System.getenv('ELIZAOS_VERSION_NAME') ?: appPkg.version
+
+android {
+    namespace 'ai.alphacompute.thinapp'
+    compileSdk rootProject.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
+
+    defaultConfig {
+        minSdk 29
+        targetSdk rootProject.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+
+    signingConfigs {
+        release {
+            def storePath = System.getenv('ELIZAOS_KEYSTORE_PATH')
+            if (storePath != null && !storePath.trim().isEmpty()) {
+                storeFile file(storePath)
+                storePassword System.getenv('ELIZAOS_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ELIZAOS_KEY_ALIAS')
+                keyPassword System.getenv('ELIZAOS_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+def generatedFlavors = file('../generated/suite-flavors.gradle')
+if (generatedFlavors.exists()) {
+    apply from: generatedFlavors
+}
+
+dependencies {
+    implementation project(':alpha-ipc')
+    implementation project(':alpha-app-runtime')
+    implementation project(':capacitor-android')
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.webkit:webkit:1.12.1'
+    testImplementation 'junit:junit:4.13.2'
+}

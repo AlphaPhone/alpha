@@ -1,0 +1,91 @@
+package ai.alphacompute.ipc;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.Test;
+
+/** Unit tests for least-privilege package authorization in {@link AlphaSuitePolicy}. */
+public final class AlphaSuitePolicyTest {
+    @Test public void defaultsContainCoreAndAllEighteenViews() {
+        AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+        assertEquals(19, policy.allRules().size());
+        assertTrue(policy.isKnownPackage(AlphaIpcContract.CORE_PACKAGE));
+        assertNotNull(policy.ruleForView("Notes"));
+        assertNotNull(policy.ruleForView("Browser"));
+        assertNotNull(policy.ruleForView("Wallet"));
+        assertNotNull(policy.ruleForView("Settings"));
+    }
+
+    @Test public void enforcesLeastPrivilegeAgentRoutes() {
+        AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+        assertTrue(policy.isAgentRouteAllowed(AlphaIpcContract.CORE_PACKAGE, "/api/wallet/requests"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/state"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/alpha/notes/transcription?format=wav"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/wallet"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/conversations"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet/holdings"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet-other"));
+        assertFalse(policy.isAgentRouteAllowed("com.example.untrusted", "/api/health"));
+    }
+
+    @Test public void rejectsPathTraversalAndUnsafeCharacters() {
+        AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/../wallet"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/%2e%2e/wallet"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api//notes/state"));
+        assertNull(AlphaSuitePolicy.normalizePath("api/notes/state"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/state\u0000"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/../wallet"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/%2e%2e/wallet"));
+    }
+
+    @Test public void enforcesCloudRoutesAndSecureStoreSlots() {
+        AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+        assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/maps/routes"));
+        assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/eliza/google/gmail/read"));
+        assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.inbox", "/api/v1/eliza/google/gmail/search?q=test"));
+        assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.notes", "/api/v1/user"));
+
+        assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "notes-draft:42"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "notes-draft:"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "inbox-saved-bodies"));
+        assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.messages", "sms-draft:v2:new"));
+        assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.messages", "sms-outgoing:v2:device"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.browser", "sms-draft:v2:new"));
+    }
+
+    @Test public void enforcesPrivilegeCapabilitiesAndPreferences() {
+        AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+        assertTrue(policy.isLifecycleCommandAllowed(AlphaIpcContract.CORE_PACKAGE));
+        assertTrue(policy.isLifecycleCommandAllowed("ai.alphacompute.settings"));
+        assertFalse(policy.isLifecycleCommandAllowed("ai.alphacompute.notes"));
+
+        assertTrue(policy.isActiveContextReadAllowed(AlphaIpcContract.CORE_PACKAGE));
+        assertFalse(policy.isActiveContextReadAllowed("ai.alphacompute.settings"));
+        assertFalse(policy.isActiveContextReadAllowed("ai.alphacompute.notes"));
+
+        assertTrue(policy.isSignInMethodAllowed("ai.alphacompute.notes", "status"));
+        assertFalse(policy.isSignInMethodAllowed("ai.alphacompute.notes", "signOut"));
+        assertTrue(policy.isSignInMethodAllowed("ai.alphacompute.inbox", "upgradeMailLease"));
+        assertFalse(policy.isSignInMethodAllowed("ai.alphacompute.maps", "upgradeMailLease"));
+
+        assertTrue(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_APPEARANCE));
+        assertFalse(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_INSTALL));
+        assertTrue(policy.isSharedPreferenceWriteAllowed(AlphaIpcContract.CORE_PACKAGE, AlphaIpcContract.KEY_INSTALL));
+        assertFalse(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.notes", AlphaIpcContract.KEY_APPEARANCE));
+    }
+
+    @Test public void parsesSuiteRegistryJsonMatchingDefaults() throws Exception {
+        Path registry = Path.of("../suite/apps.json");
+        if (!Files.exists(registry)) return;
+        AlphaSuitePolicy parsed = AlphaSuitePolicy.fromJson(Files.readString(registry));
+        assertEquals(AlphaSuitePolicy.defaults().allRules(), parsed.allRules());
+    }
+}

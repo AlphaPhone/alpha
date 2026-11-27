@@ -1,0 +1,377 @@
+package ai.alphacompute.runtime;
+
+import ai.alphacompute.ipc.AlphaIpcContract;
+import ai.alphacompute.ipc.IAlphaActionCallback;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.res.Configuration;
+import android.database.ContentObserver;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.RemoteException;
+import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
+import androidx.core.splashscreen.SplashScreen;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.PluginHandle;
+import com.getcapacitor.WebViewListener;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/** Base Capacitor activity for every standalone thin Alpha app, wiring IPC proxies, shared theme/textScale, and signed agent intents. */
+public abstract class AlphaBaseActivity extends BridgeActivity {
+    private static final String BACK_EVENT = "window.dispatchEvent(new Event('alpha-back'))";
+
+    private final Map<String, IAlphaActionCallback> pendingActions = new ConcurrentHashMap<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private ContentObserver preferencesObserver;
+    private InsetsState insets;
+    private JSONObject bufferedIntent;
+    private volatile boolean pageLoaded;
+
+    private record InsetsState(int top, int bottom, boolean keyboard) {
+        void publish(WebView page) {
+            page.evaluateJavascript("(() => { const root = document.documentElement; if (!root) return;"
+                + " const detail = { top:" + top + ", bottom:" + bottom + ", keyboard:" + keyboard + " };"
+                + " root.style.setProperty('--alpha-native-inset-top', detail.top + 'px');"
+                + " root.style.setProperty('--alpha-native-inset-bottom', detail.bottom + 'px');"
+                + " root.dataset.alphaNativeKeyboard = String(detail.keyboard);"
+                + " window.dispatchEvent(new CustomEvent('alpha-insets', { detail })); })()", null);
+        }
+    }
+
+    /** Lowercase suite id from {@code apps.json}, e.g. {@code "notes"}. */
+    protected abstract String alphaAppId();
+
+    /** Capitalized Quint {@code View} name, e.g. {@code "Notes"}. */
+    protected abstract String alphaViewName();
+
+    /** Surface mode string for this host, typically {@code "app"}. */
+    protected String alphaSurfaceMode() {
+        return "app";
+    }
+
+    /** Hook for thin app subclasses to register additional app-specific Capacitor plugins. */
+    protected void registerAppPlugins() {}
+
+    @Override public void onCreate(Bundle savedInstanceState) {
+        SplashScreen.installSplashScreen(this);
+        registerPlugin(RemoteAgentPlugin.class);
+        registerPlugin(RemoteCloudPlugin.class);
+        registerPlugin(RemoteSignInPlugin.class);
+        registerPlugin(RemoteSecureStorePlugin.class);
+        registerPlugin(AlphaPreferencesPlugin.class);
+        registerPlugin(AlphaContextPlugin.class);
+        registerAppPlugins();
+        super.onCreate(savedInstanceState);
+
+        if (getBridge() == null) return;
+        WebView page = getBridge().getWebView();
+        if (page == null) return;
+
+        boolean debuggable = (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+        WebView.setWebContentsDebuggingEnabled(debuggable);
+        page.setFilterTouchesWhenObscured(true);
+        page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+
+        syncSharedAppearanceAndTextScale();
+        registerPreferencesObserver();
+        followWindowInsets();
+        registerBackDispatcher();
+        captureAgentIntent(getIntent());
+    }
+
+    @Override public void onResume() {
+        super.onResume();
+        syncSharedAppearanceAndTextScale();
+    }
+
+    @Override public void onPause() {
+        clearForegroundContext();
+        super.onPause();
+    }
+
+    @Override public void onDestroy() {
+        clearForegroundContext();
+        unregisterPreferencesObserver();
+        failPendingActions("ActivityDestroyed");
+        super.onDestroy();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureAgentIntent(intent);
+    }
+
+    /** Resolves a pending signed cross-app agent action callback identified by {@code claimId}. */
+    public boolean replyAction(String claimId, boolean switched, String resultJson, String errorCode) {
+        if (claimId == null || claimId.isEmpty()) return false;
+        IAlphaActionCallback callback = pendingActions.remove(claimId);
+        if (callback == null) return false;
+        try {
+            callback.onResult(claimId, switched, resultJson, errorCode);
+            return true;
+        } catch (RemoteException dead) {
+            return false;
+        }
+    }
+
+    private void registerBackDispatcher() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                var bridge = getBridge();
+                WebView view = bridge == null ? null : bridge.getWebView();
+                if (view == null) {
+                    moveTaskToBack(true);
+                    return;
+                }
+                String script = "(() => { if (document.documentElement?.dataset.alphaCanGoBack === 'true') { "
+                    + BACK_EVENT + "; return true; } return false; })()";
+                view.evaluateJavascript(script, handled -> {
+                    if (!"true".equals(handled) && !isFinishing() && !isDestroyed()) {
+                        moveTaskToBack(true);
+                    }
+                });
+            }
+        });
+    }
+
+    private void followWindowInsets() {
+        var bridge = getBridge();
+        if (bridge == null) return;
+        bridge.addWebViewListener(new WebViewListener() {
+            @Override public void onPageStarted(WebView page) {
+                pageLoaded = false;
+            }
+
+            @Override public void onPageLoaded(WebView page) {
+                pageLoaded = true;
+                if (insets != null) insets.publish(page);
+                syncSharedAppearanceAndTextScale();
+                JSONObject pending = bufferedIntent;
+                if (pending != null) {
+                    bufferedIntent = null;
+                    dispatchIntentToPage(page, pending);
+                }
+            }
+        });
+        View decor = getWindow().getDecorView();
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (view, incoming) -> {
+            var bars = incoming.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            float density = getResources().getDisplayMetrics().density;
+            InsetsState measured = new InsetsState(
+                Math.round(bars.top / density),
+                Math.round(bars.bottom / density),
+                incoming.isVisible(WindowInsetsCompat.Type.ime())
+            );
+            if (!measured.equals(insets)) {
+                insets = measured;
+                var currentBridge = getBridge();
+                WebView webView = currentBridge == null ? null : currentBridge.getWebView();
+                if (webView != null) measured.publish(webView);
+            }
+            return ViewCompat.onApplyWindowInsets(view, incoming);
+        });
+        ViewCompat.requestApplyInsets(decor);
+    }
+
+    private void registerPreferencesObserver() {
+        if (preferencesObserver != null || !AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return;
+        preferencesObserver = new ContentObserver(mainHandler) {
+            @Override public void onChange(boolean selfChange, Uri uri) {
+                syncSharedAppearanceAndTextScale();
+            }
+        };
+        try {
+            getContentResolver().registerContentObserver(
+                Uri.parse(AlphaIpcContract.PREFERENCES_URI_STRING),
+                true,
+                preferencesObserver
+            );
+        } catch (SecurityException ignored) {
+            preferencesObserver = null;
+        }
+    }
+
+    private void unregisterPreferencesObserver() {
+        if (preferencesObserver == null) return;
+        try {
+            getContentResolver().unregisterContentObserver(preferencesObserver);
+        } catch (RuntimeException ignored) {
+        }
+        preferencesObserver = null;
+    }
+
+    private void syncSharedAppearanceAndTextScale() {
+        if (!AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return;
+        Bundle snapshot;
+        try {
+            snapshot = getContentResolver().call(
+                Uri.parse(AlphaIpcContract.PREFERENCES_URI_STRING),
+                AlphaIpcContract.PREF_METHOD_SNAPSHOT,
+                null,
+                null
+            );
+        } catch (RuntimeException unavailable) {
+            return;
+        }
+        if (snapshot == null) return;
+        Bundle values = snapshot.getBundle(AlphaIpcContract.PREF_RESULT_SNAPSHOT);
+        if (values == null) values = snapshot;
+
+        int textScale = parseTextScale(values.getString(AlphaIpcContract.KEY_TEXT_SCALE));
+        float fontScale = getResources().getConfiguration().fontScale;
+        if (!Float.isFinite(fontScale) || fontScale <= 0f) fontScale = 1f;
+        int zoom = Math.max(1, Math.round(textScale * fontScale));
+        var bridge = getBridge();
+        WebView page = bridge == null ? null : bridge.getWebView();
+        if (page != null) {
+            page.getSettings().setTextZoom(zoom);
+        }
+
+        boolean dark = resolveDarkLook(values.getString(AlphaIpcContract.KEY_APPEARANCE));
+        WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
+        controller.setAppearanceLightStatusBars(!dark);
+        controller.setAppearanceLightNavigationBars(!dark);
+    }
+
+    private int parseTextScale(String raw) {
+        if (raw == null) return 100;
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            return parsed >= 75 && parsed <= 150 ? parsed : 100;
+        } catch (NumberFormatException ignored) {
+            return 100;
+        }
+    }
+
+    private boolean resolveDarkLook(String rawAppearance) {
+        boolean systemDark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+            == Configuration.UI_MODE_NIGHT_YES;
+        if (rawAppearance == null || rawAppearance.isBlank()) return systemDark;
+        try {
+            String theme = new JSONObject(rawAppearance).optString("theme", "System");
+            if ("Dark".equals(theme)) return true;
+            if ("Light".equals(theme)) return false;
+            return systemDark;
+        } catch (JSONException ignored) {
+            return systemDark;
+        }
+    }
+
+    private void captureAgentIntent(Intent intent) {
+        if (intent == null || !AlphaIpcContract.ACTION_AGENT_OPEN.equals(intent.getAction())) return;
+        if (!isVerifiedCoreCaller()) {
+            rejectUnverifiedCallback(intent);
+            return;
+        }
+        String claimId = intent.getStringExtra(AlphaIpcContract.EXTRA_CLAIM_ID);
+        int ticket = intent.getIntExtra(AlphaIpcContract.EXTRA_TICKET, 0);
+        String nonce = intent.getStringExtra(AlphaIpcContract.EXTRA_NONCE);
+        String payload = intent.getStringExtra(AlphaIpcContract.EXTRA_PAYLOAD);
+        if (payload != null && payload.getBytes(StandardCharsets.UTF_8).length > AlphaIpcContract.MAX_INTENT_PAYLOAD_BYTES) {
+            rejectCallbackFromExtras(intent.getExtras(), claimId, AlphaIpcContract.FAIL_TOO_LARGE);
+            return;
+        }
+        Bundle extras = intent.getExtras();
+        if (extras != null && claimId != null && !claimId.isEmpty()) {
+            IBinder binder = extras.getBinder(AlphaIpcContract.EXTRA_CALLBACK);
+            if (binder != null) {
+                IAlphaActionCallback callback = IAlphaActionCallback.Stub.asInterface(binder);
+                if (callback != null) pendingActions.put(claimId, callback);
+            }
+        }
+        JSONObject detail = new JSONObject();
+        try {
+            detail.put("action", AlphaIpcContract.ACTION_AGENT_OPEN);
+            detail.put("appId", alphaAppId());
+            detail.put("view", alphaViewName());
+            detail.put("uri", intent.getDataString() == null ? JSONObject.NULL : intent.getDataString());
+            detail.put("claimId", claimId == null ? JSONObject.NULL : claimId);
+            detail.put("ticket", ticket);
+            detail.put("nonce", nonce == null ? JSONObject.NULL : nonce);
+            detail.put("payload", payload == null ? JSONObject.NULL : payload);
+        } catch (JSONException impossible) {
+            return;
+        }
+        var bridge = getBridge();
+        WebView page = bridge == null ? null : bridge.getWebView();
+        if (page != null && pageLoaded) {
+            dispatchIntentToPage(page, detail);
+        } else {
+            bufferedIntent = detail;
+        }
+    }
+
+    private boolean isVerifiedCoreCaller() {
+        if (!AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return false;
+        if (Build.VERSION.SDK_INT >= 34) {
+            String launchedFrom = getLaunchedFromPackage();
+            if (launchedFrom != null) return AlphaIpcContract.CORE_PACKAGE.equals(launchedFrom);
+        }
+        Uri referrer = getReferrer();
+        return referrer != null
+            && "android-app".equals(referrer.getScheme())
+            && AlphaIpcContract.CORE_PACKAGE.equals(referrer.getHost());
+    }
+
+    private void rejectUnverifiedCallback(Intent intent) {
+        rejectCallbackFromExtras(intent.getExtras(), intent.getStringExtra(AlphaIpcContract.EXTRA_CLAIM_ID), AlphaIpcContract.FAIL_UNAUTHORIZED);
+    }
+
+    private void rejectCallbackFromExtras(Bundle extras, String claimId, String errorCode) {
+        if (extras == null) return;
+        IBinder binder = extras.getBinder(AlphaIpcContract.EXTRA_CALLBACK);
+        if (binder == null) return;
+        IAlphaActionCallback callback = IAlphaActionCallback.Stub.asInterface(binder);
+        if (callback == null) return;
+        try {
+            callback.onResult(claimId == null ? "" : claimId, false, null, errorCode);
+        } catch (RemoteException ignored) {
+        }
+    }
+
+    private void dispatchIntentToPage(WebView page, JSONObject detail) {
+        String encoded = JSONObject.quote(detail.toString());
+        page.evaluateJavascript(
+            "(() => { window.dispatchEvent(new CustomEvent('alpha-intent', { detail: JSON.parse(" + encoded + ") })); })()",
+            null
+        );
+    }
+
+    private void clearForegroundContext() {
+        var bridge = getBridge();
+        if (bridge == null) return;
+        PluginHandle handle = bridge.getPlugin("AlphaContext");
+        if (handle != null && handle.getInstance() instanceof AlphaContextPlugin contextPlugin) {
+            contextPlugin.clearViewContext(alphaViewName());
+        }
+    }
+
+    private void failPendingActions(String errorCode) {
+        for (Map.Entry<String, IAlphaActionCallback> entry : pendingActions.entrySet()) {
+            IAlphaActionCallback callback = pendingActions.remove(entry.getKey());
+            if (callback == null) continue;
+            try {
+                callback.onResult(entry.getKey(), false, null, errorCode);
+            } catch (RemoteException ignored) {
+            }
+        }
+    }
+}
