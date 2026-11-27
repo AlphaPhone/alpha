@@ -1451,8 +1451,8 @@ describe("on a phone", () => {
   /**
    * Owner A taps Approve on the card of `filed` in Calendar while the read named by `held` waits: the agent's approvals list read
    * again at the tap, or the day of the event, read where Calendar's own window does not hold it. A goes Home, owner B signs in,
-   * and Calendar, opened again, takes B, whose reads of the list wait unanswered. Once the held read answers, tells the card and
-   * B's owner number beside A's.
+   * and Calendar, opened again, takes B, whose reads of the list wait unanswered. Once the held read answers, tells whether B is
+   * signed in in A's place, how the card ended, whether Approve shows and what was written.
    */
   async function approvedAcrossOwnerChange(held: "approvals" | "feed", filed: (world: ReturnType<typeof morning>) => ReturnType<typeof agentRequest>) {
     const { world, alpha, runtime, reread } = await onPhoneCalendar();
@@ -1481,17 +1481,18 @@ describe("on a phone", () => {
     await until(alpha, runtime, Changes, (s) => s.stage === "Idle");
     await drawn(() => {});
     const b = (await runtime.runPromise(Effect.flatMap(View, (machine) => machine.get()))).owner;
-    return { world, a, b, card: await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get())) };
+    const card = await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
+    return [b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes];
   }
 
   it("Approve tapped for one owner sends nothing once another owner signed in while the tap read the agent's list again (spec/app/calendar/agent.md, \"The request is read again at the tap; a newer revision is shown as updated, and nothing is sent\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
-    const { world, a, b, card } = await approvedAcrossOwnerChange("approvals", (at) => maybeTo("Team lunch", at.at(0, 12)));
+    const ended = await approvedAcrossOwnerChange("approvals", (at) => maybeTo("Team lunch", at.at(0, 12)));
     // spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent": approving is for the owner signed in at the tap, so A's approval is never sent while B is signed in
-    expect([b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes]).toEqual([true, "Refused", false, []]);
+    expect(ended).toEqual([true, "Refused", false, []]);
   });
 
   it("Approve tapped for one owner sends nothing once another owner signed in while the tap read the day of an event outside Calendar's window (spec/app/calendar/agent.md, \"The request is read again at the tap; a newer revision is shown as updated, and nothing is sent\"; spec/app/calendar/agent.md, \"A card is complete only with known fields, a valid time and, for a change, a verified target\")", async () => {
-    const { world, a, b, card } = await approvedAcrossOwnerChange("feed", (at) => {
+    const ended = await approvedAcrossOwnerChange("feed", (at) => {
       const begin = at.at(200, 12);
       at.calendar.events.push(agentEvent("Offsite", begin, begin + hour, {
         attendees: [{ email: "owner@alpha.test", displayName: "You", responseStatus: "needsAction", self: true, organizer: false, optional: false }],
@@ -1499,7 +1500,7 @@ describe("on a phone", () => {
       return maybeTo("Offsite", begin);
     });
     // spec/app/calendar/agent.md, "The request is read again at the tap; a newer revision is shown as updated, and nothing is sent": the tap reads the event's own day after it read the list, and an owner who signed in meanwhile gets nothing of A's sent
-    expect([b > 0 && b !== a, card.result, Boolean(button("Approve")), world.calendar.writes]).toEqual([true, "Refused", false, []]);
+    expect(ended).toEqual([true, "Refused", false, []]);
   });
 
   it("Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
