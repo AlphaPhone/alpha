@@ -1,0 +1,295 @@
+{
+  "key": "alpha/app/files/scan@1",
+  "spec": "spec/app/files/scan.md",
+  "shape": "4b5512ca48db02f6",
+  "state": {
+    "open": false,
+    "origin": "Document",
+    "pages": [
+      {
+        "image": 1,
+        "camera": true,
+        "text": 1,
+        "blank": false,
+        "edits": 0,
+        "links": 0
+      }
+    ],
+    "images": 1,
+    "keeping": {
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      },
+      "saves": 0,
+      "carrying": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
+      "saved": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
+      "current": true,
+      "stored": false,
+      "broken": false,
+      "loading": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "overwrite": {
+        "showing": false,
+        "revision": 0,
+        "shown": 0
+      },
+      "discard": {
+        "id": 0,
+        "outcome": "Planned"
+      }
+    },
+    "text": {
+      "reading": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "read": 0,
+      "links": {
+        "showing": false,
+        "revision": 0,
+        "shown": 0
+      },
+      "linksOf": {
+        "image": 0,
+        "camera": false,
+        "text": 0,
+        "blank": false,
+        "edits": 0,
+        "links": 0
+      },
+      "opening": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "event": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "eventOf": {
+        "image": 0,
+        "camera": false,
+        "text": 0,
+        "blank": false,
+        "edits": 0,
+        "links": 0
+      },
+      "found": false,
+      "note": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "noting": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
+      "noted": [
+        [
+          {
+            "image": 1,
+            "camera": true,
+            "text": 1,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          }
+        ]
+      ]
+    },
+    "pdf": {
+      "id": 1,
+      "outcome": "Planned"
+    },
+    "problem": "NoProblem",
+    "written": [
+      [
+        1
+      ]
+    ],
+    "keep": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "keptNow": 0,
+    "kept": [
+      1
+    ]
+  },
+  "memoryOnly": [
+    "search"
+  ],
+  "earlier": [
+    {
+      "from": "dcd279671c",
+      "until": "173bd6f26b",
+      "state": {
+        "open": false,
+        "pages": [
+          {
+            "image": 1,
+            "camera": true,
+            "text": 1,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          }
+        ],
+        "images": 1,
+        "keeping": {
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "saves": 0,
+          "carrying": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
+          "saved": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
+          "current": true,
+          "stored": false,
+          "broken": false,
+          "loading": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "overwrite": {
+            "showing": false,
+            "revision": 0,
+            "shown": 0
+          },
+          "discard": {
+            "id": 0,
+            "outcome": "Planned"
+          }
+        },
+        "text": {
+          "reading": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "read": 0,
+          "links": {
+            "showing": false,
+            "revision": 0,
+            "shown": 0
+          },
+          "linksOf": {
+            "image": 0,
+            "camera": false,
+            "text": 0,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          },
+          "opening": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "event": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "eventOf": {
+            "image": 0,
+            "camera": false,
+            "text": 0,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          },
+          "found": false,
+          "note": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "noting": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
+          "noted": [
+            [
+              {
+                "image": 1,
+                "camera": true,
+                "text": 1,
+                "blank": false,
+                "edits": 0,
+                "links": 0
+              }
+            ]
+          ]
+        },
+        "pdf": {
+          "id": 1,
+          "outcome": "Planned"
+        },
+        "problem": "NoProblem",
+        "written": [
+          [
+            1
+          ]
+        ],
+        "keep": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "keptNow": 0,
+        "kept": [
+          1
+        ]
+      }
+    }
+  ]
+}

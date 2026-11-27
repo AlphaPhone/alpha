@@ -733,9 +733,9 @@ describe("Messages on an Alpha image", () => {
     expect(document.body.textContent).toContain(`To: ${displayNumber(sms.recipients[0])}`);
     expect(document.body.textContent).toContain(sms.body);
     // spec/app/contacts/agent.md, "A text's review is two rows, and a tap anywhere on its first row approves the text while a tap on its second declines it"
-    const sendRow = button("Send this text")?.textContent ?? "";
+    const sendRow = button("Send this text")?.parentElement?.textContent ?? "";
     expect([sendRow.startsWith(`Review SMSTo: ${displayNumber(sms.recipients[0])}${sms.body}`), sendRow.endsWith("Send")]).toEqual([true, true]);
-    expect(button("Decline Keep things as they are.")?.textContent).toBe("Keep things as they are.Decline");
+    expect(button("Decline Keep things as they are.")?.parentElement?.textContent).toBe("Keep things as they are.Decline");
     expect([review.decisions, review.confirmations, world.telephony.sent]).toEqual([[], [], []]);
     await press("Send this text");
     try {

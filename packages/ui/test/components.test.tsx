@@ -56,7 +56,9 @@ vi.mock("maplibre-gl", () => {
   };
 });
 
+import { AssistantDeviceReceipt } from "../src/components/assistant/AssistantDeviceReceipt.tsx";
 import { AssistantGrabber, type AssistantRelease } from "../src/components/assistant/AssistantGrabber.tsx";
+import { AssistantMessage } from "../src/components/assistant/AssistantMessage.tsx";
 import { BrowserMenu } from "../src/components/browser/BrowserMenu.tsx";
 import { BrowserTabs } from "../src/components/browser/BrowserTabs.tsx";
 import { CalendarEventMenu, CalendarEventPage } from "../src/components/calendar/CalendarEventPage.tsx";
@@ -387,5 +389,21 @@ describe("UI component contracts", () => {
 
     render(<SettingsNetworkPage {...props} networks={[{ name: "Cafe", security: "wpa2" }]} />);
     expect(container.querySelector("form")).toBeNull();
+  });
+
+  // spec/app/assistant/cards.md, "What each kind offers"
+  it("draws a phone step's result chip as one of Alpha's lines, its mark first and the chip filling the row in the column of the reply text", () => {
+    const container = render(
+      <>
+        <AssistantMessage author="alpha" text="The reviewed read answered the original request." />
+        <AssistantMessage author="alpha" text=""><AssistantDeviceReceipt text="Latest incoming SMS sender ends in 0132." /></AssistantMessage>
+      </>,
+    );
+    const [reply, receipt] = [...container.querySelectorAll<HTMLElement>("[data-alpha-agent-line]")];
+    const chip = container.querySelector<HTMLElement>("[data-alpha-device-receipt]");
+    const shape = (line: HTMLElement | undefined) => [line?.className.includes("gap-2.5"), line?.firstElementChild?.matches("[data-alpha-agent-mark][aria-hidden]"), line?.firstElementChild?.className, line?.children.length];
+    expect([shape(receipt), chip?.parentElement === receipt, chip?.previousElementSibling === receipt?.firstElementChild, chip?.className.includes("flex-1"), chip?.textContent])
+      .toEqual([shape(reply), true, true, true, "Latest incoming SMS sender ends in 0132."]);
+    expect(shape(reply).slice(0, 2)).toEqual([true, true]);
   });
 });

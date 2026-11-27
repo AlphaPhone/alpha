@@ -1,0 +1,127 @@
+{
+  "key": "alpha/app/photos/viewer@1",
+  "spec": "spec/app/photos/viewer.md",
+  "shape": "be0efdcaf2909c83",
+  "state": {
+    "visible": true,
+    "secure": true,
+    "scope": [
+      81,
+      82
+    ],
+    "open": 0,
+    "openedBy": "Owner",
+    "origin": "LibraryItem",
+    "listed": false,
+    "read": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "kind": "Still",
+    "duration": 0,
+    "revision": 0,
+    "favourite": false,
+    "gone": false,
+    "zoom": 1,
+    "pan": {
+      "x": 0,
+      "y": 0
+    },
+    "chrome": true,
+    "muted": false,
+    "playing": false,
+    "position": 0,
+    "info": false,
+    "editing": false,
+    "cropping": false,
+    "edit": {
+      "turns": 0,
+      "cropped": false,
+      "bounds": {
+        "x": 0,
+        "y": 0,
+        "width": 10000,
+        "height": 10000
+      },
+      "look": "Original",
+      "start": 0,
+      "end": 0
+    },
+    "preview": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "unavailable": false,
+    "refusal": "NoRefusal",
+    "replace": false,
+    "save": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "attempts": 0,
+    "lookup": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "found": false,
+    "restored": false
+  },
+  "earlier": [
+    {
+      "from": "dcd279671c",
+      "until": "173bd6f26b",
+      "state": {
+        "visible": true,
+        "secure": true,
+        "scope": [
+          81,
+          82
+        ],
+        "open": 0,
+        "openedBy": "Owner",
+        "listed": false,
+        "read": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "kind": "Still",
+        "duration": 0,
+        "revision": 0,
+        "favourite": false,
+        "gone": false,
+        "zoom": 1,
+        "playing": false,
+        "position": 0,
+        "info": false,
+        "editing": false,
+        "edit": {
+          "turns": 0,
+          "cropped": false,
+          "look": "Original",
+          "start": 0,
+          "end": 0
+        },
+        "preview": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "unavailable": false,
+        "refusal": "NoRefusal",
+        "replace": false,
+        "save": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "attempts": 0,
+        "lookup": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "found": false,
+        "restored": false
+      }
+    }
+  ]
+}

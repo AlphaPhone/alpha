@@ -1,0 +1,25 @@
+{
+  "key": "alpha/app/reminders/alerts@2",
+  "spec": "spec/app/reminders/alerts.md",
+  "shape": "a670e992f21c6668",
+  "state": {
+    "entries": [
+      {
+        "id": 3,
+        "dueAt": 1795086400000,
+        "revision": 1,
+        "phase": "Scheduled",
+        "firedAt": 0,
+        "snoozedUntil": 0,
+        "requestedSnooze": 0,
+        "completed": false,
+        "attempt": {
+          "id": 0,
+          "outcome": "Planned"
+        }
+      }
+    ],
+    "bannerId": 0,
+    "nextAttempt": 1
+  }
+}

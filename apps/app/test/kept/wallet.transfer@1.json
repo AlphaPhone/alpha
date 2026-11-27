@@ -1,0 +1,50 @@
+{
+  "key": "alpha/app/wallet/transfer@1",
+  "spec": "spec/app/wallet/transfer.md",
+  "shape": "27ec63205cf72d90",
+  "state": {
+    "stage": "Closed",
+    "said": "Quiet",
+    "why": "",
+    "asking": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "request": 0,
+    "opening": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "review": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "terms": {
+      "request": 0,
+      "family": "Evm",
+      "network": "",
+      "account": "",
+      "recipient": "",
+      "symbol": "",
+      "decimals": 0,
+      "units": "",
+      "fee": "",
+      "feeSymbol": "",
+      "feeDecimals": 0,
+      "intent": "",
+      "commitment": "",
+      "expires": 0
+    },
+    "deciding": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "approving": false,
+    "spent": [
+      1,
+      2
+    ],
+    "settled": 2
+  }
+}

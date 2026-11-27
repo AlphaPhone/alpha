@@ -1,0 +1,228 @@
+{
+  "key": "alpha/app/inbox/message@1",
+  "spec": "spec/app/inbox/message.md",
+  "shape": "529e2d609ca13743",
+  "state": {
+    "account": 0,
+    "message": 0,
+    "thread": 0,
+    "position": 0,
+    "body": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "fromPhone": false,
+    "fault": "Fine",
+    "revision": 0,
+    "remote": false,
+    "images": false,
+    "link": 0,
+    "warning": false,
+    "attachment": 0,
+    "handling": "Opening",
+    "file": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "keep": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "attempts": 0,
+    "unsure": [
+      {
+        "account": 1,
+        "message": 7,
+        "attachment": 1
+      }
+    ],
+    "cancelled": 0,
+    "pdf": {
+      "page": 0,
+      "pages": 0,
+      "drawing": {
+        "status": "Idle",
+        "ticket": 0
+      }
+    },
+    "unsupported": 0
+  },
+  "kept": [
+    "unsure"
+  ],
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "f862078227",
+      "state": {
+        "account": 0,
+        "message": 0,
+        "thread": 0,
+        "position": 0,
+        "body": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "fromPhone": false,
+        "fault": "Fine",
+        "revision": 0,
+        "remote": false,
+        "images": false,
+        "link": 0,
+        "warning": false,
+        "attachment": 0,
+        "handling": "Opening",
+        "file": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "attempts": 0,
+        "unsure": [
+          {
+            "account": 1,
+            "message": 7,
+            "attachment": 1
+          }
+        ]
+      }
+    },
+    {
+      "from": "f862078227",
+      "until": "a943b4db6e (#1802)",
+      "state": {
+        "account": 0,
+        "message": 0,
+        "thread": 0,
+        "position": 0,
+        "body": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "fromPhone": false,
+        "fault": "Fine",
+        "revision": 0,
+        "remote": false,
+        "images": false,
+        "link": 0,
+        "warning": false,
+        "attachment": 0,
+        "handling": "Opening",
+        "file": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "attempts": 0,
+        "unsure": [
+          {
+            "account": 1,
+            "message": 7,
+            "attachment": 1
+          }
+        ],
+        "pdf": {
+          "page": 0,
+          "pages": 0,
+          "drawing": {
+            "status": "Idle",
+            "ticket": 0
+          }
+        }
+      }
+    },
+    {
+      "from": "a943b4db6e",
+      "until": "b4850658b1 (#1823)",
+      "state": {
+        "account": 0,
+        "message": 0,
+        "thread": 0,
+        "position": 0,
+        "body": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "fromPhone": false,
+        "fault": "Fine",
+        "revision": 0,
+        "remote": false,
+        "images": false,
+        "link": 0,
+        "warning": false,
+        "attachment": 0,
+        "handling": "Opening",
+        "file": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "keep": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "attempts": 0,
+        "unsure": [
+          {
+            "account": 1,
+            "message": 7,
+            "attachment": 1
+          }
+        ],
+        "pdf": {
+          "page": 0,
+          "pages": 0,
+          "drawing": {
+            "status": "Idle",
+            "ticket": 0
+          }
+        }
+      }
+    },
+    {
+      "from": "b4850658b1",
+      "until": "d8be219bf0 (#1836)",
+      "state": {
+        "account": 0,
+        "message": 0,
+        "thread": 0,
+        "position": 0,
+        "body": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "fromPhone": false,
+        "fault": "Fine",
+        "revision": 0,
+        "remote": false,
+        "images": false,
+        "link": 0,
+        "warning": false,
+        "attachment": 0,
+        "handling": "Opening",
+        "file": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "keep": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "attempts": 0,
+        "unsure": [
+          {
+            "account": 1,
+            "message": 7,
+            "attachment": 1
+          }
+        ],
+        "cancelled": 0,
+        "pdf": {
+          "page": 0,
+          "pages": 0,
+          "drawing": {
+            "status": "Idle",
+            "ticket": 0
+          }
+        }
+      }
+    }
+  ]
+}

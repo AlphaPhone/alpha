@@ -19,6 +19,7 @@ export const meta: ComponentMeta<NoteEditorProps> = {
       const menu = await screen.findByRole("menu", { name: "Note actions" });
       await expect([...menu.querySelectorAll("[role=menuitem]")].map((row) => [row.textContent, row.getAttribute("aria-disabled")]))
         .toEqual([["Share", null], ["Pin", null], ["Delete", null]]);
+      await userEvent.keyboard("{Escape}");
     },
   },
 };

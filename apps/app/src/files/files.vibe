@@ -1,6 +1,5 @@
 // spec/app/files/index.md, "Story: Browse my storage"
 import type { ElizaFilesPlugin, FileOutcomeRow, FilesCategory, StorageEntry, TrashEntry } from "@elizaos/os-bridges"
-import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Browser from "../../gen/app__files.effect.vibe"
 import type { Actor, Count, Effect as Out, Event, Tally, Volume } from "../../gen/app__files.effect.vibe"
 import { type Filter, type Where, everything, inDates, ofKind } from "../../gen/app__files__search.effect.vibe"
@@ -11,7 +10,7 @@ import { Device } from "../platform/index.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/index.vibe"
 import { Files, FilesFailed, called } from "../platform/index.vibe"
-import { type Job, answer, applying, due, following, hearing, reacting, run, together, untimed } from "../runtime/index.vibe"
+import { type Job, answer, applying, due, fieldsOf, filledStore, following, hearing, reacting, run, together, untimed, withFields } from "../runtime/index.vibe"
 import { scopedShelf, type Shelf } from "../runtime/index.vibe"
 import { scan, scanBack } from "./scan.vibe"
 import type { Machine as ScanMachine } from "../../gen/app__files__scan.effect.vibe"
@@ -31,31 +30,6 @@ module names {
   export function containsText(name: string, text: string): boolean {
     return name.toLocaleLowerCase().includes(text.toLocaleLowerCase())
   }
-  /** Add date bounds to the earlier stored filter shape, leaving every other kept field as it was. @throws {never} */
-  export function upgradedFilter(raw: string | undefined, bounds: { from: number; to: number }): unknown {
-    if (raw === undefined) return undefined
-    try {
-      const state: unknown = JSON.parse(raw)
-      if (typeof state !== "object" || state === null || !("search" in state)) return undefined
-      const search = state.search
-      if (typeof search !== "object" || search === null || !("filter" in search)) return undefined
-      const filter = search.filter
-      if (typeof filter !== "object" || filter === null || "from" in filter || "to" in filter) return undefined
-      return { ...state, search: { ...search, filter: { ...filter, from: bounds.from, to: bounds.to } } }
-    } catch {
-      return undefined
-    }
-  }
-  /** Give a kept Trash from before the details sheet its initial closed mark. @throws {never} */
-  export function upgradedTrash(raw: string | undefined): unknown {
-    if (raw === undefined) return undefined
-    try {
-      const state: unknown = JSON.parse(raw)
-      return typeof state === "object" && state !== null && !("details" in state) ? { ...state, details: 0 } : undefined
-    } catch {
-      return undefined
-    }
-  }
   /** @throws {never} */
   export function joined(folder: string, name: string): string {
     return folder === "" ? name : `${folder}/${name}`
@@ -70,7 +44,7 @@ module names {
     return collator.compare(first, second)
   }
 }
-import { compareNames, containsText, copied, joined, upgradedFilter, upgradedTrash } from names
+import { compareNames, containsText, copied, joined } from names
 export { parentPath as parentOf }
 
 // spec/app/files/index.md, "A name matches a text when the phone's comparison says it contains it; every name contains the empty text and itself"
@@ -556,17 +530,20 @@ function carry(fx: Out): Job<Event, Files | Handles | Browser.Machine | Bin.Mach
 }
 
 // spec/app/files/index.md, "A restart closes Files, keeps the access, the place, the layout and the sort, reports a change cut off as unknown, and tells the agent its waiting requests failed"
-function stored(key: string, start?: Browser.Files) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const raw = store.get(key) catch () => undefined
-    const upgraded = upgradedFilter(raw, everything)
-    if (upgraded !== undefined) {
-      const decoded = Browser.decodeState(upgraded) catch () => undefined
-      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** Files kept before its counts, its trash, its details, its date filter, or each item's size and contents: each is read as a fresh Files has it, or as an item not yet sized or counted. */
+function stored(key: string, start = Browser.initial) {
+  const { tally, partial, trash, details, handed, begun } = Browser.initial
+  const listed = (items: unknown) => (Array.isArray(items) ? items.map((item) => withFields(item, { bytes: 0, children: 0 })) : items)
+  return Layer.provide(Browser.stored(key, start), filledStore(key, (kept) => {
+    const search = fieldsOf(kept.search)
+    const change = fieldsOf(kept.change)
+    return {
+      tally, partial, trash, details, handed, begun, ...kept, items: listed(kept.items),
+      search: search && { complete: Browser.initial.search.complete, ...search, hits: listed(search.hits), filter: withFields(search.filter, { from: everything.from, to: everything.to }) },
+      change: change && { ...change, items: listed(change.items), sharing: listed(change.sharing), unsure: listed(change.unsure) },
     }
-    return Browser.stored(key, start)
-  })
+  }, Browser.parseState))
 }
 
 const browsing = reacting({ ...Browser, stored }, { keep: 1, open: [{ type: "restart" }, "Phone"], carry })
@@ -775,17 +752,11 @@ function carryBin(fx: Bin.Effect): Job<Bin.Event, Files | Handles | Bin.Machine 
 
 // spec/app/files/trash.md, "A restart closes the Trash, reports a job cut off as unknown, drops what was waiting and what was read, and closes the confirmation and the moment to undo"
 // spec/app/files/trash.md, "When the moment to undo has passed, the phone ends it, and Undo is no longer offered"
-function storedTrash(key: string, start?: Bin.Trash) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const raw = store.get(key) catch () => undefined
-    const upgraded = upgradedTrash(raw)
-    if (upgraded !== undefined) {
-      const decoded = Bin.decodeState(upgraded) catch () => undefined
-      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
-    }
-    return Bin.stored(key, start)
-  })
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** A Trash kept before entries could be marked or their details shown: read with none marked and no details open. */
+function storedTrash(key: string, start = Bin.initial) {
+  const { marked, details } = Bin.initial
+  return Layer.provide(Bin.stored(key, start), filledStore(key, (kept) => ({ marked, details, ...kept }), Bin.parseState))
 }
 const binning = reacting({ ...Bin, stored: storedTrash }, {
   keep: 1,

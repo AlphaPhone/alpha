@@ -25,7 +25,7 @@ const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(
 const decodeHidden = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.Number)))
 
 /** The agent's calendar list, which says whether its calendar is connected and the summary each calendar goes by (eliza's `LifeOpsCalendarSummary`). */
-schema Calendars { readonly calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }> }
+export schema Calendars { readonly calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }> }
 
 /** The number `account` keeps on this phone across restarts, which names its draft and hidden-calendar slots: 0 for no account. */
 effect function numberOf(account: string): number!!KeyValueStore.KeyValueStore {

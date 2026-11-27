@@ -1,0 +1,20 @@
+{
+  "key": "alpha/app/shell/index@5",
+  "spec": "spec/app/shell/index.md",
+  "shape": "7f8453f7a1a50aa6",
+  "state": {
+    "trail": [
+      "Clock"
+    ],
+    "drawer": false,
+    "assistant": "Bar",
+    "image": false,
+    "contacts": false,
+    "route": 0,
+    "spokenRoute": 0,
+    "textAsk": {
+      "tag": "NoTextAsk"
+    },
+    "textAskThrough": 0
+  }
+}
