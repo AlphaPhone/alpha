@@ -189,6 +189,9 @@ export async function readInboxFirst(alpha: Alpha, letters: ReturnType<typeof in
   await hardware("back");
 }
 
+/** The input whose accessible name is `name`, or null while none is drawn. */
+export const input = (name: string) => document.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`);
+
 /** Type `text` into the field whose accessible name is `name`, as a person does: React hears the input event. */
 export const fill = (name: string, text: string) => drawn(() => {
   const found = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")].find((field) => field.getAttribute("aria-label") === name);

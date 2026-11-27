@@ -79,6 +79,15 @@ async function askingBeside(world: ReturnType<typeof scene>) {
   return { alpha, ask, runtime };
 }
 
+/** The Browser opened from Home with Ask Alpha mounted beside it, once its tabs are read back. */
+async function browserBeside(world: ReturnType<typeof scene>) {
+  const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
+  const runtime = browser.runtime(alpha);
+  await press("Browser");
+  await until(alpha, runtime, Tabs, (s) => s.hydrated);
+  return { alpha, runtime };
+}
+
 /** The agent's BROWSER_OPEN of `url`, for the view that asked as `metadata` names it, marked to open at once when the owner's whole message asked for it. */
 const openAction = (url: string, metadata: unknown, atOnce = false) => ({
   action: "BROWSER_OPEN",
@@ -506,10 +515,7 @@ describe("The Browser on a phone", () => {
       reviewSession = page.sessionId;
       return Promise.resolve({ readingToken: "on-device-review" });
     };
-    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
-    const runtime = browser.runtime(alpha);
-    await press("Browser");
-    await until(alpha, runtime, Tabs, (state) => state.hydrated);
+    const { alpha, runtime } = await browserBeside(world);
     await goSecure(alpha, runtime, "https://example.test/article", kind);
     placeNative();
     const readPage = async () => {
@@ -1149,10 +1155,7 @@ describe("The Browser on a phone", () => {
       attempts += 1;
       return Promise.resolve({ text: attempts === 1 ? "" : "Settled article body after retry." });
     };
-    const { alpha } = await open(world, only("home", "assistant", "view:Browser"));
-    const runtime = browser.runtime(alpha);
-    await press("Browser");
-    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    const { alpha, runtime } = await browserBeside(world);
     await go("https://example.test/article", "normal");
     const tab = runtime.runSync(Tabs.use((tabs) => tabs.get())).selected;
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));

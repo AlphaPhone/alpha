@@ -110,7 +110,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Dismiss Call the bank");
     await later(alpha, 5_000);
     await until(alpha, reminders, Reminders, (s) => s.deletion.attempt.outcome === "Sent");
-    expect(world.sample.asked).toEqual(["Water the plants", "Call the bank"]);
+    await vi.waitFor(() => expect(world.sample.asked).toEqual(["Water the plants", "Call the bank"]));
     await first.close();
 
     world.sample.stalled = false;
