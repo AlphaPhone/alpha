@@ -64,6 +64,8 @@ export interface AskScene {
   /** The fake native store, which survives disposal of the WebView runtime. */
   readonly drafts: Map<string, string>;
   beforeDraftExchange?: () => Promise<void>;
+  /** The native store answers every read of a draft slot as unreadable, as its SecureSlots does for a slot it cannot decrypt. */
+  draftReadsFail?: boolean;
   refusedDraftExchanges: number;
   /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
   noOptionalFields?: boolean;
@@ -105,6 +107,7 @@ export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<Draft
     read(address: DraftAddress) {
       const key = admitted(address);
       if (key === undefined) return Promise.resolve({ status: "denied" });
+      if (scene.draftReadsFail) return Promise.resolve({ status: "failure" });
       const raw = scene.drafts.get(key);
       return Promise.resolve(raw === undefined ? { status: "read" } : { status: "read", raw });
     },

@@ -24,6 +24,12 @@ Voice note shows the elapsed time, recent microphone levels, and the
 recording status. Pause and Stop recording sit below the waveform.
 While paused, Resume takes the place of Pause.
 
+As in the existing app, the status is one word: Starting…, Recording,
+Paused or Saving…. A call pauses the recording quietly: the status reads
+Paused, the levels dim, and Resume waits for the call to end, with no
+words about the call. A recording picked up after a crash, or one an
+error stopped, is told to a screen reader only.
+
 ### The recorder holds one recording, the audio written so far, what is waiting to be written, and the keeping of it as a voice note
 
 A recording has a number, and while the microphone is on, a capture under

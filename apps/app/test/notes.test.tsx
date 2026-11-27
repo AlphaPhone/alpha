@@ -9,6 +9,7 @@ import { Machine as Composer } from "../gen/app__assistant__composer.effect.vibe
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Actions } from "../gen/app__notes__actions.effect.vibe";
 import { Machine as Editor, waiting } from "../gen/app__notes__editor.effect.vibe";
+import { Machine as Recorder } from "../gen/app__notes__recording.effect.vibe";
 import { Machine as Trash } from "../gen/app__notes__trash.effect.vibe";
 import { Machine as Voice } from "../gen/app__notes__voice.effect.vibe";
 import { Machine as List, nothing, writing as listWriting } from "../gen/app__notes.effect.vibe";
@@ -31,7 +32,7 @@ import { button, closeAll, drawn, fill, hardware, later, only, open, openOver, p
 import { note, notesRoutes, prepared } from "./fakes/notes.ts";
 import { answering, fetched } from "./fakes/routes.ts";
 import type * as Ui from "@repo/ui";
-import { type Scene, scene } from "./fakes/scene.ts";
+import { type Scene, alphaImage, scene } from "./fakes/scene.ts";
 
 underAct();
 afterEach(closeAll);
@@ -111,14 +112,14 @@ async function copyAfterChange(world: Scene, copy: MockInstance) {
 }
 
 async function openNotesFromHome(world: Scene) {
-  const { alpha } = await open(world, only("home", "view:Notes", "notice"));
+  const { alpha, close } = await open(world, only("home", "view:Notes", "notice"));
   const runtime = home.runtime(alpha);
   await rendered(async () => {
     expect((await runtime.runPromise(Home.use((machine) => machine.get()))).tiles.load.status).toBe("Loaded");
     expect(button("Notes")).toBeDefined();
   });
   await press("Notes");
-  return { alpha, runtime: notes.runtime(alpha) };
+  return { alpha, close, runtime: notes.runtime(alpha) };
 }
 
 async function openRecentlyDeleted(alpha: Awaited<ReturnType<typeof open>>["alpha"], runtime: ReturnType<typeof notes.runtime>, count: number) {
@@ -920,6 +921,64 @@ describe("Notes", () => {
     await chooseNotesOption("More", "Delete", true);
     await rendered(() => expect(world.notes.trash.some((entry) => entry.note.id === "sync")).toBe(true));
     await until(alpha, runtime, Voice, (state) => !state.showing);
+  });
+
+  it(`Records voice notes through an error, a call and a restart with no word but the v119 status, and keeps the paused one once (spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"; spec/app/notes/recording.md, "The owner pauses and goes on, from Notes or from the notification, and a call pauses the recording"; spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off"; spec/app/notes/recording.md, "What an error or a refused or missing keeping left is kept as a voice note when the owner says so, unless the recording is damaged")`, async () => {
+    const world = alphaImage();
+    const recorder = () => document.querySelector("[data-alpha-subview=notes-recording]");
+    const without = (hidden: string, node = recorder()) => {
+      const copy = node?.cloneNode(true) as Element | undefined;
+      for (const one of copy?.querySelectorAll(hidden) ?? []) one.remove();
+      return copy?.textContent?.replace(/\s+/g, " ").trim();
+    };
+    const seen = () => without(".sr-only");
+    const spoken = (role: string) => without("[aria-hidden]", recorder()?.querySelector(`[role=${role}]`));
+    const heard = (ms: number) => drawn(() => { world.notes.tape.durationMs = ms; world.notes.tapeChanged(); });
+    const first = await openLoadedNotes(world);
+    const record = async () => {
+      await control("Record voice note");
+      await press("Record voice note");
+      await until(first.alpha, first.runtime, Recorder, (state) => state.phase === "Recording" && state.capture > 0);
+    };
+    await record();
+    await heard(2000);
+    await until(first.alpha, first.runtime, Recorder, (state) => state.unsaved >= 2);
+    await drawn(() => { world.notes.tape.state = "stopped"; world.notes.tape.stopReason = "error"; world.notes.tape.segments.push({ segmentId: "after-error", durationMs: 2000 }); world.notes.tapeChanged(); });
+    await until(first.alpha, first.runtime, Recorder, (state) => state.phase === "Failed" && state.kept === 1);
+    await rendered(() => expect([seen(), spoken("alert"), button(/^Save recording$/)?.disabled])
+      .toEqual(["Voice noteDiscard0:02 Save recording", "Recording stopped. The saved audio is still here.", false]));
+    await press("Discard recording");
+    await control("Discard");
+    await press("Discard");
+    await until(first.alpha, first.runtime, Recorder, (state) => state.phase === "Idle");
+    await rendered(() => expect(world.notes.tape.state).toBe("idle"));
+
+    await record();
+    await heard(4000);
+    await until(first.alpha, first.runtime, Recorder, (state) => state.unsaved >= 4);
+    world.telephony.live = [{ id: "c1", state: "ringing", connectedAt: null }];
+    world.telephony.report();
+    await until(first.alpha, first.runtime, Recorder, (state) => state.calling && state.phase === "Paused" && state.kept === 1);
+    await rendered(() => expect([seen(), button(/^Resume$/)?.disabled]).toEqual(["Voice noteDiscard0:04Paused Resume Stop recording", true]));
+    expect([world.notes.told, world.notes.tape.state, world.notes.tape.segments.length]).toEqual([["Start", "Start", "Pause"], "paused", 1]);
+
+    world.telephony.live = [];
+    world.telephony.report();
+    await until(first.alpha, first.runtime, Recorder, (state) => !state.calling && state.phase === "Paused");
+    await rendered(() => expect(button(/^Resume$/)?.disabled).toBe(false));
+    expect(world.notes.told).toEqual(["Start", "Start", "Pause"]);
+    await first.close();
+
+    const restarted = await open(world, only("home", "view:Notes", "notice"));
+    const second = { alpha: restarted.alpha, runtime: notes.runtime(restarted.alpha) };
+    await until(second.alpha, second.alpha.runtime, Shell, (where) => showing(where, "Notes"));
+    await until(second.alpha, second.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 1);
+    await rendered(() => expect([seen(), spoken("status"), button(/^Resume$/)?.disabled])
+      .toEqual(["Voice noteDiscard0:00Paused Resume Stop recording", "Recovered recording", false]));
+    await press(/^Stop recording$/);
+    await until(second.alpha, second.runtime, Recorder, (state) => state.phase === "Kept" && state.note > 0);
+    const kept = world.notes.notes.filter((one) => one.format?.kind === "voice" && one.id.startsWith("fake-note-"));
+    expect([world.notes.told, kept.length, world.notes.audio.get("recording-2")]).toEqual([["Start", "Start", "Pause", "End"], 1, { noteId: kept[0]?.id, durationMs: 4000 }]);
   });
 
   it('Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, "Story: See my notes")', () => {
