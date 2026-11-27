@@ -2,7 +2,7 @@
 import type { SignInCard } from "../../gen/app__update.effect.vibe"
 import * as Recorder from "../../gen/app__notes__recording.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { applying } from "../runtime/reactor.vibe"
+import { applying } from "../runtime/index.vibe"
 
 module web {
   const nonText = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image", "hidden"])

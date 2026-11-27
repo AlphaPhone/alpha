@@ -7,8 +7,8 @@ import { type Account, type Fate, type Past, type Request, agents, own, readingO
 import { useMachine } from "../../gen/app__wallet.react.ts";
 import type { Machine as Sending, Said } from "../../gen/app__wallet__transfer.effect.vibe";
 import { useMachine as useTransfer } from "../../gen/app__wallet__transfer.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import type { Time } from "../runtime/index.vibe";
 import type { Ledger, Transferring } from "./machines.ts";
 import { Receive } from "./Receive.tsx";
 import { Review } from "./Review.tsx";

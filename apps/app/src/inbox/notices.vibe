@@ -2,12 +2,12 @@
 import type { MailBackground, MailBackgroundSelection, MailBackgroundStatus } from "@elizaos/plugin-inbox-client"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Device } from "../platform/device.vibe"
-import { backgroundMail, inboxNoticesAvailable } from "../platform/inboxNotices.vibe"
-import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
-import { started, together } from "../runtime/reactor.vibe"
-import { externalStore } from "../runtime/store.ts"
+import { Cloud } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { backgroundMail, inboxNoticesAvailable } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/index.vibe"
+import { started, together } from "../runtime/index.vibe"
+import { externalStore } from "../runtime/index.vibe"
 import { Mail, asked } from "./gmail.vibe"
 
 interface View {

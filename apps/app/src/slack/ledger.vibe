@@ -10,10 +10,10 @@ import {
   MessagingSessions,
   RateLimited,
   tokenValue,
-} from "../platform/messaging.vibe"
-import { Unreachable } from "../platform/remote.vibe"
-import { type SlackChannelSummary, type SlackClient, type SlackMessage, type SlackSearchMatch, type SlackUser, Slack } from "../platform/slack.vibe"
-import { contained } from "../runtime/reactor.vibe"
+} from "../platform/index.vibe"
+import { Unreachable } from "../platform/index.vibe"
+import { type SlackChannelSummary, type SlackClient, type SlackMessage, type SlackSearchMatch, type SlackUser, Slack } from "../platform/index.vibe"
+import { contained } from "../runtime/index.vibe"
 
 /** Metadata for one connected Slack workspace (strictly free of tokens, codes, or PKCE verifiers). */
 export interface WorkspaceMeta {

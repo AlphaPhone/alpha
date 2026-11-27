@@ -13,7 +13,7 @@ lemma latest_ensures(c: Chats, page: int, ok: bool, ids: seq<int>, conversation:
   ensures (inv(c) ==> canLatest(c, page, ids, conversation) ==> stepOnlyAMessageOfTheConversationShowingIsReadAloud(c, "latest", latest(c, page, ok, ids, conversation, replying, holding).state, latest(c, page, ok, ids, conversation, replying, holding).out))
 {
   if inv(c) && canLatest(c, page, ids, conversation) {
-    if ok && !(conversation in ids) && |ids| > 0 {
+    if |ids| > 0 {
       assert ids[0] in ids;
     }
   }

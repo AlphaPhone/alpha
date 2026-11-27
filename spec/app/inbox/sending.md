@@ -614,6 +614,8 @@ pure def sessionChanged(s: Operations): Operations = {
 
 ### Each operation takes a new number and names its account and what it acts on, and a review open is of an operation of this session not yet recorded
 
+Discovered by the proof: an operation moves past planned only after taking a number.
+
 ```quint
 pure def alwaysEachOperationHasANewNumber(s: Operations): bool =
   0 <= s.attempt.id and s.attempt.id <= s.attempts and s.of <= s.session

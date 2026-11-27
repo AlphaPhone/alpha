@@ -1,0 +1,90 @@
+{
+  "key": "alpha/app/assistant/index@1",
+  "spec": "spec/app/assistant/index.md",
+  "shape": "c5c1f6406c2ff2eb",
+  "state": {
+    "ready": false,
+    "support": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "observing": false,
+    "turn": {
+      "send": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "hold": 0,
+      "attachments": 0,
+      "reply": "Silent",
+      "stopping": false,
+      "revision": 0
+    },
+    "context": {
+      "showing": {
+        "tag": "Home"
+      },
+      "zone": "",
+      "day": 0,
+      "selected": false,
+      "sensitive": false,
+      "section": "Top",
+      "revision": 0
+    },
+    "check": "Unchecked",
+    "aborted": false,
+    "recheck": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "opening": {
+      "id": 0,
+      "outcome": "Planned"
+    }
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "299b554681",
+      "state": {
+        "ready": false,
+        "support": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "observing": false,
+        "turn": {
+          "send": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "hold": 0,
+          "attachments": 0,
+          "reply": "Silent",
+          "stopping": false,
+          "revision": 0
+        },
+        "context": {
+          "showing": {
+            "tag": "Home"
+          },
+          "zone": "",
+          "day": 0,
+          "selected": false,
+          "sensitive": false,
+          "revision": 0
+        },
+        "check": "Unchecked",
+        "aborted": false,
+        "recheck": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "opening": {
+          "id": 0,
+          "outcome": "Planned"
+        }
+      }
+    }
+  ]
+}

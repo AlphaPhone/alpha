@@ -1,26 +1,43 @@
+// spec/app/files/index.md
 lemma ToggleKeeps(s: Files, target: int, by_: Actor)
   ensures toggle(s, target, by_).picked == (if (target in s.picked) then ProofLib.Filter((id: int) => (id != target), s.picked) else (s.picked + [target]))
+{
+}
+
+lemma PickedFromFilter(items: seq<app__files__shared_Item>, picked: seq<int>)
+  ensures pickedFrom(items, picked) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in picked), items)
 {
 }
 
 lemma ChosenIsListed(s: Files)
   ensures forall i :: i in chosen(s) ==> i in s.items
 {
-  assert chosen(s) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in s.picked), s.items);
+  PickedFromFilter(s.items, s.picked);
   forall i | i in chosen(s) ensures i in s.items {
     ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in s.picked), s.items, i);
   }
 }
 
-lemma ApproveDeletingKeeps(s: Files, ticket: int, act: Action, file: app__files__shared_Item, folder: int, name: string, dest: app__files__change_Place, guarded: bool, mail: bool, by_: Actor)
-  requires runnable(s, act, file, folder, name, dest, guarded) && act.Deleting?
-  ensures approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state.picked == ProofLib.Filter((id: int) => (id != file.id), s.picked)
+lemma SearchSearchedHitsFilter(sh: app__files__search_Search, ticket: int, ok: bool, complete: bool, xs: seq<app__files__shared_Item>)
+  requires ok
+  ensures app__files__search_searched(sh, ticket, ok, complete, xs).hits == ProofLib.Filter((i: app__files__shared_Item) => (app__files__search_ofKind(sh.filter, i) && app__files__search_inDates(sh.filter, i.revision)), xs)
+{
+}
+
+lemma SearchedCallsSearchSearched(s: Files, ticket: int, ok: bool, complete: bool, entries: seq<app__files__shared_Item>, by_: Actor)
+  ensures searched(s, ticket, ok, complete, entries, by_).state.search == app__files__search_searched(s.search, ticket, ok, complete, ProofLib.Filter((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries))
 {
 }
 
 lemma ApproveBatchDeletingKeeps(s: Files, ticket: int, act: Action, approvedItems: seq<app__files__shared_Item>, reviewedFrom: app__files__search_Where, dest: app__files__change_Place, guarded: bool, by_: Actor)
   requires batchFits(s, act, approvedItems, reviewedFrom, dest, guarded) && act.Deleting?
   ensures approveBatch(s, ticket, act, approvedItems, reviewedFrom, dest, guarded, by_).state.picked == ProofLib.Filter((id: int) => !((exists i :: i in approvedItems && (i.id == id))), s.picked)
+{
+}
+
+lemma ApproveDeletingKeeps(s: Files, ticket: int, act: Action, file: app__files__shared_Item, folder: int, name: string, dest: app__files__change_Place, guarded: bool, mail: bool, by_: Actor)
+  requires runnable(s, act, file, folder, name, dest, guarded) && act.Deleting?
+  ensures approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state.picked == ProofLib.Filter((id: int) => (id != file.id), s.picked)
 {
 }
 
@@ -62,6 +79,7 @@ lemma toggle_ensures(s: Files, target: int, by_: Actor)
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepABatchDispatchesOneReviewedAction(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "toggle", toggle(s, target, by_), []))
   ensures (inv(s) ==> canToggle(s, target, by_) ==> stepARestartKeepsTheArrangement(s, "toggle", toggle(s, target, by_)))
+
 {
   if inv(s) && canToggle(s, target, by_) {
     var after := toggle(s, target, by_);
@@ -112,6 +130,7 @@ lemma approve_ensures(s: Files, ticket: int, act: Action, file: app__files__shar
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepABatchDispatchesOneReviewedAction(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state, approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).out))
   ensures (inv(s) ==> canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) ==> stepARestartKeepsTheArrangement(s, "approve", approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state))
+
 {
   if inv(s) && canApprove(s, ticket, act, file, folder, name, dest, guarded, mail, by_) && runnable(s, act, file, folder, name, dest, guarded) && act.Deleting? {
     var after := approve(s, ticket, act, file, folder, name, dest, guarded, mail, by_).state;
@@ -160,6 +179,7 @@ lemma begin_ensures(s: Files, work: app__files__change_Work, name: string, by_: 
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepABatchDispatchesOneReviewedAction(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "begin", begin(s, work, name, by_).state, begin(s, work, name, by_).out))
   ensures (inv(s) ==> canBegin(s, work, name, by_) ==> stepARestartKeepsTheArrangement(s, "begin", begin(s, work, name, by_).state))
+
 {
   if inv(s) && canBegin(s, work, name, by_) {
     ChosenIsListed(s);
@@ -204,6 +224,7 @@ lemma keepBoth_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepABatchDispatchesOneReviewedAction(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "keepBoth", keepBoth(s, by_).state, keepBoth(s, by_).out))
   ensures (inv(s) ==> canKeepBoth(s, by_) ==> stepARestartKeepsTheArrangement(s, "keepBoth", keepBoth(s, by_).state))
+
 {
   if inv(s) && canKeepBoth(s, by_) {
     app__files__change_keepBoth_ensures(s.change);
@@ -248,6 +269,7 @@ lemma replaceThem_ensures(s: Files, by_: Actor)
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepABatchDispatchesOneReviewedAction(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "replaceThem", replaceThem(s, by_).state, replaceThem(s, by_).out))
   ensures (inv(s) ==> canReplaceThem(s, by_) ==> stepARestartKeepsTheArrangement(s, "replaceThem", replaceThem(s, by_).state))
+
 {
   if inv(s) && canReplaceThem(s, by_) {
     app__files__change_replaceThem_ensures(s.change);
@@ -292,6 +314,7 @@ lemma finished_ensures(s: Files, ticket: int, done: seq<int>, failed: seq<int>, 
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepABatchDispatchesOneReviewedAction(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "finished", finished(s, ticket, done, failed, by_).state, finished(s, ticket, done, failed, by_).out))
   ensures (inv(s) ==> canFinished(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "finished", finished(s, ticket, done, failed, by_).state))
+
 {
   if inv(s) && canFinished(s, ticket, by_) {
     app__files__change_finished_ensures(s.change, ticket, done, failed);
@@ -337,36 +360,22 @@ lemma listed_ensures(s: Files, ticket: int, ok: bool, gone: bool, complete: bool
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepReviewedNewFolderKeepsThePlace(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state, listed(s, ticket, ok, gone, complete, entries, by_).out))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "listed", listed(s, ticket, ok, gone, complete, entries, by_).state))
 {
-  if inv(s) && canListed(s, ticket, by_) {
+  if inv(s) && canListed(s, ticket, by_) && !((!ok && gone) && !s.inCategory) {
     var after := listed(s, ticket, ok, gone, complete, entries, by_).state;
-    if !((!(ok) && gone) && !(s.inCategory)) {
-      var items := (if !(ok) then [] else (if s.inCategory then ProofLib.Filter((i: app__files__shared_Item) => app__files__shared_fitsKind(s.category, i.kind), entries) else entries));
-      var picked := ProofLib.Filter((id: int) => has(items, id), s.picked);
-      assert after.items == items;
-      assert after.picked == picked;
-      if s.inCategory && ok {
-        forall i | i in items ensures app__files__shared_fitsKind(s.category, i.kind) {
-          ProofLib.FilterMember((i: app__files__shared_Item) => app__files__shared_fitsKind(s.category, i.kind), entries, i);
-        }
-      }
-      forall id | id in picked ensures has(items, id) {
-        ProofLib.FilterMember((id: int) => has(items, id), s.picked, id);
-      }
-      if kit__review_canConfirm(after.deleting) {
-        assert s.deleting.showing;
-        assert kit__review_canConfirm(s.deleting);
-        assert |s.picked| > 0;
-        var id0 := s.picked[0];
-        assert id0 in s.picked;
-        assert has(s.items, id0);
-        var x :| x in s.items && x.id == id0;
-        assert chosen(s) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in s.picked), s.items);
-        ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in s.picked), s.items, x);
-        assert x in chosen(s);
-        assert chosen(s) == ProofLib.Filter((i: app__files__shared_Item) => (i.id in picked), items);
-        ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in picked), items, x);
-        assert x.id in picked;
-      }
+    if kit__review_canConfirm(s.deleting) && |after.picked| == 0 {
+      assert |s.picked| > 0;
+      var id := s.picked[0];
+      assert id in s.picked;
+      assert has(s.items, id);
+      var it :| it in s.items && it.id == id;
+      PickedFromFilter(s.items, s.picked);
+      ProofLib.FilterMember((i: app__files__shared_Item) => (i.id in s.picked), s.items, it);
+      assert it in chosen(s);
+      assert |chosen(s)| > 0;
+      PickedFromFilter(after.items, after.picked);
+      ProofLib.FilterNone((i: app__files__shared_Item) => (i.id in after.picked), after.items);
+      assert |pickedFrom(after.items, after.picked)| == 0;
+      assert chosen(s) != pickedFrom(after.items, after.picked);
     }
   }
 }
@@ -411,13 +420,15 @@ lemma searched_ensures(s: Files, ticket: int, ok: bool, complete: bool, entries:
   ensures (inv(s) ==> canSearched(s, ticket, by_) ==> stepARestartKeepsTheArrangement(s, "searched", searched(s, ticket, ok, complete, entries, by_).state))
 {
   if inv(s) && canSearched(s, ticket, by_) {
-    var filtered := ProofLib.Filter((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries);
-    var afterSearch := app__files__search_searched(s.search, ticket, ok, complete, filtered);
+    SearchedCallsSearchSearched(s, ticket, ok, complete, entries, by_);
+    var textHits := ProofLib.Filter((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries);
     var after := searched(s, ticket, ok, complete, entries, by_).state;
-    assert after.search == afterSearch;
     if ok {
-      forall i | i in afterSearch.hits ensures app__files__search_ofKind(afterSearch.filter, i) && app__files__search_inDates(afterSearch.filter, i.revision) && containsText(i.name, afterSearch.filter.text) {
-        ProofLib.FilterMember((i: app__files__shared_Item) => (app__files__search_ofKind(s.search.filter, i) && app__files__search_inDates(s.search.filter, i.revision)), filtered, i);
+      SearchSearchedHitsFilter(s.search, ticket, ok, complete, textHits);
+      forall i | i in after.search.hits
+        ensures app__files__search_ofKind(s.search.filter, i) && app__files__search_inDates(s.search.filter, i.revision) && containsText(i.name, s.search.filter.text)
+      {
+        ProofLib.FilterMember((i: app__files__shared_Item) => (app__files__search_ofKind(s.search.filter, i) && app__files__search_inDates(s.search.filter, i.revision)), textHits, i);
         ProofLib.FilterMember((i: app__files__shared_Item) => containsText(i.name, s.search.filter.text), entries, i);
       }
     }
@@ -428,12 +439,10 @@ lemma lawAPositionNamesOnlyAResultShown_ensures(hits: seq<app__files__shared_Ite
   ensures (lawAPositionNamesOnlyAResultShown(hits, positions) == true)
 {
   var res := atPositions(hits, positions);
-  if (|positions| > 0) && !((exists p :: p in positions && !(((p >= 1) && (p <= |hits|))))) {
-    forall i | i in res ensures i in hits {
-      var k :| 0 <= k < |res| && res[k] == i;
+  if |positions| > 0 && !(exists p :: p in positions && !((p >= 1) && (p <= |hits|))) {
+    forall k | 0 <= k < |res| ensures res[k] in hits {
       var p := positions[k];
       assert p in positions;
-      assert 1 <= p <= |hits|;
       assert res[k] == hits[p - 1];
     }
   }

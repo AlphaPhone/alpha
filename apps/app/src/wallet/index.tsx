@@ -2,8 +2,8 @@
 import { Effect } from "effect";
 import * as Ledger from "../../gen/app__wallet.effect.vibe";
 import * as Sending from "../../gen/app__wallet__transfer.effect.vibe";
-import { area } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
+import { area } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
 import { Wallet } from "./Wallet.tsx";
 import { transfer } from "./transfer.vibe";
 import { wallet } from "./wallet.vibe";

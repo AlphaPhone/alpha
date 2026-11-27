@@ -1,0 +1,240 @@
+// spec/app/notices/posting.md, "Story: Be told by Alpha's own notices"; spec/app/notices/posting.md, "A channel in a group the owner blocked is off, and reminder, call and text channels are in no group"; spec/app/notices/posting.md, "Story: Change owner or restart with a notice out"
+import * as Posting from "../../gen/app__notices__posting.effect.vibe"
+import { type Job, answer, contained, reacting, run, together } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
+
+/** Alpha's four Android notification channel groups, declared before any notice is posted. */
+export const ALPHA_CHANNEL_GROUPS = [
+  { id: "AssistantGroup", name: "Assistant" },
+  { id: "MailAndBriefsGroup", name: "Mail and briefs" },
+  { id: "WorkflowsGroup", name: "Workflows" },
+  { id: "OngoingGroup", name: "Ongoing activity" },
+] as const
+
+/** Metadata describing an outbound Alpha notice queued for delivery. */
+export interface PostedNoticeDetail {
+  readonly id: number
+  readonly title: string
+  readonly body: string
+  readonly channel: Posting.NoticeChannel
+  readonly owner: number
+}
+
+/** Current channel/group delivery gate for a notice channel. */
+export interface ChannelGate {
+  readonly notifications: boolean
+  readonly channelBlocked: boolean
+  readonly groupBlocked: boolean
+}
+
+/** Injectable hooks for posting, checking, withdrawing, acknowledging, and blocking outbound notices. */
+export interface PostingHooks {
+  post(detail: PostedNoticeDetail): { readonly shown: boolean; readonly known: boolean }!!
+  checkPosted(detail: PostedNoticeDetail): { readonly shown: boolean; readonly known: boolean }!!
+  withdraw(detail: PostedNoticeDetail): void!!
+  acknowledge(id: number): void!!
+  cannotShow(id: number): void!!
+}
+
+/** Snapshot of outbound deliveries and events for UI and tests. */
+export interface PostingSnapshot {
+  readonly details: ReadonlyMap<number, PostedNoticeDetail>
+  readonly posted: ReadonlyArray<number>
+  readonly withdrawn: ReadonlyArray<number>
+  readonly acknowledged: ReadonlyArray<number>
+  readonly blocked: ReadonlyArray<number>
+  readonly checked: ReadonlyArray<number>
+}
+
+export interface PostingDeskService {
+  snapshot(): PostingSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<PostingHooks>): void
+  register(detail: PostedNoticeDetail): void
+  detailOf(id: number): PostedNoticeDetail | undefined
+  reset(): void
+  performPost(id: number): { readonly shown: boolean; readonly known: boolean }!!
+  performCheck(id: number): { readonly shown: boolean; readonly known: boolean }!!
+  performWithdraw(id: number): void!!
+  performAcknowledge(id: number): void!!
+  performCannotShow(id: number): void!!
+}
+
+export service PostingDesk: PostingDeskService {}
+
+/** Compute whether a channel may post given notification permission, channel block, and group block. */
+export function canPostToChannel(channel: Posting.NoticeChannel, gate: ChannelGate): boolean {
+  return gate.notifications && Posting.channelOn(channel, gate.channelBlocked, gate.groupBlocked)
+}
+
+const postingDesk = Layer.sync(PostingDesk, () => {
+  const details = new Map<number, PostedNoticeDetail>()
+  let posted: number[] = []
+  let withdrawn: number[] = []
+  let acknowledged: number[] = []
+  let blocked: number[] = []
+  let checked: number[] = []
+  let hooks: Partial<PostingHooks> = {}
+  const { snapshot, subscribe, emit } = createDeskStore((): PostingSnapshot => ({
+    details: new Map(details),
+    posted: [...posted],
+    withdrawn: [...withdrawn],
+    acknowledged: [...acknowledged],
+    blocked: [...blocked],
+    checked: [...checked],
+  }))
+  const fallbackDetail = (id: number): PostedNoticeDetail =>
+    details.get(id) ?? { id, title: "Alpha notice", body: "", channel: "AssistantChannel", owner: 1 }
+  return {
+    snapshot,
+    subscribe,
+    setHooks(next: Partial<PostingHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    register(detail: PostedNoticeDetail): void {
+      details.set(detail.id, detail)
+      emit()
+    },
+    detailOf: (id: number) => details.get(id),
+    reset(): void {
+      details.clear()
+      posted = []
+      withdrawn = []
+      acknowledged = []
+      blocked = []
+      checked = []
+      hooks = {}
+      emit()
+    },
+    performPost: (id: number) => effect {
+      posted.push(id)
+      emit()
+      if (hooks.post !== undefined) return try hooks.post(fallbackDetail(id))
+      return { shown: true, known: true }
+    },
+    performCheck: (id: number) => effect {
+      checked.push(id)
+      emit()
+      if (hooks.checkPosted !== undefined) return try hooks.checkPosted(fallbackDetail(id))
+      return { shown: true, known: true }
+    },
+    performWithdraw: (id: number) => effect {
+      withdrawn.push(id)
+      emit()
+      if (hooks.withdraw !== undefined) try hooks.withdraw(fallbackDetail(id))
+    },
+    performAcknowledge: (id: number) => effect {
+      acknowledged.push(id)
+      emit()
+      if (hooks.acknowledge !== undefined) try hooks.acknowledge(id)
+    },
+    performCannotShow: (id: number) => effect {
+      blocked.push(id)
+      emit()
+      if (hooks.cannotShow !== undefined) try hooks.cannotShow(id)
+    },
+  }
+})
+
+function postNoticeAnswer(label: string, id: number, work: (desk: PostingDeskService) => { readonly shown: boolean; readonly known: boolean }!!) {
+  return answer(
+    label,
+    effect {
+      const result = try work(try PostingDesk)
+      return { type: "posted", id, shown: result.shown, known: result.known } as const
+    },
+    { type: "posted", id, shown: false, known: false } as const,
+  )
+}
+
+function carry(fx: Posting.Effect): Job<Posting.Event, PostingDesk, []> {
+  return match (fx.act) {
+    when "Post": postNoticeAnswer(`posting-post-${fx.number}`, fx.number, (desk) => desk.performPost(fx.number));
+    when "CheckPosted": postNoticeAnswer(`posting-check-${fx.number}`, fx.number, (desk) => desk.performCheck(fx.number));
+    when "Withdraw": run(`posting-withdraw-${fx.number}`, effect { try (try PostingDesk).performWithdraw(fx.number) });
+    when "Acknowledge": run(`posting-ack-${fx.number}`, effect { try (try PostingDesk).performAcknowledge(fx.number) });
+    when "CannotShow": run(`posting-blocked-${fx.number}`, effect { try (try PostingDesk).performCannotShow(fx.number) });
+  }
+}
+
+// spec/app/notices/posting.md, "A delivery is queued once, under its identity, for the owner signed in"
+/** Queue an outbound Alpha notice once under its identity for `detail.owner`. */
+export effect function queueNotice(detail: PostedNoticeDetail): boolean!!(Posting.Machine | PostingDesk) {
+  const machine = try Posting.Machine
+  if (!Posting.canQueue(try machine.get(), detail.id, detail.owner)) return false
+  ;(try PostingDesk).register(detail)
+  return try contained(machine.send({ type: "queue", id: detail.id, signedIn: detail.owner }), "queuing notice")
+}
+
+// spec/app/notices/posting.md, "A queued delivery is posted only while Android allows notifications and its channel is on, for its owner signed in, and never after its tap was spent"
+/** Attempt to deliver a queued notice against its channel and group block status; blocks once when disallowed. */
+export effect function deliverNotice(id: number, gate: ChannelGate, signedIn: number): boolean!!(Posting.Machine | PostingDesk) {
+  const machine = try Posting.Machine
+  const detail = (try PostingDesk).detailOf(id)
+  const channel: Posting.NoticeChannel = detail?.channel ?? "AssistantChannel"
+  const channelAllowed = Posting.channelOn(channel, gate.channelBlocked, gate.groupBlocked)
+  const state = try machine.get()
+  if (Posting.canPost(state, id, gate.notifications, channelAllowed, signedIn)) {
+    return try contained(machine.send({ type: "post", id, notifications: gate.notifications, channel: channelAllowed, signedIn }), "posting notice")
+  }
+  if (Posting.canBlock(state, id, gate.notifications, channelAllowed)) {
+    try ignore(machine.send({ type: "block", id, notifications: gate.notifications, channel: channelAllowed }))
+  }
+  return false
+}
+
+// spec/app/notices/posting.md, "A refused post is tried again once, under the same identity; refused again, it is not tried any more"
+/** Retry a once-refused notice delivery under the same identity. */
+export effect function retryNoticeDelivery(id: number): boolean!!Posting.Machine {
+  const machine = try Posting.Machine
+  if (!Posting.canRetry(try machine.get(), id)) return false
+  return try contained(machine.send({ type: "retry", id }), "retrying notice delivery")
+}
+
+// spec/app/notices/posting.md, "When the owner's tap on it is spent, nothing is posted after that"
+/** Close a delivery once its tap is spent or the notice is dismissed. */
+export effect function markNoticeSpent(id: number): boolean!!Posting.Machine {
+  const machine = try Posting.Machine
+  if (!Posting.canSpent(try machine.get(), id)) return false
+  return try contained(machine.send({ type: "spent", id }), "spending notice delivery")
+}
+
+// spec/app/notices/posting.md, "Whoever asked for the notice is told once that it was shown, acted on, refused twice, or cannot be known"
+/** Acknowledge an ended delivery to its publisher once. */
+export effect function acknowledgeNotice(id: number): boolean!!Posting.Machine {
+  const machine = try Posting.Machine
+  if (!Posting.canAcknowledge(try machine.get(), id)) return false
+  return try contained(machine.send({ type: "acknowledge", id }), "acknowledging notice delivery")
+}
+
+// spec/app/notices/posting.md, "Another owner signing in withdraws each notice shown for the owner before, and closes it"
+/** Withdraw and close every confirmed notice belonging to another owner when `signedIn` changes. */
+export effect function concealNoticesForOwner(signedIn: number): void!!Posting.Machine {
+  const machine = try Posting.Machine
+  const state = try machine.get()
+  for (const id of state.ids) {
+    if (Posting.canConceal(try machine.get(), id, signedIn)) {
+      try ignore(machine.send({ type: "conceal", id, signedIn }))
+    }
+  }
+}
+
+// spec/app/notices/posting.md, "After a restart Alpha asks Android once whether each notice being posted was shown, and posts nothing until it has"
+/** Mark every active delivery interrupted on restart and check each once. */
+export effect function restartAndCheckPosting(): void!!Posting.Machine {
+  const machine = try Posting.Machine
+  if (Posting.canRestart(try machine.get())) {
+    try ignore(machine.send({ type: "restart" }))
+  }
+  const state = try machine.get()
+  for (const id of state.interrupted) {
+    if (Posting.canCheck(try machine.get(), id)) {
+      try ignore(machine.send({ type: "check", id }))
+    }
+  }
+}
+
+const postingMachine = reacting(Posting, { carry })
+
+/** Outbound Alpha notification posting coordinator with channel-group blocking and single-retry. */
+export const posting = together(postingDesk, postingMachine)

@@ -1,0 +1,58 @@
+{
+  "key": "alpha/app/assistant/chats@1",
+  "spec": "spec/app/assistant/chats.md",
+  "shape": "c3e7a40cb66ebec6",
+  "state": {
+    "list": {
+      "status": "Loaded",
+      "ticket": 1
+    },
+    "ids": [
+      12,
+      15
+    ],
+    "chosen": 0,
+    "origin": 0,
+    "page": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "around": 0,
+    "messages": 0,
+    "make": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "forkAt": 0,
+    "fresh": false
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "9e783ddf28 (#1785)",
+      "state": {
+        "list": {
+          "status": "Loaded",
+          "ticket": 1
+        },
+        "ids": [
+          12,
+          15
+        ],
+        "chosen": 0,
+        "origin": 0,
+        "page": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "around": 0,
+        "messages": 0,
+        "make": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "forkAt": 0
+      }
+    }
+  ]
+}

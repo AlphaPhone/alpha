@@ -1,7 +1,7 @@
 // spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
 import { type LayerEntry, LayerObserverProvider, PortalContainerProvider } from "@repo/ui";
 import { type ReactNode, useCallback, useRef } from "react";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 
 export interface ShellLayerHostProps {
   /** The running shell instance receiving layer registrations and Back handoffs. */

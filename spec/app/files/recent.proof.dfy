@@ -1,3 +1,4 @@
+// spec/app/files/recent.md
 lemma FilterLength<T>(p: T -> bool, xs: seq<T>)
   ensures |ProofLib.Filter(p, xs)| <= |xs|
   decreases |xs|
@@ -31,10 +32,10 @@ lemma DroppedSound(before: Recent, after: Recent, extra: seq<Effect>)
   ensures stepHeldAccessIsKept(before, after, dropped(before, after))
 {
   var F := ProofLib.Filter((r: Row) => ((r.grant != 0) && !(held(after, r.grant))), before.rows);
-  var head := seq(|F|, i requires 0 <= i < |F| => Release(F[i].grant));
-  var tail := if before.shown.grant != 0 && !named(before, before.shown.grant) && !held(after, before.shown.grant) then [Release(before.shown.grant)] else [];
-  assert dropped(before, after) == head + tail;
-  forall o: seq<Effect> | o == head + tail || o == head + tail + extra
+  var tail := if (((before.shown.grant != 0) && !(named(before, before.shown.grant))) && !(held(after, before.shown.grant))) then [Release(before.shown.grant)] else [];
+  var head := seq(|F|, i requires 0 <= i < |F| => Release(F[i].grant)) + tail;
+  assert dropped(before, after) == head;
+  forall o: seq<Effect> | o == head || o == head + extra
     ensures stepAccessNoLongerHeldIsGivenUp(before, after, o) && stepHeldAccessIsKept(before, after, o)
   {
     forall r | r in before.rows && r.grant != 0 && !held(after, r.grant) ensures releases(o, r.grant) {
@@ -51,17 +52,17 @@ lemma DroppedSound(before: Recent, after: Recent, extra: seq<Effect>)
         assert o[j] == Release(before.shown.grant);
         assert o[j] in o;
       } else {
-        assert o[|head|] == Release(before.shown.grant);
-        assert o[|head|] in o;
+        assert o[|F|] == Release(before.shown.grant);
+        assert o[|F|] in o;
       }
     }
     forall e | e in o && e.Release? ensures held(before, e.grant) && !held(after, e.grant) {
       var k :| 0 <= k < |o| && o[k] == e;
-      if k < |head| {
+      if k < |F| {
         ProofLib.FilterMember((r: Row) => ((r.grant != 0) && !(held(after, r.grant))), before.rows, F[k]);
         assert F[k] in before.rows;
-      } else if k < |head| + |tail| {
-        assert e == Release(before.shown.grant);
+      } else if k < |head| {
+        assert o[k] == tail[0];
       } else {
         assert o[k] in extra;
       }
@@ -71,6 +72,7 @@ lemma DroppedSound(before: Recent, after: Recent, extra: seq<Effect>)
 
 lemma ListedFirstMembers(row: Row, rows: seq<Row>)
   ensures forall r :: r in listedFirst(row, rows) ==> r == row || r in rows
+  ensures |listedFirst(row, rows)| > 0 && listedFirst(row, rows)[0] == row
   ensures row in listedFirst(row, rows)
   ensures |rows| <= limit ==> |listedFirst(row, rows)| <= limit
   ensures |listedFirst(row, rows)| >= 1 && listedFirst(row, rows)[0] == row
@@ -94,42 +96,34 @@ lemma ListedFirstMembers(row: Row, rows: seq<Row>)
   }
 }
 
+lemma PickerClosedShape(s: Recent, ticket: int, chose: bool, keep: bool, by_: Actor)
+  ensures var delivers := chose && ticket == s.live; var closed := s.(pickers := ProofLib.Filter((t: int) => (t != ticket), s.pickers), live := (if (ticket == s.live) then 0 else s.live), replacing := (if (ticket == s.live) then 0 else s.replacing)); var listed := delivers && (keep || s.replacing != 0); var cleared := (if (delivers && (s.replacing != 0)) then closed.(rows := ProofLib.Filter((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), closed.rows)) else closed); pickerClosed(s, ticket, chose, keep, by_).state == (if listed then given(Origin.Picked, 0, cleared).(shown := Row(Origin.Picked, (s.issued + 1), (s.issued + 1))) else (if delivers then cleared.(issued := (s.issued + 1), shown := nobody) else cleared)) && pickerClosed(s, ticket, chose, keep, by_).out == dropped(s, pickerClosed(s, ticket, chose, keep, by_).state) + (if delivers then [Open((s.issued + 1), (if listed then (s.issued + 1) else 0))] else [])
+{
+}
+
 lemma GivenFacts(origin: Origin, key: int, s: Recent)
-  ensures forall r :: r in given(origin, key, s).rows ==> r in s.rows || (r.grant == s.issued + 1 && r.key == (if origin.Picked? then s.issued + 1 else key) && r.origin == origin)
+  ensures var row := Row(origin, (if origin.Picked? then (s.issued + 1) else key), (s.issued + 1)); forall r :: r in given(origin, key, s).rows ==> r in s.rows || r == row
+  ensures |given(origin, key, s).rows| > 0 && given(origin, key, s).rows[0] == Row(origin, (if origin.Picked? then (s.issued + 1) else key), (s.issued + 1))
   ensures given(origin, key, s).issued == s.issued + 1
   ensures |s.rows| <= limit ==> |given(origin, key, s).rows| <= limit
-  ensures |given(origin, key, s).rows| >= 1 && given(origin, key, s).rows[0] == Row(origin, (if origin.Picked? then s.issued + 1 else key), s.issued + 1)
   ensures exists r :: r in given(origin, key, s).rows && r.grant == s.issued + 1 && r.key == (if origin.Picked? then s.issued + 1 else key)
 {
   var row := Row(origin, (if origin.Picked? then (s.issued + 1) else key), (s.issued + 1));
   ListedFirstMembers(row, s.rows);
 }
 
-lemma AdoptFold(acc: Recent, kept: seq<string>)
-  requires inv(acc)
-  ensures var res := Std.Collections.Seq.FoldLeft((a: Recent, selection: string) => given(Origin.Picked, 0, a), acc, kept);
-    inv(res) && res.issued == acc.issued + |kept| && res.shown == acc.shown && res.opened_ == acc.opened_ && res.pickers == acc.pickers
-    && forall r :: r in res.rows ==> r in acc.rows || r.grant > acc.issued
+lemma FoldGivenPreserves(s: Recent, kept: seq<string>)
+  requires inv(s)
+  ensures var after := Std.Collections.Seq.FoldLeft((acc: Recent, selection: string) => given(Origin.Picked, 0, acc), s, kept); inv(after) && after.shown == s.shown && after.pickers == s.pickers && after.opened_ == s.opened_ && after.live == s.live && after.issued >= s.issued && (forall r :: r in after.rows ==> r in s.rows || r.grant > s.issued)
   decreases |kept|
 {
   if |kept| > 0 {
-    var next := given(Origin.Picked, 0, acc);
-    GivenFacts(Origin.Picked, 0, acc);
+    GivenFacts(Origin.Picked, 0, s);
+    var next := given(Origin.Picked, 0, s);
     assert inv(next);
-    AdoptFold(next, kept[1..]);
+    FoldGivenPreserves(next, kept[1..]);
   }
 }
-
-lemma PickerClosedParts(s: Recent, ticket: int, chose: bool, keep: bool, by_: Actor)
-  ensures var delivers := chose && ticket == s.live;
-    var closed := s.(pickers := ProofLib.Filter((t: int) => (t != ticket), s.pickers), live := (if (ticket == s.live) then 0 else s.live), replacing := (if (ticket == s.live) then 0 else s.replacing));
-    var cleared := (if (delivers && (s.replacing != 0)) then closed.(rows := ProofLib.Filter((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows)) else closed);
-    var listed := delivers && (keep || s.replacing != 0);
-    pickerClosed(s, ticket, chose, keep, by_).state == (if listed then given(Origin.Picked, 0, cleared).(shown := Row(Origin.Picked, (s.issued + 1), (s.issued + 1))) else (if delivers then cleared.(issued := (s.issued + 1), shown := nobody) else cleared))
-    && pickerClosed(s, ticket, chose, keep, by_).out == dropped(s, pickerClosed(s, ticket, chose, keep, by_).state) + (if delivers then [Open((s.issued + 1), (if listed then (s.issued + 1) else 0))] else [])
-{
-}
-
 lemma remember_ensures(s: Recent, key: int, by_: Actor)
   ensures (inv(s) ==> canRemember(s, key, by_) ==> alwaysHeldAccessWasGiven(remember(s, key, by_).state))
   ensures (inv(s) ==> canRemember(s, key, by_) ==> alwaysRecentIsBounded(remember(s, key, by_).state))
@@ -170,7 +164,7 @@ lemma adopt_ensures(s: Recent, kept: seq<string>, by_: Actor)
   ensures (inv(s) ==> canAdopt(s, kept, by_) ==> stepASelectedFileReplacesItsLapsedRow(s, "adopt", adopt(s, kept, by_)))
 {
   if inv(s) && canAdopt(s, kept, by_) {
-    AdoptFold(s, kept);
+    FoldGivenPreserves(s, kept);
   }
 }
 
@@ -239,12 +233,11 @@ lemma forget_ensures(s: Recent, key: int, by_: Actor)
   if inv(s) && canForget(s, key, by_) {
     var m := forget(s, key, by_);
     assert m.state.rows == ProofLib.Filter((r: Row) => (r.key != key), s.rows);
-    forall r | r in m.state.rows ensures r in s.rows && r.key != key {
+    forall r | r in s.rows ensures r in m.state.rows <==> r.key != key {
       ProofLib.FilterMember((r: Row) => (r.key != key), s.rows, r);
     }
-    forall r | r in s.rows && r !in m.state.rows ensures !held(m.state, r.grant) {
+    forall r | r in m.state.rows ensures r in s.rows && r.key != key {
       ProofLib.FilterMember((r: Row) => (r.key != key), s.rows, r);
-      assert r.key == key;
     }
     var x :| x in s.rows && x.key == key;
     FilterShorter((r: Row) => (r.key != key), s.rows, x);
@@ -414,9 +407,9 @@ lemma pickerClosed_ensures(s: Recent, ticket: int, chose: bool, keep: bool, by_:
   if inv(s) && canPickerClosed(s, ticket, by_) {
     var delivers := chose && ticket == s.live;
     var closed := s.(pickers := ProofLib.Filter((t: int) => (t != ticket), s.pickers), live := (if (ticket == s.live) then 0 else s.live), replacing := (if (ticket == s.live) then 0 else s.replacing));
-    var cleared := (if (delivers && (s.replacing != 0)) then closed.(rows := ProofLib.Filter((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows)) else closed);
     var listed := delivers && (keep || s.replacing != 0);
-    PickerClosedParts(s, ticket, chose, keep, by_);
+    var cleared := (if (delivers && (s.replacing != 0)) then closed.(rows := ProofLib.Filter((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), closed.rows)) else closed);
+    PickerClosedShape(s, ticket, chose, keep, by_);
     var m := pickerClosed(s, ticket, chose, keep, by_);
     var after := m.state;
     assert after.pickers == ProofLib.Filter((t: int) => (t != ticket), s.pickers);
@@ -433,6 +426,7 @@ lemma pickerClosed_ensures(s: Recent, ticket: int, chose: bool, keep: bool, by_:
       forall r | r in cleared.rows ensures r in s.rows && !(r.key == s.replacing && r.grant == 0) {
         ProofLib.FilterMember((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows, r);
       }
+      FilterLength((r: Row) => !(((r.key == s.replacing) && (r.grant == 0))), s.rows);
     } else {
       assert cleared.rows == s.rows;
     }

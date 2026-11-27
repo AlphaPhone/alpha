@@ -1,24 +1,3 @@
-lemma NextFold(start: int, steps: seq<app__workflows__steps_Step>)
-  requires start >= 1
-  ensures var res := Std.Collections.Seq.FoldLeft((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), start, steps);
-    res >= start && forall s :: s in steps ==> s.id < res
-  decreases |steps|
-{
-  if |steps| > 0 {
-    var f := (n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n);
-    var next := f(start, steps[0]);
-    assert Std.Collections.Seq.FoldLeft(f, start, steps) == Std.Collections.Seq.FoldLeft(f, next, steps[1..]);
-    NextFold(next, steps[1..]);
-    forall s | s in steps ensures s.id < Std.Collections.Seq.FoldLeft(f, next, steps[1..]) {
-      if s == steps[0] {
-        assert s.id < next;
-      } else {
-        assert s in steps[1..];
-      }
-    }
-  }
-}
-
 lemma offerRead_ensures(b: Builder, ticket: int, ok: bool, speaks: bool, reminders: bool, runDay: bool, schedules: bool, generates: bool, steps: seq<app__workflows__steps_Step>, name: int, when: app__workflows__schedule_When)
   ensures (inv(b) ==> canOfferRead(b, ticket, steps) ==> alwaysTheDraftIsShaped(offerRead(b, ticket, ok, speaks, reminders, runDay, schedules, generates, steps, name, when)))
   ensures (inv(b) ==> canOfferRead(b, ticket, steps) ==> alwaysAWriteIsNamed(offerRead(b, ticket, ok, speaks, reminders, runDay, schedules, generates, steps, name, when)))
@@ -31,15 +10,9 @@ lemma offerRead_ensures(b: Builder, ticket: int, ok: bool, speaks: bool, reminde
   ensures (inv(b) ==> canOfferRead(b, ticket, steps) ==> stepStepsChangeOnlyByTheOwner(b, "offerRead", offerRead(b, ticket, ok, speaks, reminders, runDay, schedules, generates, steps, name, when)))
 {
   if inv(b) && canOfferRead(b, ticket, steps) {
-    NextFold(1, steps);
+    ProofLib.FoldLeftInflationary((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), 1, steps);
+    ProofLib.FoldLeftAboveEach((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), (s: app__workflows__steps_Step) => s.id + 1, 1, steps);
   }
-}
-
-lemma ToggleDayDays(w: app__workflows__schedule_When, day: int)
-  ensures app__workflows__schedule_toggleDay(w, day).days ==
-    (if day in w.days then ProofLib.Filter((set_x: int) => !((set_x in [day])), w.days)
-     else w.days + ProofLib.Filter((set_x: int) => !((set_x in w.days)), [day]))
-{
 }
 
 lemma toggleDay_ensures(b: Builder, day: int)
@@ -54,22 +27,7 @@ lemma toggleDay_ensures(b: Builder, day: int)
   ensures (inv(b) ==> canToggleDay(b, day) ==> stepStepsChangeOnlyByTheOwner(b, "toggleDay", toggleDay(b, day)))
 {
   if inv(b) && canToggleDay(b, day) {
-    ToggleDayDays(b.when, day);
-    var days := app__workflows__schedule_toggleDay(b.when, day).days;
-    if day in b.when.days {
-      forall d | d in days ensures 0 <= d <= 6 {
-        ProofLib.FilterMember((set_x: int) => !((set_x in [day])), b.when.days, d);
-      }
-      var other :| other in b.when.days && other != day;
-      ProofLib.FilterMember((set_x: int) => !((set_x in [day])), b.when.days, other);
-      assert other in days;
-    } else {
-      forall d | d in days ensures 0 <= d <= 6 {
-        ProofLib.FilterMember((set_x: int) => !((set_x in b.when.days)), [day], d);
-      }
-      ProofLib.FilterMember((set_x: int) => !((set_x in b.when.days)), [day], day);
-      assert day in days;
-    }
+    app__workflows__schedule_lawEveryChangeKeepsTheScheduleWellFormed_ensures(b.when, b.when.preset, day, b.when.hour, b.when.minute, b.when.zone);
   }
 }
 
@@ -85,7 +43,8 @@ lemma useGenerated_ensures(b: Builder, steps: seq<app__workflows__steps_Step>, b
   ensures (inv(b) ==> canUseGenerated(b, steps, baseline) ==> stepStepsChangeOnlyByTheOwner(b, "useGenerated", useGenerated(b, steps, baseline)))
 {
   if inv(b) && canUseGenerated(b, steps, baseline) {
-    NextFold(b.next, steps);
+    ProofLib.FoldLeftInflationary((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), b.next, steps);
+    ProofLib.FoldLeftAboveEach((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), (s: app__workflows__steps_Step) => s.id + 1, b.next, steps);
   }
 }
 
@@ -101,6 +60,7 @@ lemma takeSaved_ensures(b: Builder, steps: seq<app__workflows__steps_Step>)
   ensures (inv(b) ==> canTakeSaved(b, steps) ==> stepStepsChangeOnlyByTheOwner(b, "takeSaved", takeSaved(b, steps)))
 {
   if inv(b) && canTakeSaved(b, steps) {
-    NextFold(b.next, steps);
+    ProofLib.FoldLeftInflationary((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), b.next, steps);
+    ProofLib.FoldLeftAboveEach((n: int, s: app__workflows__steps_Step) => (if (s.id >= n) then (s.id + 1) else n), (s: app__workflows__steps_Step) => s.id + 1, b.next, steps);
   }
 }

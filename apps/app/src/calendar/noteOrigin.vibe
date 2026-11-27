@@ -1,7 +1,7 @@
 // spec/app/notes/note.md, "Story: Review a Calendar draft from a note"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { recordNoteOriginOf } from "@elizaos/plugin-notes-client"
-import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/owner.vibe"
+import { type ResidentOwner, launchOwnerAt, sameResidentOwner } from "../platform/index.vibe"
 
 export schema NoteOrigin {
   readonly version: 2

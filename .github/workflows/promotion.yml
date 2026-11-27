@@ -1,0 +1,58 @@
+name: Promotion checks
+
+# Full uncached verification gate for promoting develop/vibestack-develop to main:
+# runs Node 26 + pnpm verify without cached verification receipts, verifies third-party
+# notices, checks zero Bun usage, and confirms the pinned Eliza commit is reachable upstream.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promotion-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify-fresh:
+    name: Fresh verification, specs, browser tests and notices
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: promotion
+          verification: "true"
+          cache-verification: "false"
+      - name: Verify zero Bun
+        run: pnpm no-bun
+      - name: Prepare pinned Eliza checkout and verify upstream reachability
+        run: |
+          pnpm eliza
+          node --input-type=module - <<'JS'
+          import { pinProblems } from "./apps/app/scripts/android.ts";
+          const problems = pinProblems();
+          if (problems.length > 0) {
+            for (const p of problems) process.stderr.write(`PIN PROBLEM ${p.input}: ${p.problem} (${p.fix})\n`);
+            process.exit(1);
+          }
+          process.stdout.write("Pinned Eliza commit is clean and reachable on origin/develop.\n");
+          JS
+      - name: Verify third-party notices and release signer record
+        run: |
+          pnpm --filter @repo/app licences --check
+          python3 scripts/ci/app_update_producer.py signer-record apps/app/aosp/signing/release-signer.json
+      - name: Run full uncached verification suite
+        run: pnpm verify
+      - name: Run image, release, and AOSP conformance tests
+        run: |
+          pnpm --filter @repo/app exec vitest run test/image.test.ts
+          python3 apps/app/aosp/branding/provision/test_fresh_presets.py

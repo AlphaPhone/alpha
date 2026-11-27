@@ -79,7 +79,7 @@ module held {
   }
 }
 import { type AppPermission, type PasswordProviderAction, filesOf, hostOf, locationOf, noticeHostOf, noticesOf, passwordsOf, photosOf, systemOf, wifiOf } from held
-export { type PasswordProviderAction, noticeHostOf, noticesOf }
+export { type PasswordProviderAction, noticeHostOf, noticesOf, passwordsOf }
 
 module web {
   /** The browser's own answer for `name`, or none where it has no such permission. */

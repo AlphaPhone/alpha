@@ -1,7 +1,6 @@
 // spec/kit/read.md, "Story: Read from outside"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Install, install } from "../runtime/attempts.vibe"
-import { type Time, timeOver } from "../runtime/time.vibe"
+import { type Install, install, type Time, timeOver } from "../runtime/index.vibe"
 import { type Agent, agentAt, relayedAgent } from "./agent.vibe"
 import { type Cloud, cloudAt, relayedCloud } from "./cloud.vibe"
 import { Device, browserDevice, phoneDevice } from "./device.vibe"

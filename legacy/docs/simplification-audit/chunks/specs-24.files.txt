@@ -1,1 +1,0 @@
-specs/quint/native/manifest.json

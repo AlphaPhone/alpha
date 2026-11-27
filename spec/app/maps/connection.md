@@ -92,7 +92,7 @@ alone. The coverage is metadata: a wait Cloud named never holds it back.
 pure def canConnect(c: Connection): bool =
   c.account != 0 and not(working(c)) and c.coverage.status != R::Loading
 
-pure def connect(c: Connection): Connection = { ...c, coverage: R::ask(c.coverage), unoffered: false }
+pure def connect(c: Connection): Connection = { ...c, unoffered: false, coverage: R::ask(c.coverage) }
 ```
 
 ### Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account

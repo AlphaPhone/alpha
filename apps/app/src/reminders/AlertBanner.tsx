@@ -7,10 +7,10 @@ import type * as BrowserAlerts from "../../gen/app__notices__browserAlerts.effec
 import { useMachine as useBrowserAlerts } from "../../gen/app__notices__browserAlerts.react.ts";
 import type * as Alerts from "../../gen/app__reminders__alerts.effect.vibe";
 import { useMachine as useAlertsMachine } from "../../gen/app__reminders__alerts.react.ts";
-import { native } from "../platform/device.vibe";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { native } from "../platform/index.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import { Time } from "../runtime/index.vibe";
 import { snoozeAlertFromBanner } from "./alerts.vibe";
 import { formatRelativeDue, snoozeTargetMs } from "./recurrence.ts";
 import { AlertBannerShelf, RemindersNowShelf } from "./shelf.vibe";

@@ -430,25 +430,25 @@ pure def lawAReplyAfterASystemNoticeHidesIt(latest: bool): bool = not(systemNoti
 
 ## Story: Read a reply as it was written
 
-> As the owner, I want Alpha's bold words, lists, quotes, code and links
-> drawn the way they read, never as raw asterisks and angle brackets, and
+> As the owner, I want Alpha's replies printed as the model wrote them, line
+> for line, as Sunday's v119 printed them, with a web address I can tap, and
 > only its plain words when I copy, quote, email or hear it.
 
-### Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text
+### Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text
 
-The marks are the model's, read from its words; a mark left open reads as
-written. A heading is drawn as a bold line. A link opens through the
-phone's own link path, and a link to any other kind of address shows only
-its words.
+Every mark stays the words it is: asterisks, a rule's dashes, a list's
+numbers and a quote's angle bracket are printed, never drawn as bold, a
+line or a list (v119, Alpha 45f6bed30 `template.html:4534`, `phone.css:280`).
+An https address that starts a word opens through the phone's own link
+path; any other kind of address is only its words.
 
 ```quint
 type Mark = Strong | Emphasis | InlineCode | HeadingLine | ListItem | QuoteLine | CodeBlock | Link({ https: bool }) | Html
-type Drawn = Styled | Linked | AsText
+type Drawn = Linked | AsText
 
 pure def drawn(mark: Mark): Drawn = match mark {
   | Link(l) => if (l.https) Linked else AsText
-  | Html => AsText
-  | _ => Styled
+  | _ => AsText
 }
 
 pure val markValues = Set(Strong, Emphasis, InlineCode, HeadingLine, ListItem, QuoteLine, CodeBlock, Link({ https: true }), Link({ https: false }), Html)

@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useMachine } from "../../gen/app__notices__toasts.react.ts";
-import { type Resident, type Shown, area } from "../runtime/area.tsx";
+import { type Resident, type Shown, area } from "../runtime/ui.tsx";
 import { Said, nameOf } from "./toasts.vibe";
 
 const modalDialogSelector =

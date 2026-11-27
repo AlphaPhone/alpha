@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { NotesScreen } from "./Notes.tsx";
 import { back } from "./notes.vibe";
 

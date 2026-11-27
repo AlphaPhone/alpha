@@ -8,8 +8,8 @@ import { useMachine as useDigestDelivery } from "../../gen/app__digests.react.ts
 import { useMachine } from "../../gen/app__digests__schedules.react.ts";
 import type { Machine } from "../../gen/app__digests__schedules.effect.vibe";
 import type { Change, Event } from "../../gen/app__digests__schedules.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { type DigestNoticeIdentity, sameDigestNoticeResult } from "../platform/hosted-digests.vibe";
+import type { Resident, Shown } from "../runtime/ui.tsx";
+import { type DigestNoticeIdentity, sameDigestNoticeResult } from "../platform/index.vibe";
 import { setBrowserDigestChecks } from "./browser-digests.vibe";
 import { askAboutNativeDigest, digestQuestionExcerpt, enableDigestNotifications, NativeDigestPanel, setNativeDigestChecks } from "./native-digests.vibe";
 import { DigestWords, newDigest, pickDigestSource } from "./digests.vibe";

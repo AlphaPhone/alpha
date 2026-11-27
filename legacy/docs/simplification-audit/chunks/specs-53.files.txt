@@ -1,1 +1,0 @@
-specs/quint/services/manifest.json

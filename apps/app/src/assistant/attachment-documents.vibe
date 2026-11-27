@@ -1,8 +1,8 @@
 // spec/app/assistant/attachments.md, "Story: Choose files to attach"; spec/app/assistant/attachments.md, "Only the newest listing is shown; a denied folder asks for access, and one that fails offers Retry"
 import type { FilesResult, StorageEntry, StorageVolume } from "@elizaos/os-bridges"
-import { native } from "../platform/device.vibe"
-import { called, Files } from "../platform/files.vibe"
-import { Documents, type StorageAttachmentReceipt } from "../platform/documents.vibe"
+import { native } from "../platform/index.vibe"
+import { called, Files } from "../platform/index.vibe"
+import { Documents, type StorageAttachmentReceipt } from "../platform/index.vibe"
 import { documentAttachmentFile } from "./attachments.vibe"
 
 export interface AttachmentDocumentLocation {

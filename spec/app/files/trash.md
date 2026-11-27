@@ -147,12 +147,15 @@ pure def asked(job: Job, e: Entry): bool =
 
 pure def canFinished(s: Trash, number: int, window: int, by: Actor): bool = by == Phone and A::canConclude(s.attempt, number) and window > 0
 
+pure def remaining(entries: List[Entry], jobEntries: List[Entry], done: List[Entry]): List[Entry] =
+  entries.select(e => not(jobEntries.includes(e) and done.some(d => d.mark == e.mark)))
+
 pure def concluded(results: List[Entry], known: bool, now: int, window: int, s: Trash): Trash =
   val done = results.select(e => asked(s.job, e))
   val whole = if (s.job.kind == Binning) s.job.items.every(i => done.some(e => e.item == i)) else s.job.entries.every(e => done.some(d => d.mark == e.mark))
   val binning = s.job.kind == Binning
   val entries = if (binning) done.select(d => not(s.entries.includes(d))).concat(s.entries)
-    else s.entries.select(e => not(s.job.entries.includes(e) and done.some(d => d.mark == e.mark)))
+    else remaining(s.entries, s.job.entries, done)
   { ...s, attempt: A::conclude(s.attempt, whole, known), job: idle, done: done, waiting: List(), entries: entries,
     erasing: if (entries == s.entries) s.erasing else V::revise(s.erasing),
     binned: if (binning) done else List(), undo: if (binning and done.length() > 0) U::hold(now, window) else if (binning) U::free else s.undo,
@@ -349,8 +352,12 @@ pure def alwaysDetailsAreListed(s: Trash): bool =
 
 ### A job and a read of the list never run together
 
+Discovered by the proof: while a job runs, the list is idle with no marks or details open; when no job runs, the idle job holds no entries.
+
 ```quint
-pure def alwaysAJobHoldsTheTrashAlone(s: Trash): bool = busy(s) implies s.listing.status != R::Loading
+pure def alwaysAJobHoldsTheTrashAlone(s: Trash): bool =
+  (busy(s) implies (s.listing.status == R::Idle and s.marked.length() == 0 and s.details == 0))
+    and (not(busy(s)) implies s.job.entries.length() == 0)
 ```
 
 ### A list that could not be read shows nothing

@@ -67,7 +67,8 @@ pure def offerSettles(s: Delivery, turn: int, acknowledged: bool): Delivery =
   if (acknowledged) { ...s, accepted: turn, connected: true, relay: true } else s
 pure def canEndTurn(s: Delivery, turn: int): bool = turn >= 1 and turn <= s.offer
 pure def endTurn(s: Delivery, turn: int): Delivery = if (turn == s.accepted) { ...s, connected: false, relay: false } else s
-pure def alwaysTheRelayIsTheAcceptedTurns(s: Delivery): bool = (s.relay iff s.connected) and (s.connected implies s.accepted >= 1)
+pure def alwaysTheRelayIsTheAcceptedTurns(s: Delivery): bool =
+  (s.relay iff s.connected) and (s.connected implies s.accepted >= 1) and s.accepted >= 0 and s.accepted <= s.offer
 ```
 
 ### An accepted turn is never negative and never ahead of the latest offer
@@ -101,7 +102,8 @@ pure def applyClaimed(s: Delivery, request: int): DeliveryStep =
 pure def canFailBeforeEffect(s: Delivery, request: int): bool = s.claimPhase == Claimed and request == s.request
 pure def failBeforeEffect(s: Delivery, request: int): DeliveryStep =
   { state: { ...s, claimPhase: CleanedUp, negatives: s.negatives + 1 }, out: List(SendNegative({ claim: s.claim })) }
-pure def alwaysAnEffectIsAppliedOnce(s: Delivery): bool = s.applied.every(k => s.applied.select(j => j == k).length() == 1)
+pure def alwaysAnEffectIsAppliedOnce(s: Delivery): bool =
+  s.applied.every(k => s.applied.select(j => j == k).length() == 1) and (s.claimPhase == Claimed implies s.claim > 0)
 pure def stepAnEffectNeedsAClaim(before: Delivery, via: str, after: Delivery, out: List[DeliveryEffect]): bool =
   out.some(e => match e { | ApplyNavigation(x) => true | _ => false }) implies via == "applyClaimed" and before.claimPhase == Claimed and before.claim > 0
 pure def stepAnUnknownClaimIsNeverReplayed(before: Delivery, via: str, after: Delivery): bool =

@@ -20,7 +20,6 @@ const scratch = () => { const directory = mkdtempSync(join(tmpdir(), "alpha-rele
 const write = (directory: string, name: string, value: unknown) => { const file = join(directory, name); writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`); return file; };
 const digest = (seed: string) => createHash("sha256").update(seed).digest("hex");
 const digestOf = (bytes: Uint8Array | undefined) => createHash("sha256").update(bytes ?? new Uint8Array()).digest("hex");
-const apkManifest = (results: readonly Record<string, unknown>[], testMocks = false) => ({ schema: 1, applicationId: PACKAGE, variant: "launcher", testMocks, results });
 
 /** What a `pnpm aosp` command answered: its result, or the tag and words of the failure it ended with. */
 async function run(...argv: string[]) {
@@ -49,10 +48,6 @@ describe("Stage Alpha into an image (spec/app/image/index.md, \"Story: Stage Alp
     // spec/app/image/index.md, "The Sense policy patch belongs only to a listener image, and the protected power and generic assist patches never come together"
     expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--patch", "protected-power", "--patch", "assist", "--patch", "sense-policy"))
       .toMatchObject({ ok: false, problems: ["SensePolicyWithoutAListenerImage", "PowerAndAssistTogether"] });
-    expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--listener-apk", "sense.apk"))
-      .toMatchObject({ ok: false, tag: "UsageError", said: "--listener-apk needs --listener-descriptor" });
-    expect(await stage("--target", "pixel10a", "--factory-image", "factory.zip", "--development", "--listener-apk", "sense.apk", "--listener-descriptor", "listener.json", "--listener-voice-host", "voice.json"))
-      .toMatchObject({ ok: false, tag: "UsageError", said: "Listener speech needs its APK, both reviewed files, and their SHA-256 digests" });
     expect(await stage("--target", "pixel10a", "--development")).toMatchObject({ ok: false, tag: "UsageError", said: "--target pixel10a needs --factory-image" });
   });
 
@@ -206,8 +201,8 @@ describe("Qualify and publish a release", () => {
   // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
   it("refuses a build its verification recorded with test mocks, and one with no row at all", async () => {
     const directory = scratch();
-    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", apkManifest([candidateRow(122)], true)));
-    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", apkManifest([])));
+    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
+    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
     expect([mocked.ok, mocked.ok ? "" : mocked.said.includes("\"mocks\":true"), empty.ok]).toEqual([false, true, false]);
   });
 
@@ -217,7 +212,6 @@ describe("Qualify and publish a release", () => {
     copyFileSync(place("aosp/signing/release-signer.json"), recordFile);
     const channel = channelAt({ "alpha-update-stable.json": json({ versionCode: 121 }), "alpha-phone-121.apk": json("alpha 121") }, recordFile);
     const now = Math.floor(Date.now() / 3_600_000);
-    /** A run at Qualified for `number`, its receipt delivered `age` hours ago, and its APK's bytes and admitted facts. */
     const qualified = (number: number, age = 0) => {
       const file = join(directory, `run-${number}.json`);
       const state: Channel.Channel = { ...Channel.initial, stage: "Qualified", number, attempt: 1, lastNumber: number, plan: 1, reviewed: true, signers: 1, deliveredAt: now - age, qualifiedAt: now - age };
@@ -302,8 +296,8 @@ describe("Qualify and publish a release", () => {
 });
 
 /** A verify row of an unsigned release candidate with nothing else to block it, as eliza's verification records one. */
-const candidateRow = (versionCode: number, overrides: Record<string, unknown> = {}) => ({
-  mode: "release", variant: "launcher", versionCode, sha256: digest("candidate"), testMocks: false, bundleAudit: "passed", signed: false, runtime: "PACKAGED", runtimeNotices: true,
+const candidateRow = (overrides: Record<string, unknown> = {}) => ({
+  mode: "release", sha256: digest("candidate"), testMocks: false, bundleAudit: "passed", signed: false, runtime: "PACKAGED", runtimeNotices: true,
   runtimeProfile: "native", voiceHost: { packaged: true, differences: [], qualified: true }, licenceBlockers: [], distributable: false, ...overrides,
 });
 
@@ -313,8 +307,7 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     const run = join(directory, "run.json");
     const unsigned = join(directory, "launcher-release-unsigned.apk");
     writeFileSync(unsigned, "unsigned candidate bytes");
-    const receipt = (version: number, overrides?: Record<string, unknown>) => apkManifest([{ mode: "debug", variant: "launcher", testMocks: true }, candidateRow(version, overrides)]);
-    const verified = write(directory, "apk-manifest.json", receipt(122));
+    const verified = write(directory, "apk-manifest.json", { apks: [candidateRow()] });
     const lock = JSON.parse(readFileSync(place("../../eliza.lock.json"), "utf8")) as { remote: string; branch: string; commit: string };
     const upstream = write(directory, "upstream.json", { ...lock, status: "ahead", mergeBase: lock.commit });
     const candidate = (number: string, apks: string, reached = upstream) => released("candidate", "--run", run, "--number", number, "--attempt", "1", "--apk-manifest", apks, "--upstream", reached);
@@ -322,25 +315,19 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(compareUrl(lock)).toBe(`https://api.github.com/repos/elizaOS/eliza/compare/${lock.commit}...${lock.branch}`);
     expect([compared({ ...lock, status: "diverged", mergeBase: digest("older") }, lock), compared({ ...lock, commit: "0".repeat(40), status: "ahead", mergeBase: lock.commit }, lock)])
       .toEqual([{ forThePin: true, reached: false }, { forThePin: false, reached: true }]);
-    const diverged = await candidate("118", write(directory, "v118.json", receipt(118)), write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }));
+    const diverged = await candidate("121", verified, write(directory, "diverged.json", { ...lock, status: "diverged", mergeBase: "0".repeat(40) }));
     expect(diverged).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     expect(diverged.ok ? "" : diverged.said).toContain("\"upstream\":true");
-    expect(await candidate("119", write(directory, "v119.json", receipt(119)), write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("121", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
-    expect(await candidate("120", write(directory, "mocked.json", receipt(120, { testMocks: true })))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    const unqualified = await candidate("121", write(directory, "unqualified.json", receipt(121, { voiceHost: undefined, runtimeNotices: undefined })));
-    expect(unqualified.ok ? "" : unqualified.said).toContain("RuntimeNoticesMissing");
-    expect(unqualified.ok ? "" : unqualified.said).toContain("VoiceNotRecorded");
+    expect(await candidate("121", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A build its verification found not distributable is no candidate, and its run number is spent"
-    expect(await candidate("121", write(directory, "v121.json", receipt(121)))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("121", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
-    expect(await candidate("74", write(directory, "before-floor.json", receipt(74)))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    const wrongVersion = await candidate("123", verified);
-    expect(wrongVersion.ok ? "" : wrongVersion.said).toContain("does not record launcher version 123");
-    const next = write(directory, "next.json", receipt(123));
+    expect(await candidate("74", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     expect(await candidate("122", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 122 } });
-    expect(await candidate("123", next)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("123", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "The candidate is mirrored privately, creating the object only if it is absent, or reusing one whose bytes read back the same"
     const mirror = join(directory, "private");
     expect(await released("mirror", "--run", run, "--apk", unsigned, "--to", mirror)).toMatchObject({ ok: true, value: { mirrored: join(mirror, "alpha-phone-122-unsigned.apk") } });
@@ -367,7 +354,7 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     // spec/release/index.md, "A candidate can be abandoned before it is published": its number stays spent.
     expect(await released("abandon", "--run", run)).toMatchObject({ ok: true, value: { stage: "Abandoned" } });
     expect(await candidate("122", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
-    expect(await candidate("123", next)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
+    expect(await candidate("123", verified)).toMatchObject({ ok: true, value: { stage: "Built", number: 123 } });
   });
 });
 

@@ -3,9 +3,9 @@ import { NOT_DISPATCHED, type DeviceOperation, type ExecutorCall } from "@elizao
 import { noteLimits, projectNoteForModel, reconstructNoteContent, sameJson, type StickyNote } from "@elizaos/plugin-notes-client"
 import { validateWorkflowReadResult, type WorkflowNoteRow, type WorkflowNotesReadOperation, type WorkflowReadResult } from "@elizaos/plugin-workflow-client"
 import { Machine as Notes } from "../../gen/app__notes.effect.vibe"
-import type { Agent } from "../platform/agent.vibe"
-import { NoteStore } from "../platform/notes.vibe"
-import { ownerAt } from "../platform/owner.vibe"
+import type { Agent } from "../platform/index.vibe"
+import { NoteStore } from "../platform/index.vibe"
+import { ownerAt } from "../platform/index.vibe"
 
 type Authority = () => Promise<boolean>
 type NotesRead = Extract<WorkflowReadResult, { readonly kind: "notes" }>

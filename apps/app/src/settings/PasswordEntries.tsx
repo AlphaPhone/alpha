@@ -3,8 +3,8 @@ import { Banner, Button, ConfirmDialog, ListGroup, ListRow, Menu, MenuContent, M
 import { ChevronRight, Clipboard, Ellipsis, Eye, Globe, LockKeyhole, Trash2, UnlockKeyhole } from "lucide-react";
 import { useMemo } from "react";
 import { useMachine as useFacts } from "../../gen/app__settings__facts.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import type { SettingsRuntime } from "./Settings.tsx";
 
 const empty = [] as const;

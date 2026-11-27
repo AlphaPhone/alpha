@@ -5,7 +5,7 @@ import { Effect, type Layer } from "effect";
 import { RotateCw } from "lucide-react";
 import { useState, useSyncExternalStore, type PointerEvent } from "react";
 import { useMachine } from "../../gen/app__files__correction.react.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { ScanAssets, setScanOutline, type scan } from "./scan.vibe";
 import { scanButton, scanPanel, scanPrimary, scanTitle } from "./scan-dialog.ts";
 

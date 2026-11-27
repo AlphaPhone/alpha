@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import type { Event } from "../../gen/app__notes__previous.ts";
 import { useMachine } from "../../gen/app__notes__previous.react.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { EarlierNotes } from "./previous.vibe";
 
 export function Previous({ runtime }: { readonly runtime: Alpha["runtime"] }) {

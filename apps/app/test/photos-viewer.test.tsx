@@ -38,11 +38,11 @@ it("On the launcher the photo viewer's header floats below the status bar and th
     "Photo. Zoom 100 percent. Pinch or double tap to zoom; drag to pan. Use plus, minus, 0 and arrow keys.",
   ]);
   expect([has(header()?.parentElement, "absolute top-0 inset-x-0 pointer-events-none"), has(header()?.parentElement, launcherTop), has(header(), launcherInnerHeader)]).toEqual([true, true, true]);
-  expect([has(viewer(), "pb-[max(108px,calc(var(--alpha-dock-clearance,102px)+6px))]"), has(viewer(), dockClearance)]).toEqual([true, false]);
+  expect([has(viewer(), "pb-(--alpha-viewer-reserve)"), has(viewer(), dockClearance)]).toEqual([true, false]);
   const photo = viewer()?.querySelector<HTMLImageElement>("img[alt]");
-  expect([has(photo, "w-[min(100cqw,75cqh,calc(min(133.333cqw,100cqh)*var(--alpha-photo-ratio)))]"), photo?.style.getPropertyValue("--alpha-photo-ratio")]).toEqual([true, "1"]);
+  expect([photo?.parentElement?.hasAttribute("data-alpha-photo-frame"), photo?.style.getPropertyValue("--alpha-photo-ratio")]).toEqual([true, "1"]);
   const controls = document.querySelector("[role=toolbar][aria-label='Photo controls']");
-  expect([has(controls?.parentElement, "absolute bottom-[max(108px,calc(var(--alpha-dock-clearance,102px)+6px))]"), has(controls, "pointer-events-auto pb-3")]).toEqual([true, true]);
+  expect([has(controls?.parentElement, "absolute bottom-(--alpha-viewer-reserve)"), has(controls, "pointer-events-auto pb-3")]).toEqual([true, true]);
   await drawn(() => viewport()?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   await until(alpha, runtime, Viewer, (state) => !state.chrome);
   await drawn(() => expect([has(header()?.parentElement, "opacity-0"), has(controls, "opacity-0")]).toEqual([true, true]));

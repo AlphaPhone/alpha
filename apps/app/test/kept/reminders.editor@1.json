@@ -1,0 +1,25 @@
+{
+  "key": "alpha/app/reminders/editor@1",
+  "spec": "spec/app/reminders/editor.md",
+  "shape": "c0ac9eeb6f28c94b",
+  "state": {
+    "open": false,
+    "itemId": 0,
+    "draft": {
+      "sync": "Kept",
+      "edits": 0,
+      "carried": 0,
+      "base": 0
+    },
+    "titleValid": false,
+    "notesValid": true,
+    "listId": 1,
+    "hasDueDate": false,
+    "dueDay": 0,
+    "hasDueTime": false,
+    "dueMinute": 0,
+    "hasRepeat": false,
+    "subtaskCount": 0,
+    "savedCount": 0
+  }
+}

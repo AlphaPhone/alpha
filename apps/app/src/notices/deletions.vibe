@@ -1,0 +1,346 @@
+// spec/app/notices/deletion.md, "Story: Undo a deletion"; spec/app/notices/deletion.md, "Story: See how a deletion ended"; spec/app/notices/deletion.md, "Story: Change owner or restart with a deletion pending"; spec/app/notices/deletions.md, "Story: Delete several things, each with its own Undo"; spec/app/notices/deletions.md, "Story: See how my deletions ended"; spec/app/notices/deletions.md, "Story: Change owner or restart with deletions pending"
+import { DELETION_NOTICE_TEXT } from "@elizaos/os-bridges"
+import type * as Deletion from "../../gen/app__notices__deletion.effect.vibe"
+import * as Deletions from "../../gen/app__notices__deletions.effect.vibe"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { type Job, answer, contained, due, reacting, run, together, untimed, Time } from "../runtime/index.vibe"
+import { createDeskStore } from "./desk.ts"
+import { type Said, offer, withdraw } from "./toasts.vibe"
+
+export { DELETION_NOTICE_TEXT }
+
+/** Metadata describing a deferred deletion queued from any area (calendar, reminders, notes, messages, etc.). */
+export interface DeletionDetail {
+  readonly number: number
+  readonly itemId: number
+  readonly area: string
+  readonly title: string
+  readonly message: string
+}
+
+/** Injectable hooks for recording, committing, restoring, reading back, and dismissing deferred deletions. */
+export interface DeletionHooks {
+  record(detail: DeletionDetail): boolean!!
+  commit(detail: DeletionDetail): Deletion.Result!!
+  readBack(detail: DeletionDetail): Deletion.Result!!
+  restore(detail: DeletionDetail): boolean!!
+  dismiss(detail: DeletionDetail): boolean!!
+  checkStatus(): boolean!!
+}
+
+/** Observable state of the deferred-deletion desk for UI and tests. */
+export interface DeletionDeskSnapshot {
+  readonly details: ReadonlyMap<number, DeletionDetail>
+  readonly committed: ReadonlyArray<number>
+  readonly restored: ReadonlyArray<number>
+  readonly readBacks: ReadonlyArray<number>
+  readonly dismissed: ReadonlyArray<number>
+}
+
+export interface DeletionDeskService {
+  snapshot(): DeletionDeskSnapshot
+  subscribe(listener: () => void): () => void
+  setHooks(hooks: Partial<DeletionHooks>): void
+  register(detail: DeletionDetail): void
+  detailOf(number: number): DeletionDetail | undefined
+  nextNumber(): number
+  reset(): void
+  performRecord(number: number): boolean!!
+  performCommit(number: number): Deletion.Result!!
+  performReadBack(number: number): Deletion.Result!!
+  performRestore(number: number): boolean!!
+  performDismiss(number: number): boolean!!
+  performCheckStatus(): boolean!!
+}
+
+export service DeletionDesk: DeletionDeskService {}
+
+const deletionDesk = Layer.sync(DeletionDesk, () => {
+  const details = new Map<number, DeletionDetail>()
+  let committed: number[] = []
+  let restored: number[] = []
+  let readBacks: number[] = []
+  let dismissed: number[] = []
+  let counter = 0
+  let hooks: Partial<DeletionHooks> = {}
+  const { snapshot, subscribe, emit } = createDeskStore((): DeletionDeskSnapshot => ({
+    details: new Map(details),
+    committed: [...committed],
+    restored: [...restored],
+    readBacks: [...readBacks],
+    dismissed: [...dismissed],
+  }))
+  const fallback = (number: number): DeletionDetail =>
+    details.get(number) ?? { number, itemId: number, area: "deletions", title: `Item #${number}`, message: `Deleted item #${number}` }
+  return {
+    snapshot,
+    subscribe,
+    setHooks(next: Partial<DeletionHooks>): void {
+      hooks = { ...hooks, ...next }
+    },
+    register(detail: DeletionDetail): void {
+      details.set(detail.number, detail)
+      if (detail.number > counter) counter = detail.number
+      emit()
+    },
+    detailOf: (number: number) => details.get(number),
+    nextNumber(): number {
+      counter += 1
+      return counter
+    },
+    reset(): void {
+      details.clear()
+      committed = []
+      restored = []
+      readBacks = []
+      dismissed = []
+      counter = 0
+      hooks = {}
+      emit()
+    },
+    performRecord: (number: number) => effect {
+      const detail = fallback(number)
+      if (hooks.record !== undefined) return try hooks.record(detail)
+      return true
+    },
+    performCommit: (number: number) => effect {
+      const detail = fallback(number)
+      committed.push(number)
+      emit()
+      if (hooks.commit !== undefined) return try hooks.commit(detail)
+      return "Gone" as const
+    },
+    performReadBack: (number: number) => effect {
+      const detail = fallback(number)
+      readBacks.push(number)
+      emit()
+      if (hooks.readBack !== undefined) return try hooks.readBack(detail)
+      return "Gone" as const
+    },
+    performRestore: (number: number) => effect {
+      const detail = fallback(number)
+      restored.push(number)
+      emit()
+      if (hooks.restore !== undefined) return try hooks.restore(detail)
+      return true
+    },
+    performDismiss: (number: number) => effect {
+      const detail = fallback(number)
+      dismissed.push(number)
+      emit()
+      if (hooks.dismiss !== undefined) return try hooks.dismiss(detail)
+      return true
+    },
+    performCheckStatus: () => effect {
+      if (hooks.checkStatus !== undefined) return try hooks.checkStatus()
+      return true
+    },
+  }
+})
+
+// spec/app/notices/deletion.md, "Once written, the deletion is held for as long as Undo is offered, and Undo is offered; one that could not be written tells the owner nothing was queued"
+effect function recordDeletion(number: number): Deletions.Event!!(DeletionDesk | Toasts.Machine | Time) {
+  const desk = try DeletionDesk
+  const ok = try desk.performRecord(number)
+  const now = try (try Time).now()
+  const scale = Math.max(100, (try (try Toasts.Machine).get()).scale)
+  const detail = desk.detailOf(number)
+  const chars = Math.max(1, (detail?.message ?? DELETION_NOTICE_TEXT.queued).length)
+  return { type: "recorded", number, ok, start: now, chars, scale }
+}
+
+// spec/app/notices/deletion.md, "The owner who queued it can undo that deletion while its window lasts, or while it is paused, and never once it was sent"
+/** Trigger Undo for deletion `number` when allowed by the Deletions machine. */
+export effect function undoDeletion(number: number): boolean!!(Deletions.Machine | Time) {
+  const machine = try Deletions.Machine
+  const now = try (try Time).now()
+  if (!Deletions.canUndo(try machine.get(), number, now)) return false
+  return try contained(machine.send({ type: "undo", number, now: untimed }), "undoing deletion")
+}
+
+effect function offerDeletionUndo(number: number): void!!(DeletionDesk | Deletions.Machine | Toasts.Machine | Said | Time) {
+  const detail = (try DeletionDesk).detailOf(number)
+  const label = detail?.message ?? `Deleted item #${number}`
+  const machine = try Deletions.Machine
+  const time = try Time
+  const undoWork = effect {
+    const now = try time.now()
+    if (Deletions.canUndo(try machine.get(), number, now)) {
+      try ignore(machine.send({ type: "undo", number, now: untimed }))
+    }
+  }
+  try offer(label, "deletions", number, undoWork)
+}
+
+function carryAbout(deletion: number, does: Deletion.Act): Job<Deletions.Event, DeletionDesk | Deletions.Machine | Toasts.Machine | Said | Time, []> {
+  return match (does) {
+    when "Record": answer(
+      `deletion-record-${deletion}`,
+      recordDeletion(deletion),
+      { type: "recorded", number: deletion, ok: false, start: 0, chars: 30, scale: 100 } as const,
+    );
+    when "OfferUndo": run(`deletion-offer-${deletion}`, offerDeletionUndo(deletion));
+    when "EndUndo": run(`deletion-end-${deletion}`, withdraw("deletions", deletion));
+    when "Delete": answer(
+      `deletion-commit-${deletion}`,
+      effect {
+        const result = try (try DeletionDesk).performCommit(deletion)
+        return { type: "answer", number: deletion, result } as const
+      },
+      { type: "answer", number: deletion, result: "Lost" } as const,
+    );
+    when "ReadBack": answer(
+      `deletion-readback-${deletion}`,
+      effect {
+        const result = try (try DeletionDesk).performReadBack(deletion)
+        return { type: "answer", number: deletion, result } as const
+      },
+      { type: "answer", number: deletion, result: "Lost" } as const,
+    );
+    when "Restore": answer(
+      `deletion-restore-${deletion}`,
+      effect {
+        const restored = try (try DeletionDesk).performRestore(deletion)
+        return { type: "undone", number: deletion, restored } as const
+      },
+      { type: "undone", number: deletion, restored: false } as const,
+    );
+    when "Dismiss": answer(
+      `deletion-dismiss-${deletion}`,
+      effect {
+        const ok = try (try DeletionDesk).performDismiss(deletion)
+        return { type: "dismissed", number: deletion, ok } as const
+      },
+      { type: "dismissed", number: deletion, ok: false } as const,
+    );
+  }
+}
+
+function carry(fx: Deletions.Effect): Job<Deletions.Event, DeletionDesk | Deletions.Machine | Toasts.Machine | Said | Time, []> {
+  return match (fx) {
+    when { tag: "About", let deletion, let does }: carryAbout(deletion, does);
+    when { tag: "CheckStatus", let ticket }: answer(
+      `deletion-status-${ticket}`,
+      effect {
+        const ok = try (try DeletionDesk).performCheckStatus()
+        return { type: "checked", ticket, ok } as const
+      },
+      { type: "checked", ticket, ok: false } as const,
+    );
+  }
+}
+
+const deletionsMachine = reacting(Deletions, {
+  carry,
+  timers: (state) => {
+    const dueList: Array<ReturnType<typeof due<Deletions.Event, []>>> = []
+    for (const number of state.numbers) {
+      const entry = Deletions.held(state, number)
+      if (entry.window.holding === "Held" && !entry.paused && !entry.undoing && !state.interrupted.includes(number)) {
+        const at = entry.window.until
+        if (Deletions.canRelease(state, number, at)) {
+          dueList.push(due<Deletions.Event, []>(`deletion-release-${number}`, at, { type: "release", number, now: at }))
+        }
+      }
+    }
+    return dueList
+  },
+})
+
+// spec/app/notices/deletions.md, "A deletion is queued under a new number, for the owner signed in, of an item no other deletion still has in hand, and never of one whose deletion went ahead or cannot be told"
+/** Queue a deferred deletion for `itemId` under a fresh number (or `explicitNumber` if supplied). Returns the allocated number or 0 if refused. */
+export effect function queueDeletion(input: {
+  readonly itemId: number
+  readonly area: string
+  readonly title: string
+  readonly message?: string
+  readonly number?: number
+}): number!!(Deletions.Machine | DeletionDesk) {
+  const desk = try DeletionDesk
+  const machine = try Deletions.Machine
+  const number = input.number ?? desk.nextNumber()
+  if (!Deletions.canQueue(try machine.get(), number, input.itemId)) return 0
+  desk.register({
+    number,
+    itemId: input.itemId,
+    area: input.area,
+    title: input.title,
+    message: input.message ?? `Deleted ${input.title}`,
+  })
+  const ok = try contained(machine.send({ type: "queue", number, itemId: input.itemId }), "queuing deferred deletion")
+  return ok ? number : 0
+}
+
+// spec/app/notices/deletion.md, "A paused deletion goes ahead again only when its owner reviews it again, with a new window and Undo offered again"
+/** Resume a paused deletion for the signed-in viewer with a fresh scale-adjusted Undo window. */
+export effect function resumeDeletion(number: number): boolean!!(Deletions.Machine | DeletionDesk | Toasts.Machine | Time) {
+  const machine = try Deletions.Machine
+  const now = try (try Time).now()
+  const scale = Math.max(100, (try (try Toasts.Machine).get()).scale)
+  const detail = (try DeletionDesk).detailOf(number)
+  const chars = Math.max(1, (detail?.message ?? DELETION_NOTICE_TEXT.queued).length)
+  if (!Deletions.canResume(try machine.get(), number, chars, scale)) return false
+  return try contained(machine.send({ type: "resume", number, start: now, chars, scale }), "resuming paused deletion")
+}
+
+// spec/app/notices/deletion.md, "The phone says when the item changed"
+/** Mark a held or paused deletion's underlying item as changed so it pauses instead of deleting. */
+export effect function markDeletionItemChanged(number: number): boolean!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  if (!Deletions.canChangeItem(try machine.get(), number)) return false
+  return try contained(machine.send({ type: "changeItem", number }), "marking deletion item changed")
+}
+
+// spec/app/notices/deletions.md, "The owner can ask again how a sent deletion ended, and dismiss an ended one"
+/** Ask again how a sent deletion ended. */
+export effect function refreshDeletion(number: number): boolean!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  if (!Deletions.canRefresh(try machine.get(), number)) return false
+  return try contained(machine.send({ type: "refresh", number }), "refreshing deletion outcome")
+}
+
+// spec/app/notices/deletions.md, "The owner can ask again how a sent deletion ended, and dismiss an ended one"
+/** Dismiss an ended deletion outcome receipt. */
+export effect function dismissDeletion(number: number): boolean!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  if (!Deletions.canDismiss(try machine.get(), number)) return false
+  return try contained(machine.send({ type: "dismiss", number }), "dismissing deletion outcome")
+}
+
+// spec/app/notices/deletions.md, "The phone says who is signed in; another owner then sees none of the notice, and each Undo offered to the owner before is withdrawn"
+/** Switch the signed-in owner and conceal any Undo offered to the prior owner. */
+export effect function switchDeletionsOwner(owner: number): void!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  if (Deletions.canSwitchOwner(try machine.get(), owner)) {
+    try ignore(machine.send({ type: "switchOwner", owner }))
+  }
+  const state = try machine.get()
+  for (const number of state.numbers) {
+    if (Deletions.canConceal(try machine.get(), number)) {
+      try ignore(machine.send({ type: "conceal", number }))
+    }
+  }
+}
+
+// spec/app/notices/deletions.md, "A restart marks every deletion it left unsettled to be picked up, and each is then picked up once: written again, paused, or read back"
+/** Mark unsettled deletions interrupted across a restart. */
+export effect function restartDeletions(): boolean!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  if (!Deletions.canRestart(try machine.get())) return false
+  return try contained(machine.send({ type: "restart" }), "restarting deletions")
+}
+
+// spec/app/notices/deletions.md, "A restart marks every deletion it left unsettled to be picked up, and each is then picked up once: written again, paused, or read back"
+/** Pick up every deletion marked interrupted after a restart (re-record, pause, or read back). */
+export effect function recoverDeletions(): void!!Deletions.Machine {
+  const machine = try Deletions.Machine
+  const interrupted = [...(try machine.get()).interrupted]
+  for (const number of interrupted) {
+    if (Deletions.canRecover(try machine.get(), number)) {
+      try ignore(machine.send({ type: "recover", number }))
+    }
+  }
+}
+
+/** Concurrent deferred-deletion Undo queue with scale-adjusted timing and restart recovery. */
+export const deletions = together(deletionDesk, deletionsMachine)

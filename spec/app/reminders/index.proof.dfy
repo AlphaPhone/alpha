@@ -187,9 +187,17 @@ lemma initialHolds_ensures()
   ensures inv(initialHolds())
 {
   var s := initialHolds();
-  ListsCountsFromUnique(s.lists);
-  ListOfUnique(s.lists, defaultList);
-  SmartCountsHold(s);
+  assert alwaysDefaultListExists(s) by {
+    ListsCountsFromUnique(s.lists);
+    ListOfUnique(s.lists, defaultList);
+  }
+  assert alwaysEveryItemWellFormed(s);
+  assert alwaysSelectedItemExists(s);
+  assert alwaysHiddenExactlyWhileDeleteHeld(s);
+  assert alwaysActiveCustomListExists(s);
+  assert alwaysSmartCountsConsistent(s) by {
+    SmartCountsHold(s);
+  }
 }
 
 lemma setToday_ensures(s: Reminders, day: int)
@@ -206,6 +214,7 @@ lemma setToday_ensures(s: Reminders, day: int)
   ensures (inv(s) ==> canSetToday(s, day) ==> stepDeleteListKeepsItemsValid(s, "setToday", setToday(s, day)))
   ensures (inv(s) ==> canSetToday(s, day) ==> stepNoSentWriteAfterRestart(s, "setToday", setToday(s, day), []))
   ensures (inv(s) ==> canSetToday(s, day) ==> stepRecurringCompleteAdvancesDue(s, "setToday", setToday(s, day)))
+
 {
   if inv(s) && canSetToday(s, day) {
     SmartCountsHold(setToday(s, day));
@@ -226,6 +235,7 @@ lemma createList_ensures(s: Reminders)
   ensures (inv(s) ==> canCreateList(s) ==> stepDeleteListKeepsItemsValid(s, "createList", createList(s).state))
   ensures (inv(s) ==> canCreateList(s) ==> stepNoSentWriteAfterRestart(s, "createList", createList(s).state, createList(s).out))
   ensures (inv(s) ==> canCreateList(s) ==> stepRecurringCompleteAdvancesDue(s, "createList", createList(s).state))
+
 {
   if inv(s) && canCreateList(s) {
     ListsUniqueFromCounts(s.lists);
@@ -259,6 +269,7 @@ lemma renameList_ensures(s: Reminders, listId: int)
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "renameList", renameList(s, listId).state))
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepNoSentWriteAfterRestart(s, "renameList", renameList(s, listId).state, renameList(s, listId).out))
   ensures (inv(s) ==> canRenameList(s, listId) ==> stepRecurringCompleteAdvancesDue(s, "renameList", renameList(s, listId).state))
+
 {
   if inv(s) && canRenameList(s, listId) {
     ListsUniqueFromCounts(s.lists);
@@ -300,6 +311,7 @@ lemma deleteList_ensures(s: Reminders, listId: int, mode: DeleteMode)
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "deleteList", deleteList(s, listId, mode).state))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepNoSentWriteAfterRestart(s, "deleteList", deleteList(s, listId, mode).state, deleteList(s, listId, mode).out))
   ensures (inv(s) ==> canDeleteList(s, listId) ==> stepRecurringCompleteAdvancesDue(s, "deleteList", deleteList(s, listId, mode).state))
+
 {
   if inv(s) && canDeleteList(s, listId) {
     ListsUniqueFromCounts(s.lists);
@@ -352,6 +364,7 @@ lemma createItem_ensures(s: Reminders, spec: ItemSpec)
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepDeleteListKeepsItemsValid(s, "createItem", createItem(s, spec).state))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepNoSentWriteAfterRestart(s, "createItem", createItem(s, spec).state, createItem(s, spec).out))
   ensures (inv(s) ==> canCreateItem(s, spec) ==> stepRecurringCompleteAdvancesDue(s, "createItem", createItem(s, spec).state))
+
 {
   if inv(s) && canCreateItem(s, spec) {
     ItemsUniqueFromCounts(s.items);
@@ -378,6 +391,7 @@ lemma updateItem_ensures(s: Reminders, itemId: int, spec: ItemSpec)
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepDeleteListKeepsItemsValid(s, "updateItem", updateItem(s, itemId, spec).state))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepNoSentWriteAfterRestart(s, "updateItem", updateItem(s, itemId, spec).state, updateItem(s, itemId, spec).out))
   ensures (inv(s) ==> canUpdateItem(s, itemId, spec) ==> stepRecurringCompleteAdvancesDue(s, "updateItem", updateItem(s, itemId, spec).state))
+
 {
   if inv(s) && canUpdateItem(s, itemId, spec) {
     ItemsUniqueFromCounts(s.items);
@@ -405,6 +419,7 @@ lemma toggleFlag_ensures(s: Reminders, itemId: int)
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "toggleFlag", toggleFlag(s, itemId).state))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepNoSentWriteAfterRestart(s, "toggleFlag", toggleFlag(s, itemId).state, toggleFlag(s, itemId).out))
   ensures (inv(s) ==> canToggleFlag(s, itemId) ==> stepRecurringCompleteAdvancesDue(s, "toggleFlag", toggleFlag(s, itemId).state))
+
 {
   if inv(s) && canToggleFlag(s, itemId) {
     ItemsUniqueFromCounts(s.items);
@@ -413,6 +428,50 @@ lemma toggleFlag_ensures(s: Reminders, itemId: int)
     var updated := cur.(flagged := !cur.flagged, revision := cur.revision + 1);
     PutItemPreserves(s.items, s.lists, s.nextItemId, updated);
     var after := toggleFlag(s, itemId).state;
+    ItemsCountsFromUnique(after.items);
+    SmartCountsHold(after);
+  }
+}
+
+lemma adoptReopened_ensures(s: Reminders, itemId: int, dueDay: int, dueMinute: int)
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysDefaultListExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysEveryItemWellFormed(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysSelectedItemExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysHiddenExactlyWhileDeleteHeld(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysActiveCustomListExists(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> alwaysSmartCountsConsistent(adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepBackShowsLists(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepLeavesOverview(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepDeleteOnlyOnExpire(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute), []))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepUndoRestoresExactState(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepDeleteListKeepsItemsValid(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepNoSentWriteAfterRestart(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute), []))
+  ensures (inv(s) ==> canAdoptReopened(s, itemId, dueDay, dueMinute) ==> stepRecurringCompleteAdvancesDue(s, "adoptReopened", adoptReopened(s, itemId, dueDay, dueMinute)))
+{
+  if inv(s) && canAdoptReopened(s, itemId, dueDay, dueMinute) {
+    ItemsUniqueFromCounts(s.items);
+    ItemOfMember(s.items, itemId);
+    var after := adoptReopened(s, itemId, dueDay, dueMinute);
+    assert |after.items| == |s.items|;
+    forall i | 0 <= i < |after.items|
+      ensures after.items[i].id == s.items[i].id
+      ensures itemWellFormed(after.items[i], s.lists, s.nextItemId)
+    {
+      assert s.items[i] in s.items;
+      if s.items[i].id == itemId {
+        ItemOfUnique(s.items, s.items[i]);
+      }
+    }
+    forall id ensures hasItem(after.items, id) == hasItem(s.items, id) {
+      if hasItem(s.items, id) {
+        var j :| 0 <= j < |s.items| && s.items[j].id == id;
+        assert after.items[j] in after.items && after.items[j].id == id;
+      }
+      if hasItem(after.items, id) {
+        var j :| 0 <= j < |after.items| && after.items[j].id == id;
+        assert s.items[j] in s.items && s.items[j].id == id;
+      }
+    }
     ItemsCountsFromUnique(after.items);
     SmartCountsHold(after);
   }
@@ -432,6 +491,7 @@ lemma moveItem_ensures(s: Reminders, itemId: int, targetListId: int)
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepDeleteListKeepsItemsValid(s, "moveItem", moveItem(s, itemId, targetListId).state))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepNoSentWriteAfterRestart(s, "moveItem", moveItem(s, itemId, targetListId).state, moveItem(s, itemId, targetListId).out))
   ensures (inv(s) ==> canMoveItem(s, itemId, targetListId) ==> stepRecurringCompleteAdvancesDue(s, "moveItem", moveItem(s, itemId, targetListId).state))
+
 {
   if inv(s) && canMoveItem(s, itemId, targetListId) {
     ItemsUniqueFromCounts(s.items);
@@ -459,6 +519,7 @@ lemma toggleComplete_ensures(s: Reminders, itemId: int, nextDueDay: int, at: int
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepDeleteListKeepsItemsValid(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepNoSentWriteAfterRestart(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state, toggleComplete(s, itemId, nextDueDay, at).out))
   ensures (inv(s) ==> canToggleComplete(s, itemId, nextDueDay) ==> stepRecurringCompleteAdvancesDue(s, "toggleComplete", toggleComplete(s, itemId, nextDueDay, at).state))
+
 {
   if inv(s) && canToggleComplete(s, itemId, nextDueDay) {
     ItemsUniqueFromCounts(s.items);
@@ -530,6 +591,7 @@ lemma deleteItem_ensures(s: Reminders, itemId: int, at: int)
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "deleteItem", deleteItem(s, itemId, at).state))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepNoSentWriteAfterRestart(s, "deleteItem", deleteItem(s, itemId, at).state, deleteItem(s, itemId, at).out))
   ensures (inv(s) ==> canDeleteItem(s, itemId) ==> stepRecurringCompleteAdvancesDue(s, "deleteItem", deleteItem(s, itemId, at).state))
+
 {
   if inv(s) && canDeleteItem(s, itemId) {
     SmartCountsHold(deleteItem(s, itemId, at).state);
@@ -550,6 +612,7 @@ lemma undoAction_ensures(s: Reminders, now: int)
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepDeleteListKeepsItemsValid(s, "undoAction", undoAction(s, now).state))
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepNoSentWriteAfterRestart(s, "undoAction", undoAction(s, now).state, undoAction(s, now).out))
   ensures (inv(s) ==> canUndoAction(s, now) ==> stepRecurringCompleteAdvancesDue(s, "undoAction", undoAction(s, now).state))
+
 {
   if inv(s) && canUndoAction(s, now) {
     var after := undoAction(s, now).state;
@@ -580,6 +643,7 @@ lemma expireUndo_ensures(s: Reminders, now: int)
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepDeleteListKeepsItemsValid(s, "expireUndo", expireUndo(s, now).state))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepNoSentWriteAfterRestart(s, "expireUndo", expireUndo(s, now).state, expireUndo(s, now).out))
   ensures (inv(s) ==> canExpireUndo(s, now) ==> stepRecurringCompleteAdvancesDue(s, "expireUndo", expireUndo(s, now).state))
+
 {
   if inv(s) && canExpireUndo(s, now) {
     var after := expireUndo(s, now).state;
@@ -612,6 +676,7 @@ lemma settleUndo_ensures(s: Reminders)
   ensures (inv(s) ==> canSettleUndo(s) ==> stepDeleteListKeepsItemsValid(s, "settleUndo", settleUndo(s).state))
   ensures (inv(s) ==> canSettleUndo(s) ==> stepNoSentWriteAfterRestart(s, "settleUndo", settleUndo(s).state, settleUndo(s).out))
   ensures (inv(s) ==> canSettleUndo(s) ==> stepRecurringCompleteAdvancesDue(s, "settleUndo", settleUndo(s).state))
+
 {
   if inv(s) && canSettleUndo(s) {
     var after := settleUndo(s).state;
@@ -644,6 +709,7 @@ lemma ownerChanged_ensures(s: Reminders, owner: int)
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepDeleteListKeepsItemsValid(s, "ownerChanged", ownerChanged(s, owner)))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepNoSentWriteAfterRestart(s, "ownerChanged", ownerChanged(s, owner), []))
   ensures (inv(s) ==> canOwnerChanged(s, owner) ==> stepRecurringCompleteAdvancesDue(s, "ownerChanged", ownerChanged(s, owner)))
+
 {
   if inv(s) && canOwnerChanged(s, owner) {
     var after := ownerChanged(s, owner);
@@ -667,6 +733,7 @@ lemma clearCompleted_ensures(s: Reminders)
   ensures (inv(s) ==> canClearCompleted(s) ==> stepDeleteListKeepsItemsValid(s, "clearCompleted", clearCompleted(s).state))
   ensures (inv(s) ==> canClearCompleted(s) ==> stepNoSentWriteAfterRestart(s, "clearCompleted", clearCompleted(s).state, clearCompleted(s).out))
   ensures (inv(s) ==> canClearCompleted(s) ==> stepRecurringCompleteAdvancesDue(s, "clearCompleted", clearCompleted(s).state))
+
 {
   if inv(s) && canClearCompleted(s) {
     ItemsUniqueFromCounts(s.items);
@@ -693,6 +760,7 @@ lemma reopen_ensures(s: Reminders)
   ensures (inv(s) ==> stepDeleteListKeepsItemsValid(s, "reopen", reopen(s).state))
   ensures (inv(s) ==> stepNoSentWriteAfterRestart(s, "reopen", reopen(s).state, reopen(s).out))
   ensures (inv(s) ==> stepRecurringCompleteAdvancesDue(s, "reopen", reopen(s).state))
+
 {
   if inv(s) {
     var moved := reopen(s);
@@ -721,6 +789,7 @@ lemma takeList_ensures(s: Reminders, listId: int)
   ensures (inv(s) ==> canTakeList(s, listId) ==> stepDeleteListKeepsItemsValid(s, "takeList", takeList(s, listId)))
   ensures (inv(s) ==> canTakeList(s, listId) ==> stepNoSentWriteAfterRestart(s, "takeList", takeList(s, listId), []))
   ensures (inv(s) ==> canTakeList(s, listId) ==> stepRecurringCompleteAdvancesDue(s, "takeList", takeList(s, listId)))
+
 {
   if inv(s) && canTakeList(s, listId) {
     ListsUniqueFromCounts(s.lists);
@@ -755,6 +824,7 @@ lemma takeItem_ensures(s: Reminders, itemId: int, spec: ItemSpec, completed: boo
   ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepDeleteListKeepsItemsValid(s, "takeItem", takeItem(s, itemId, spec, completed)))
   ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepNoSentWriteAfterRestart(s, "takeItem", takeItem(s, itemId, spec, completed), []))
   ensures (inv(s) ==> canTakeItem(s, itemId, spec, completed) ==> stepRecurringCompleteAdvancesDue(s, "takeItem", takeItem(s, itemId, spec, completed)))
+
 {
   if inv(s) && canTakeItem(s, itemId, spec, completed) {
     ItemsUniqueFromCounts(s.items);
@@ -794,6 +864,7 @@ lemma forgetItem_ensures(s: Reminders, itemId: int)
   ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepDeleteListKeepsItemsValid(s, "forgetItem", forgetItem(s, itemId)))
   ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepNoSentWriteAfterRestart(s, "forgetItem", forgetItem(s, itemId), []))
   ensures (inv(s) ==> canForgetItem(s, itemId) ==> stepRecurringCompleteAdvancesDue(s, "forgetItem", forgetItem(s, itemId)))
+
 {
   if inv(s) && canForgetItem(s, itemId) {
     ItemsUniqueFromCounts(s.items);
@@ -824,6 +895,7 @@ lemma applySync_ensures(s: Reminders, syncedLists: seq<ListEntry>, nextListId: i
   ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepDeleteListKeepsItemsValid(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
   ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepNoSentWriteAfterRestart(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId), []))
   ensures (inv(s) ==> canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) ==> stepRecurringCompleteAdvancesDue(s, "applySync", applySync(s, syncedLists, nextListId, syncedItems, nextItemId)))
+
 {
   if inv(s) && canApplySync(s, syncedLists, nextListId, syncedItems, nextItemId) {
     SmartCountsHold(applySync(s, syncedLists, nextListId, syncedItems, nextItemId));

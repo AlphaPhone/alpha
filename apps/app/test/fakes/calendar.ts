@@ -46,6 +46,8 @@ export interface CalendarScene {
   events: FakeEvent[];
   /** What `/api/lifeops/calendar/feed` reports as its `state` (defaults to `"complete"`). */
   feedState?: "complete" | "partial" | "unavailable";
+  /** The summary `/api/lifeops/calendar/calendars` lists for the agent's calendar (defaults to eliza's own, "Eliza Calendar"). */
+  summary?: string;
   /** Every write the agent took, as `<method> <id>`, and the idempotency keys it took them under. */
   readonly writes: string[];
   readonly keys: Map<string, FakeEvent>;
@@ -205,7 +207,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/calendars`) return;
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
-      return Response.json({ calendars: [{ provider: "eliza", side: "owner", calendarId: "eliza-calendar/primary", summary: "Alpha", primary: true }] });
+      return Response.json({ calendars: [{ provider: "eliza", side: "owner", calendarId: "eliza-calendar/primary", summary: scene.summary ?? "Eliza Calendar", primary: true }] });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== `${base}/events`) return;

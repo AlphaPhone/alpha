@@ -42,6 +42,8 @@ export interface VoiceScene {
   stopLiveCaptureCalls: number;
   startCloudSpeechCalls: number;
   cloudStartGate?: () => Promise<void>;
+  /** Held while the relay is asked to unmute its microphone, as a slow phone answers it. */
+  cloudUnmuteGate?: () => Promise<void>;
   readonly cloudStarts: { readonly environment: string; readonly credentialId: string }[];
   readonly relayWarmups: string[];
   relayWarmupHangs: boolean;
@@ -285,7 +287,10 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         voice.speakerMuted = muted;
         return Promise.resolve({});
       },
-      setCloudSpeechMuted: () => Promise.resolve({}),
+      setCloudSpeechMuted: async ({ muted }) => {
+        if (!muted) await voice.cloudUnmuteGate?.();
+        return {};
+      },
       speakCloudSpeech: ({ sessionId, utteranceId, text }) => {
         voice.spoken.push({ text, append: false, replace: false, channel: "cloud" });
         void Promise.resolve().then(() => {

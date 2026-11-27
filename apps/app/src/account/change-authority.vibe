@@ -1,7 +1,7 @@
 // spec/app/account/change.md, "Story: Change or cancel my plan"; spec/app/account/change.md, "Story: Keep plan changes to their sign-in"
 import { type SignInAttempt, type SignInReceipt, signInCode } from "@elizaos/os-bridges"
-import { type Account, Cloud } from "../platform/cloud.vibe"
-import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/voice.vibe"
+import { type Account, Cloud } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "../platform/index.vibe"
 import { accountIsInFront, type Buyer, buyerOf, readAccount, sameBuyer } from "./profile.vibe"
 
 type Visit = Effect.Services<typeof accountIsInFront>

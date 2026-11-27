@@ -63,7 +63,9 @@ function followEnd(viewport: HTMLElement, reading: TranscriptScroll) {
   const selection = viewport.ownerDocument.getSelection();
   if (reading.follows && !(selection?.anchorNode && !selection.isCollapsed && viewport.contains(selection.anchorNode))) viewport.scrollTop = viewport.scrollHeight;
   else if (!reading.follows && viewport.scrollTop < reading.top) viewport.scrollTop = reading.top;
-  reading.seen = { height: viewport.scrollHeight, view: viewport.clientHeight };
+  if (reading.follows || viewport.scrollHeight - viewport.clientHeight >= reading.top) {
+    reading.seen = { height: viewport.scrollHeight, view: viewport.clientHeight };
+  }
 }
 
 /** v119's measure (45f6bed30 model.js:5585): within 80 points of the end as the conversation was last seen. */
@@ -143,9 +145,12 @@ export function AssistantTranscript({ messages, messagesAfterLater, holdMessage,
       onScroll={(event) => {
         const viewport = event.currentTarget;
         const reading = scrollRef.current;
-        if (visible && status === "loaded" && (reading.follows || viewport.scrollHeight - viewport.clientHeight >= reading.top)) {
-          reading.follows = atSeenEnd(reading, viewport.scrollTop);
-          reading.top = viewport.scrollTop;
+        if (visible && status === "loaded") {
+          const maxScroll = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+          if (reading.follows || maxScroll >= reading.top || viewport.scrollTop < maxScroll - 1) {
+            reading.follows = atSeenEnd(reading, viewport.scrollTop);
+            reading.top = viewport.scrollTop;
+          }
         }
         onScroll?.(event);
       }}

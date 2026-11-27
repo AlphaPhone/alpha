@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Effect, Layer } from "effect";
 import { Browser } from "./Browser.tsx";
 import { reviewing } from "./agent.vibe";

@@ -1,7 +1,7 @@
 // spec/app/browser/index.md, "Story: Let the agent open a page"
 import { type ExecutorCall, NOT_DISPATCHED, type DeviceOperation } from "@elizaos/agent";
 import { Effect } from "effect";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import type { ReviewAuthority } from "./media-review.vibe";
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const;

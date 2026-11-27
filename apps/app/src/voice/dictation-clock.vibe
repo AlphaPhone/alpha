@@ -1,7 +1,7 @@
 // spec/app/voice/index.md, "Story: Dictate into a field"; spec/app/voice/dictation.md, "Recording starts from ready, and only the answer to that start opens it"
 import { Machine as Voice } from "../../gen/app__voice.effect.vibe"
-import { started } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { started } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 
 type Reading = { readonly ticket: number | undefined; readonly seconds: number }
 

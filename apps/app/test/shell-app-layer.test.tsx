@@ -1,11 +1,15 @@
 // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits"; spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open"
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
+import { Machine as Comms } from "../gen/app__phone__comms.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import type { Event as ShellEvent } from "../gen/app__shell.ts";
 import home from "../src/home/index.tsx";
+import { act } from "react";
 import { closeAll, drawn, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { alphaImage, scene } from "./fakes/scene.ts";
 
@@ -68,20 +72,7 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
   });
 
   it("slides a communications app in from the side while Ask Alpha rests at its sheet, and swaps at once for Phone's own tabs or with Ask Alpha closed", async () => {
-    await windowSize(412, 915);
-    const world = { ...alphaImage(), now: 1_700_000_400_000 };
-    const { alpha } = await open(world, only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages"));
-    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
-    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
-    await drawn(() => {
-      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Phone']");
-      if (!tile) throw new Error("no Phone tile on Home");
-      tile.click();
-    });
-    await until(alpha, alpha.runtime, Phone, (s) => s.front);
-    await until(alpha, alpha.runtime, Canvas, (s) => !s.landscape);
-    const slides = watchSlides();
-    const trail = (shown: string) => until(alpha, alpha.runtime, Shell, (s) => s.trail.join(",") === shown);
+    const { alpha, slides, trail } = await stagedPhone(false);
 
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": with Ask Alpha at rest, Contacts and back swap at once.
     await tab("Contacts");
@@ -122,5 +113,69 @@ describe("The app layer (spec/app/shell/index.md, \"Story: Move between Home and
     await tab("Contacts");
     await trail("Phone,Contacts");
     expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)", "translateX(18%)"]);
+  });
+
+  /** Phone open from Home in portrait, with Ask Alpha raised to its sheet unless `raised` is false, and a watch on the app layer's slides. */
+  async function stagedPhone(raised = true) {
+    await windowSize(412, 915);
+    const world = { ...alphaImage(), now: 1_700_000_400_000 };
+    const { alpha } = await open(world, only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages"));
+    await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
+    await until(alpha, home.runtime(alpha), Home, (s) => s.tiles.load.status === "Loaded");
+    await drawn(() => {
+      const tile = document.querySelector<HTMLButtonElement>("[data-home-tile='view:Phone']");
+      if (!tile) throw new Error("no Phone tile on Home");
+      tile.click();
+    });
+    await until(alpha, alpha.runtime, Phone, (s) => s.front);
+    await until(alpha, alpha.runtime, Canvas, (s) => !s.landscape);
+    const slides = watchSlides();
+    if (raised) {
+      await press("Open Alpha");
+      await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    }
+    const trail = (shown: string) => until(alpha, alpha.runtime, Shell, (s) => s.trail.join(",") === shown);
+    return { world, alpha, slides, trail };
+  }
+
+  it("slides back to Phone on Back after the Contacts tab is chosen again on Contacts, since only a return chosen from the tabs swaps at once", async () => {
+    const { slides, trail } = await stagedPhone();
+    await tab("Contacts");
+    await trail("Phone,Contacts");
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": choosing Contacts again on Contacts changes nothing, so the Back after it slides as v119's back() did (45f6bed30 prototype/model.js:6018, :5770-5776).
+    await tab("Contacts");
+    await drawn(() => {});
+    await hardware("back");
+    await trail("Phone");
+    expect(slides()).toEqual(["translateX(18%)", "translateX(-18%)"]);
+  });
+
+  it("slides back to Phone on Back after an earlier return from the tabs, since that return's mark ends with it", async () => {
+    const { alpha, slides, trail } = await stagedPhone(false);
+    const shell = (event: ShellEvent) => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send(event)));
+    await tab("Contacts");
+    await trail("Phone,Contacts");
+    await tab("Recents");
+    await trail("Phone");
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Contacts opens and Ask Alpha rises with no tap in between, and Back then slides as v119's back() did (45f6bed30 prototype/model.js:6018, :5770-5776).
+    await shell({ type: "openView", view: "Contacts" });
+    await trail("Phone,Contacts");
+    await shell({ type: "raise", detent: "Sheet" });
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await hardware("back");
+    await trail("Phone");
+    expect(slides()).toEqual(["translateX(-18%)"]);
+  });
+
+  it("swaps at once while an emergency call is live, as v119 never staged one", async () => {
+    const { world, alpha, slides, trail } = await stagedPhone();
+    world.telephony.live = [{ id: "possible-emergency", state: "active", connectedAt: world.now }];
+    world.telephony.emergency = null;
+    act(() => world.telephony.report());
+    await until(alpha, alpha.runtime, Comms, (s) => s.emergency);
+    // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": an emergency call is never staged, so nothing slides over it (45f6bed30 prototype/model.js:6286).
+    await tab("Contacts");
+    await trail("Phone,Contacts");
+    expect(slides()).toEqual([]);
   });
 });

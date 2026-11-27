@@ -1,3 +1,4 @@
+// spec/app/files/trash.md
 lemma TakeWorks(job: Job, s: Trash)
   ensures take(job, s).state.attempt.id == s.attempt.id + 1
   ensures |take(job, s).out| == 1
@@ -9,6 +10,62 @@ lemma TakeWorks(job: Job, s: Trash)
   forall o ensures works(o + m.out) {
     assert (o + m.out)[|o|] == m.out[0];
     assert (o + m.out)[|o|] in o + m.out;
+  }
+}
+
+lemma UnseenFilter(open: bool, allowed: bool, s: Trash)
+  ensures unseen(open, allowed, s).entries == ProofLib.Filter((e: Entry) => ((e in s.job.entries) || (e in s.binned)), s.entries)
+{
+}
+
+lemma PicksFilter(s: Trash)
+  ensures picks(s) == ProofLib.Filter((e: Entry) => (e.mark in s.marked), s.entries)
+{
+}
+
+lemma KeptAtFilter(s: Trash, now: int)
+  ensures keptAt(s, now) == ProofLib.Filter((e: Entry) => (now < e.until), s.entries)
+{
+}
+
+lemma MarkFilter(s: Trash, entry: Entry, by_: Actor)
+  requires entry.mark in s.marked
+  ensures mark(s, entry, by_).marked == ProofLib.Filter((m: int) => (m != entry.mark), s.marked)
+{
+}
+
+lemma RestoreMarkedEntriesFilter(s: Trash, now: int, by_: Actor)
+  ensures var kept := ProofLib.Filter((e: Entry) => (now < e.until), picks(s)); restoreMarked(s, now, by_) == take(Job(Kind.Restoring, seq(|kept|, i_map requires 0 <= i_map < |kept| => var e := kept[i_map]; e.item), kept, 0), s)
+{
+}
+
+lemma ConcludedMarkedEmpty(results: seq<Entry>, known: bool, now: int, window: int, s: Trash)
+  requires |s.marked| == 0
+  ensures concluded(results, known, now, window, s).marked == []
+{
+  var local_2 := Std.Collections.Seq.Filter((e: Entry) => asked(s.job, e), results);
+  var local_4 := s.job.kind.Binning?;
+  var local_5 := (if local_4 then (Std.Collections.Seq.Filter((d: Entry) => !((d in s.entries)), local_2) + s.entries) else Std.Collections.Seq.Filter((e: Entry) => !(((e in s.job.entries) && (exists d :: d in local_2 && (d.mark == e.mark)))), s.entries));
+  assert concluded(results, known, now, window, s).marked == ProofLib.Filter((m: int) => (exists e :: e in local_5 && (e.mark == m)), s.marked);
+  ProofLib.FilterNil((m: int) => (exists e :: e in local_5 && (e.mark == m)), s.marked);
+}
+
+lemma RemainingFilter(entries: seq<Entry>, jobEntries: seq<Entry>, done: seq<Entry>)
+  ensures remaining(entries, jobEntries, done) == ProofLib.Filter((e: Entry) => !(((e in jobEntries) && (exists d :: d in done && (d.mark == e.mark)))), entries)
+{
+}
+
+lemma ConcludedKeepsOtherEntries(results: seq<Entry>, known: bool, now: int, window: int, s: Trash)
+  ensures forall e :: e in s.entries && !(e in s.job.entries) ==> e in concluded(results, known, now, window, s).entries
+{
+  if !s.job.kind.Binning? {
+    var done := concluded(results, known, now, window, s).done;
+    RemainingFilter(s.entries, s.job.entries, done);
+    forall e | e in s.entries && !(e in s.job.entries)
+      ensures e in concluded(results, known, now, window, s).entries
+    {
+      ProofLib.FilterMember((e: Entry) => !(((e in s.job.entries) && (exists d :: d in done && (d.mark == e.mark)))), s.entries, e);
+    }
   }
 }
 
@@ -60,20 +117,13 @@ lemma finished_ensures(s: Trash, number: int, results: seq<Entry>, known: bool, 
   ensures (inv(s) ==> canFinished(s, number, window, by_) ==> stepARestartLeavesNothingToAnswer(s, "finished", finished(s, number, results, known, now, window, by_).state))
 {
   if inv(s) && canFinished(s, number, window, by_) {
+    ConcludedMarkedEmpty(results, known, now, window, s);
+    ConcludedKeepsOtherEntries(results, known, now, window, s);
     var m := finished(s, number, results, known, now, window, by_);
-    var done := concluded(results, known, now, window, s);
-    ProofLib.FilterNil((m_id: int) => (exists e :: e in done.entries && (e.mark == m_id)), s.marked);
-    assert done.marked == ProofLib.Filter((m_id: int) => (exists e :: e in done.entries && (e.mark == m_id)), s.marked);
-    if seen(s) && !s.job.kind.Binning? {
-      var local_2 := ProofLib.Filter((e: Entry) => asked(s.job, e), results);
-      assert done.done == local_2;
-      forall e | e in s.entries && !(e in s.job.entries) ensures e in m.state.entries {
-        ProofLib.FilterMember((e: Entry) => !(((e in s.job.entries) && (exists d :: d in local_2 && (d.mark == e.mark)))), s.entries, e);
-      }
-    }
     if |s.waiting| > 0 {
-      var base := if seen(s) then done else done.(entries := done.binned);
-      TakeWorks(Job(Kind.Binning, s.waiting, [], 0), base);
+      var concluding := concluded(results, known, now, window, s);
+      var ended := if seen(s) then concluding else concluding.(entries := concluding.binned);
+      TakeWorks(Job(Kind.Binning, s.waiting, [], 0), ended);
     } else {
       forall e | e in m.out ensures !(e.Bin? || (e.Restore? || e.Erase?)) {
       }
@@ -128,8 +178,9 @@ lemma leave_ensures(s: Trash, by_: Actor)
   ensures (inv(s) ==> canLeave(s, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "leave", leave(s, by_), []))
   ensures (inv(s) ==> canLeave(s, by_) ==> stepARestartLeavesNothingToAnswer(s, "leave", leave(s, by_)))
 {
-  if inv(s) && canLeave(s, by_) && busy(s) {
-    forall e | e in s.job.entries ensures e in leave(s, by_).entries {
+  if inv(s) && canLeave(s, by_) {
+    UnseenFilter(false, s.allowed, s);
+    forall e | e in s.job.entries && e in s.entries ensures e in leave(s, by_).entries {
       ProofLib.FilterMember((e: Entry) => ((e in s.job.entries) || (e in s.binned)), s.entries, e);
     }
   }
@@ -155,8 +206,9 @@ lemma accessReported_ensures(s: Trash, allowed: bool, by_: Actor)
   ensures (inv(s) ==> canAccessReported(s, allowed, by_) ==> stepOnlyWhatWasConfirmedIsErased(s, "accessReported", accessReported(s, allowed, by_).state, accessReported(s, allowed, by_).out))
   ensures (inv(s) ==> canAccessReported(s, allowed, by_) ==> stepARestartLeavesNothingToAnswer(s, "accessReported", accessReported(s, allowed, by_).state))
 {
-  if inv(s) && canAccessReported(s, allowed, by_) && !allowed && busy(s) {
-    forall e | e in s.job.entries ensures e in accessReported(s, allowed, by_).state.entries {
+  if inv(s) && canAccessReported(s, allowed, by_) && !allowed {
+    UnseenFilter(s.open, false, s);
+    forall e | e in s.job.entries && e in s.entries ensures e in accessReported(s, allowed, by_).state.entries {
       ProofLib.FilterMember((e: Entry) => ((e in s.job.entries) || (e in s.binned)), s.entries, e);
     }
   }
@@ -183,7 +235,7 @@ lemma mark_ensures(s: Trash, entry: Entry, by_: Actor)
   ensures (inv(s) ==> canMark(s, entry, by_) ==> stepARestartLeavesNothingToAnswer(s, "mark", mark(s, entry, by_)))
 {
   if inv(s) && canMark(s, entry, by_) && entry.mark in s.marked {
-    assert mark(s, entry, by_).marked == ProofLib.Filter((m: int) => (m != entry.mark), s.marked);
+    MarkFilter(s, entry, by_);
     ProofLib.FilterSubset((m: int) => (m != entry.mark), s.marked);
   }
 }
@@ -236,10 +288,10 @@ lemma restoreAll_ensures(s: Trash, now: int, by_: Actor)
   ensures (inv(s) ==> canRestoreAll(s, now, by_) ==> stepARestartLeavesNothingToAnswer(s, "restoreAll", restoreAll(s, now, by_).state))
 {
   if inv(s) && canRestoreAll(s, now, by_) {
-    var kept := keptAt(s, now);
-    assert kept == ProofLib.Filter((e: Entry) => (now < e.until), s.entries);
+    KeptAtFilter(s, now);
     ProofLib.FilterSubset((e: Entry) => (now < e.until), s.entries);
-    TakeWorks(Job(Kind.Restoring, (var s_map := kept; seq(|s_map|, i_map requires 0 <= i_map < |s_map| => var e := s_map[i_map]; e.item)), kept, 0), s);
+    var kept := keptAt(s, now);
+    TakeWorks(Job(Kind.Restoring, seq(|kept|, i_map requires 0 <= i_map < |kept| => var e := kept[i_map]; e.item), kept, 0), s);
     var m := restoreAll(s, now, by_);
     assert m.out[0] in m.out;
   }
@@ -266,17 +318,17 @@ lemma restoreMarked_ensures(s: Trash, now: int, by_: Actor)
   ensures (inv(s) ==> canRestoreMarked(s, now, by_) ==> stepARestartLeavesNothingToAnswer(s, "restoreMarked", restoreMarked(s, now, by_).state))
 {
   if inv(s) && canRestoreMarked(s, now, by_) {
-    var picked := picks(s);
-    assert picked == ProofLib.Filter((e: Entry) => (e.mark in s.marked), s.entries);
+    PicksFilter(s);
     ProofLib.FilterSubset((e: Entry) => (e.mark in s.marked), s.entries);
-    var kept := ProofLib.Filter((e: Entry) => (now < e.until), picked);
-    ProofLib.FilterSubset((e: Entry) => (now < e.until), picked);
-    var w :| w in picked && now < w.until;
-    ProofLib.FilterMember((e: Entry) => (now < e.until), picked, w);
+    RestoreMarkedEntriesFilter(s, now, by_);
+    var kept := ProofLib.Filter((e: Entry) => (now < e.until), picks(s));
+    ProofLib.FilterSubset((e: Entry) => (now < e.until), picks(s));
+    var w :| w in picks(s) && now < w.until;
+    ProofLib.FilterMember((e: Entry) => (now < e.until), picks(s), w);
+    assert w in kept;
     assert |kept| > 0;
     TakeWorks(Job(Kind.Restoring, seq(|kept|, i_map requires 0 <= i_map < |kept| => var e := kept[i_map]; e.item), kept, 0), s);
     var m := restoreMarked(s, now, by_);
-    assert m.state.job.entries == kept;
     assert m.out[0] in m.out;
   }
 }
@@ -302,7 +354,7 @@ lemma askToEraseMarked_ensures(s: Trash, by_: Actor)
   ensures (inv(s) ==> canAskToEraseMarked(s, by_) ==> stepARestartLeavesNothingToAnswer(s, "askToEraseMarked", askToEraseMarked(s, by_)))
 {
   if inv(s) && canAskToEraseMarked(s, by_) {
-    assert askToEraseMarked(s, by_).doomed == ProofLib.Filter((e: Entry) => (e.mark in s.marked), s.entries);
+    PicksFilter(s);
     ProofLib.FilterSubset((e: Entry) => (e.mark in s.marked), s.entries);
   }
 }

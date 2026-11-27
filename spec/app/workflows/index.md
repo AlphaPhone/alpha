@@ -295,6 +295,7 @@ pure def letGo(w: Workflows): Workflows = { ...w, change: Q::release(w.change) }
 ```quint
 pure def alwaysTheChangeIsKeptHonestly(w: Workflows): bool = and {
   Q::sound(w.change), w.version >= 0, w.named >= 0,
+  w.open implies w.owner >= 1,
   w.detail.status == R::Loaded implies w.version >= 1,
   Q::kept(w.change) implies (w.named >= 1 and w.named <= w.version and w.owner >= 1),
   w.change.offered implies w.named == w.version,

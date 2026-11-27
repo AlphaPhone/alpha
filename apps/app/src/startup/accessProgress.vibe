@@ -2,7 +2,7 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Access from "../../gen/app__startup__access.effect.vibe"
 import * as Steps from "../../gen/app__startup__steps.effect.vibe"
-import { storeKey, untimed } from "../runtime/reactor.vibe"
+import { storeKey, untimed } from "../runtime/index.vibe"
 
 export const accessVersion = 1
 

@@ -438,32 +438,32 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === (phone ? 9 : 6) && s.turn.reply === "Complete");
     expect(lines().slice(-2)).toEqual([written, "You said: Open Maps"]);
-    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text"
+    // spec/app/assistant/reply.md, "Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text"
     const marked = "**Limes** tonight?\n> Ask [Ana](https://ana.example/) <b>now</b>\n- [one](javascript:alert(1))";
     write(marked);
     await press("Send");
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === `You said: ${marked}`.length);
-    await vi.waitFor(() => expect([...document.querySelectorAll("[role=log] article")].at(-1)?.querySelector("strong")).toBeTruthy());
+    await vi.waitFor(() => expect([...document.querySelectorAll("[role=log] article")].at(-1)?.querySelector("a")).toBeTruthy());
     const reply = [...document.querySelectorAll("[role=log] article")].at(-1);
-    expect([reply?.querySelector("strong")?.textContent, reply?.querySelector("blockquote a")?.getAttribute("href"), reply?.querySelectorAll("a").length, reply?.querySelector("b"), reply?.querySelector("li")?.textContent, lines().at(-1)])
-      .toEqual(["Limes", "https://ana.example/", 1, null, "one", "You said: Limes tonight?Ask Ana <b>now</b>one"]);
-    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": Enter on the link is the link's own, and the message's press still opens its actions.
+    expect([reply?.querySelector("strong, em, blockquote, ul, ol, li, hr, b"), [...(reply?.querySelectorAll("a") ?? [])].map((one) => [one.getAttribute("href"), one.textContent]), lines().at(-1)])
+      .toEqual([null, [["https://ana.example/", "https://ana.example/"]], `You said: ${marked}`]);
+    // spec/app/assistant/reply.md, "Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text": Enter on the link is the link's own, and the message's press still opens its actions.
     const link = reply?.querySelector("a");
     act(() => { link?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     expect([link?.closest("button"), document.querySelector("[role=menu]")]).toEqual([null, null]);
     const messagePress = reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]");
-    expect([messagePress?.getAttribute("aria-label"), messagePress?.textContent, messagePress?.hasAttribute("aria-labelledby"), messagePress?.nextElementSibling?.textContent]).toEqual(["Message actions", "", false, "You said: Limes tonight?Ask Ana <b>now</b>one"]);
+    expect([messagePress?.getAttribute("aria-label"), messagePress?.textContent, messagePress?.hasAttribute("aria-labelledby"), messagePress?.nextElementSibling?.textContent]).toEqual(["Message actions", "", false, `You said: ${marked}`]);
     act(() => { messagePress?.click(); });
     expect(document.querySelector("[role=menu]")?.getAttribute("aria-label")).toBe("Message actions");
     act(() => { reply?.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")?.click(); });
     // spec/app/assistant/reply.md, "Copy, quote, read aloud, use in email and Talk take the reply's plain words, without its marks"
     if (phone) {
-      await vi.waitFor(() => onMessage("You said: Limes tonight?Ask Ana <b>now</b>one", "Copy"));
+      await vi.waitFor(() => onMessage(`You said: ${marked}`, "Copy"));
       await vi.waitFor(() => expect(world.settings.copied.at(-1)).toBe("You said: Limes tonight?\n\nAsk Ana (https://ana.example/) <b>now</b>\n\n• one"));
     }
 
     // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the owner's own words keep it, and a link's words stay.
-    const tagged = [[["Sure.\n[answer] Paris"], "Sure.Paris", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "answer", "answer (https://example.com/)"]] as const;
+    const tagged = [[["Sure.\n[answer] Paris"], "Sure.\nParis", "Sure.\nParis"], [["Paris. [answer]"], "Paris.", "Paris."], [["<promise> One sec."], "One sec.", "One sec."], [["[ans", "wer] Paris"], "Paris", "Paris"], [["[answer", "](https://example.com)"], "[answer](https://example.com)", "answer (https://example.com/)"]] as const;
     for (const [said, drawn, plain] of tagged) {
       const { turn } = await runtime.runPromise(Effect.flatMap(Conversation, (machine) => machine.get()));
       world.ask.nextReplyChunks = said;
@@ -887,7 +887,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Streaming");
     expect(button("Send")).toBe(undefined);
-    // spec/app/assistant/reply.md, "Prose is drawn with its Markdown: bold, italics, code, headings, lists and quotes; a link is a link only to an https address, and HTML reads as text": the reply still being written holds back its open mark, and its link opens through the phone's link path.
+    // spec/app/assistant/reply.md, "Prose is shown as the model wrote it, line for line; only a bare https address is a link, and HTML reads as text": the reply still being written prints its marks as written, and its address opens through the phone's link path.
     // spec/app/assistant/reply.md, "The agent's turn tag is never drawn, copied, quoted, emailed or spoken, and a reply still being written holds back what may become one": the "[ans" it ends in is held back too.
     const writing = await vi.waitFor(() => {
       const found = document.querySelector("[data-alpha-message-id='reply'] a");
@@ -896,7 +896,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     });
     const tap = new MouseEvent("click", { bubbles: true, cancelable: true });
     act(() => { writing.dispatchEvent(tap); });
-    expect([writing.getAttribute("href"), writing.closest("[data-alpha-message-id]")?.textContent, tap.defaultPrevented]).toEqual(["https://en.wikipedia.org/wiki/Octopus", "Read Octopus and Lim", phone]);
+    expect([writing.getAttribute("href"), writing.closest("[data-alpha-message-id]")?.textContent, tap.defaultPrevented]).toEqual(["https://en.wikipedia.org/wiki/Octopus", "Read [Octopus](https://en.wikipedia.org/wiki/Octopus) and **Lim", phone]);
     await press("Stop reply");
     // spec/app/assistant/index.md, "The agent's answer to the abort starts the one read of the conversation"; spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
@@ -937,6 +937,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       });
     });
     await until(alpha, runtime, Conversation, (s) => s.context.sensitive && s.context.showing.tag === "App");
+    const sheetHeader = () => document.querySelector("[data-alpha-chat-header]");
+    expect([sheetHeader()?.textContent, sheetHeader()?.querySelector("[aria-label='Private screen']") !== null]).toEqual(["Telegram", true]);
     write("read my code");
     expect(button("Send")?.disabled).toBe(true);
 
@@ -952,6 +954,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       });
     });
     await until(alpha, runtime, Conversation, (s) => !s.context.sensitive && s.context.selected);
+    await vi.waitFor(() => expect(sheetHeader()?.textContent).toBe(""));
     world.ask.metadata = [];
     write("Summarize this chat");
     await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));

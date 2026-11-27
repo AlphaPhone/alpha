@@ -8,7 +8,7 @@ import { making } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import { Machine as ShellMachine, canRaise } from "../../gen/app__shell.effect.vibe";
-import type { Area } from "../runtime/area.tsx";
+import type { Area } from "../runtime/ui.tsx";
 import { type AssistantProps } from "./Assistant.tsx";
 import { freedom } from "./assistant.vibe";
 import assistant from "./index.tsx";

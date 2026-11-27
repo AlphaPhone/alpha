@@ -7,6 +7,7 @@ lemma toggleDay_ensures(c: Clock, day: int)
   ensures (inv(c) ==> canToggleDay(c, day) ==> stepNothingChangesInFlight(c, "toggleDay", toggleDay(c, day)))
   ensures (inv(c) ==> canToggleDay(c, day) ==> stepAChangeVoidsTheReview(c, "toggleDay", toggleDay(c, day)))
   ensures (inv(c) ==> canToggleDay(c, day) ==> stepAnEndedHandoffStaysEnded(c, "toggleDay", toggleDay(c, day)))
+
 {
   if inv(c) && canToggleDay(c, day) {
     var after := toggleDay(c, day);

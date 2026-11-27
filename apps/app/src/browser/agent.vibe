@@ -2,8 +2,8 @@
 import * as Tabs from "../../gen/app__browser.effect.vibe"
 import * as Address from "../../gen/app__browser__address.effect.vibe"
 import { Machine as Shell, canAgentShowPage, showing } from "../../gen/app__shell.effect.vibe"
-import type { AgentPage, TabHost } from "../platform/browser.vibe"
-import { contained } from "../runtime/reactor.vibe"
+import type { AgentPage, TabHost } from "../platform/index.vibe"
+import { contained } from "../runtime/index.vibe"
 import { Pages, inputOf, pageOf, tellPage, tellTabs } from "./browser.vibe"
 
 /** A page the agent asked for, with whether the owner's request that asked for it is still their latest. */

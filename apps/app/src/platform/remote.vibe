@@ -1,7 +1,7 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"; spec/app/platform/index.md, "A refusal carries the time the other side named for its allowance to come back, and a reader takes it only while it lies ahead"
 import * as Sse from "effect/encoding/Sse"
 import { replied, resetAhead, waitAdvised } from "../../gen/app__platform.effect.vibe"
-import { Attempts } from "../runtime/attempts.vibe"
+import { Attempts } from "../runtime/index.vibe"
 
 /** The request provably never left Alpha: its route is not one the phone relays, or the bridge was busy or is not there. */
 export error Unsent { cause: unknown }

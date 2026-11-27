@@ -75,7 +75,9 @@ pure def subscribeResult(f: Feed, success: bool, matching: bool): Feed =
   else if (success and matching) { ...heard, phase: Ready }
   else ended(heard.listener, heard)
 
-pure def alwaysReadyOwnsItsListener(f: Feed): bool = f.phase == Ready implies (f.listener == Live and f.asked and f.answered)
+pure def alwaysReadyOwnsItsListener(f: Feed): bool =
+  (f.phase == Ready implies (f.listener == Live and f.asked and f.answered))
+    and ((f.asked and f.phase != Ended) implies f.listener == Live)
 ```
 
 ### Only this feed's steps for this screen reach it, until it ends

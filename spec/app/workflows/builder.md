@@ -95,9 +95,16 @@ pure val stepsValues = Set(
   List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 },
        { op: T::ReadAloud, id: 2, source: 1, text: 0, items: 0, span: T::FixedDates, days: 1 }),
 )
+pure val weight_openBuilder = 2
+pure val weight_offerRead = 3
+pure val weight_rename = 2
+pure val weight_addStep = 3
+pure val weight_reviewSave = 3
+pure val weight_confirmSave = 3
 pure val weight_saveUnanswered = 3
 pure val weight_checkSave = 3
 pure val weight_saveChecked = 3
+pure val weight_letGo = 3
 pure val weight_reviewResend = 3
 pure val weight_confirmResend = 3
 ```
@@ -448,6 +455,39 @@ pure def canConfirmResend(b: Builder): bool = V::canConfirm(b.review) and Q::can
 pure def confirmResend(b: Builder): Moved =
   { state: { ...b, review: V::confirm(b.review), save: Q::resend(b.save) },
     out: List(SaveWorkflow({ id: b.save.attempt.id, workflow: b.workflow, version: b.version, revision: b.shown })) }
+
+pure val eval_witness_canReviewResend = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+  "reviewResend",
+)
+
+pure val eval_witness_canConfirmResend = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+  "reviewResend",
+  "confirmResend",
+)
 ```
 
 ### The draft is never edited while its save is kept, and a save is kept honestly
@@ -503,6 +543,21 @@ pure def sometimesALostSaveIsFound(b: Builder): bool = b.saved >= 1 and b.save.r
 
 pure def sometimesASaveIsOfferedAgain(b: Builder): bool = b.save.offered and b.steps.length() >= 1
 
+pure val eval_witness_sometimesASaveIsOfferedAgain = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, true, false, false),
+)
+
 pure def sometimesASaveIsRefused(b: Builder): bool = b.save.attempt.outcome == A::Refused and not(b.save.offered) and b.steps.length() >= 1
 
 pure def sometimesASavedWorkflowIsEdited(b: Builder): bool = b.workflow >= 1 and b.save.live and b.version >= 1
@@ -521,12 +576,6 @@ pure val eval_witness_sometimesALostSaveIsFound = (
   ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, true, false)
 )
 
-pure val eval_witness_sometimesASaveIsOfferedAgain = (
-  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
-  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
-  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false)
-)
-
 pure val eval_witness_sometimesASaveIsRefused = (
   ("ownerChanged", 1), ("openBuilder", 0, 0, false),
   ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
@@ -539,28 +588,26 @@ pure val eval_witness_sometimesASavedWorkflowIsEdited = (
   ("reviewSave", false), ("confirmSave", false)
 )
 
-pure val eval_witness_sometimesASaveIsLetGo = (
-  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
-  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
-  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, false, false, false), "letGo"
-)
-
 pure val eval_witness_canCancelSave = (
   ("ownerChanged", 1), ("openBuilder", 0, 0, false),
   ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
   ("reviewSave", false), "cancelSave"
 )
 
-pure val eval_witness_canReviewResend = (
-  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
-  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
-  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false), "reviewResend"
-)
-
-pure val eval_witness_canConfirmResend = (
-  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
-  ("offerRead", 1, true, true, true, true, true, true, List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
-  ("reviewSave", false), ("confirmSave", false), "saveUnanswered", "checkSave", ("saveChecked", 1, true, false, false), "reviewResend", "confirmResend"
+pure val eval_witness_sometimesASaveIsLetGo = (
+  ("ownerChanged", 1),
+  ("openBuilder", 0, 0, false),
+  ("offerRead", 1, true, true, true, true, true, true,
+    List({ op: T::SuppliedText, id: 1, source: 0, text: 5, items: 0, span: T::FixedDates, days: 1 }), 1, S::daily(0)),
+  ("rename", 1),
+  "keepDraft",
+  ("draftKept", 1, WriteLanded, 1),
+  ("reviewSave", false),
+  ("confirmSave", false),
+  "saveUnanswered",
+  "checkSave",
+  ("saveChecked", 1, false, false, false),
+  "letGo",
 )
 ```
 

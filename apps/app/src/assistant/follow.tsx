@@ -7,7 +7,7 @@ import { type CSSProperties, type ReactNode, type RefObject, useCallback, useRef
 import { flushSync } from "react-dom";
 import { isOpen, keptShare, landing, shareScale, stays } from "../../gen/app__assistant__dock.ts";
 import type { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 
 type Dock = ReturnType<typeof useDock>;
 type Detent = Parameters<typeof isOpen>[0];

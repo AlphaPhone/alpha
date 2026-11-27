@@ -73,7 +73,10 @@ pure def commitOpen(s: AgentSurface): AgentSurface = {
 pure def canOpenTimesOut(s: AgentSurface, id: int): bool = id > 0 and id == s.waiting
 pure def openTimesOut(s: AgentSurface, id: int): AgentSurface = answerOf(true, s)
 pure def alwaysAnOpenPerRequest(s: AgentSurface): bool = s.opens <= s.begun and (s.waiting > 0 implies s.waiting == s.begun)
-pure def alwaysAnswersAreCounted(s: AgentSurface): bool = s.admitted + s.notShown <= s.begun and s.lateOpens <= s.opens
+pure def alwaysAnswersAreCounted(s: AgentSurface): bool =
+  s.begun >= 0 and s.admitted + s.notShown <= s.begun
+    and s.admitted + s.notShown + (if (s.waiting > 0) 1 else 0) == s.begun
+    and s.lateOpens <= s.opens and (s.pendingOpen implies s.lateOpens < s.opens)
 pure def stepAdmittedOnlyWithMapsShown(before: AgentSurface, after: AgentSurface): bool =
   after.admitted > before.admitted implies after.view == MapsView and not(after.blocked)
 pure def sometimesAdmittedAfterOpen(s: AgentSurface): bool = s.admitted >= 1 and s.opens >= 1

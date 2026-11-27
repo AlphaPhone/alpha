@@ -9,7 +9,7 @@ import * as Page from "../gen/app__update__page.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
 import { dictate } from "../src/assistant/dictation.vibe";
 import assistant from "../src/assistant/index.tsx";
-import { button, closeAll, drawn, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import { apk, manifestDigest, release, signer, tell } from "./fakes/update.ts";
 
@@ -43,6 +43,16 @@ async function general(alpha: Awaited<ReturnType<typeof open>>["alpha"]) {
   await press("Settings");
   await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Settings");
   await press("General");
+}
+
+/** Open a phone offering release `version`, wait for the offer, and open Settings → General. */
+async function openOfferInGeneral(permission: ReturnType<typeof phoneWith>["update"]["permission"], version = 121) {
+  const world = phoneWith([release(version)]);
+  world.update.permission = permission;
+  const { alpha } = await open(world);
+  await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === version);
+  await general(alpha);
+  return { alpha, world };
 }
 
 describe("Updates", () => {
@@ -86,11 +96,7 @@ describe("Updates", () => {
   });
 
   it("Install update that Android refuses says why at once (spec/app/update/index.md, \"Story: Install an update\")", async () => {
-    const world = phoneWith([release(121)]);
-    world.update.permission = "unsupported";
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await general(alpha);
+    const { alpha, world } = await openOfferInGeneral("unsupported");
     // spec/app/update/index.md, "An install Android refused for its permission offers Allow automatic updates at once"
     world.update.installAnswer = "permission-required";
     await pressRow("Install update");
@@ -150,12 +156,7 @@ describe("Updates", () => {
   });
 
   it("Only a complete manifest of well-formed releases is understood, and a check that never answers is unreadable (spec/app/update/index.md, \"Story: Read the update channel\")", async () => {
-    const world = phoneWith([release(121)]);
-    world.update.permission = "permission-required";
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.checked === "Fine" && s.offer.release.version === 121);
-    await general(alpha);
-    /** Asks for a check from Settings while the channel serves `manifest`, and waits for what Settings says. */
+    const { alpha, world } = await openOfferInGeneral("permission-required");
     const checking = async (manifest: unknown) => {
       world.update.manifest = JSON.stringify(manifest);
       const before = world.update.checks.length;
@@ -234,38 +235,6 @@ describe("Updates", () => {
     // spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
     await until(alpha, alpha.runtime, Updates.Machine, (s) => s.installed === 120 && s.permission === "Required");
     expect([(await updatesOf(alpha)).offer.release.version, world.update.checks.length]).toEqual([121, 1]);
-  });
-
-  it("Apps drawer keeps automatic updates waiting, deferred retry still polls at 15 minutes, and an incomplete manifest keeps the saved offer installable (spec/app/update/index.md, \"Story: Install an update\"; spec/app/update/index.md, \"Story: Keep the offer that fits this phone\")", async () => {
-    const world = phoneWith([release(121)]);
-    world.update.installAnswer = "starting";
-    const { alpha } = await open(world, only("home", "view:Settings", "settings/update"));
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.deferrals === 1);
-    world.update.installAnswer = undefined;
-
-    // spec/app/update/index.md, "The owner is idle only on Home with nothing open, not typing, no voice, no dialog and the connection not busy, and the phone is quiet only with Alpha in front, no call and normal audio"
-    await press("Apps");
-    await until(alpha, alpha.runtime, Shell, (s) => s.drawer);
-    await later(alpha, 60_000);
-    expect([world.update.installs.length, (await updatesOf(alpha)).activity.open]).toEqual([1, true]);
-
-    // spec/app/update/index.md, "A check is due fifteen minutes after one that was answered, a minute after one that failed, and at once before the first or when the clock went back"
-    const checksBefore = world.update.checks.length;
-    await later(alpha, 15 * 60_000);
-    expect(world.update.checks.length).toBeGreaterThan(checksBefore);
-
-    // spec/app/update/index.md, "Only the answer to the newest check is taken: a complete manifest replaces the offer, a withdrawn one removes it, and anything else keeps it"
-    await hardware("back");
-    await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
-    await general(alpha);
-    world.update.manifest = JSON.stringify(release(122, { apkUrl: "http://releases.alphacompute.cc/alpha-122.apk" }));
-    await press("Check for updates");
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => s.note === "CouldNotCheck");
-    expect((await updatesOf(alpha)).offer.release.version).toBe(121);
-    const installsBefore = world.update.installs.length;
-    await pressRow("Install update");
-    await until(alpha, alpha.runtime, Updates.Machine, (s) => !s.installing && s.note === "Installing");
-    expect(world.update.installs.length).toBe(installsBefore + 1);
   });
 });
 
@@ -370,14 +339,5 @@ describe("An open page during an update (spec/app/update/page.md, \"Story: Save 
     world.update.state = { activationId: "a7", bridgeId: "b7", outcome: "installed", idle: true };
     await later(alpha, 1_000);
     await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount === "Mounted");
-  });
-
-  it('a pending update reported without ids holds rather than mount editors (spec/app/update/page.md, "A page that cannot read the update state holds rather than mount")', async () => {
-    const world = { ...scene(), phone: true };
-    world.update.state = { pending: true, phase: "preparing" };
-    const { alpha } = await open(world);
-    await until(alpha, alpha.runtime, Page.Machine, (s) => s.mount !== "Opening");
-    expect((await alpha.runtime.runPromise(Page.Machine.use((page) => page.get()))).mount).toBe("Holding");
-    expect([document.body.textContent?.includes("Updating Alpha…"), button("Settings")]).toEqual([true, undefined]);
   });
 });

@@ -1,8 +1,8 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"
 import { managedGmailClient, type ManagedGmailClient, type ManagedGmailTransport, AttachmentRefused, MailProtocolFailed, MailUnreachable, type MailAttachmentReviewer } from "@elizaos/plugin-inbox-client"
 import { reviewMailAttachment } from "@elizaos/plugin-files-client"
-import type { Account } from "../platform/cloud.vibe"
-import { Garbled, Refused } from "../platform/remote.vibe"
+import type { Account } from "../platform/index.vibe"
+import { Garbled, Refused } from "../platform/index.vibe"
 
 const preview: MailAttachmentReviewer = (file) =>
   mapError(reviewMailAttachment({ ...file, mimeType: file.mimeType.toLowerCase() }), (failure) => new AttachmentRefused({ detail: failure.message }))

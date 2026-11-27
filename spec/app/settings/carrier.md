@@ -130,8 +130,9 @@ pure def lawOnlyAReturnedFieldHasAValue(kind: Kind, value: str): bool =
 
 ```quint
 pure def alwaysOnlyAShownReadHoldsIdentifiers(s: Carrier): bool =
-  (s.read.read.status != R::Loaded or not(s.showing)) implies
-    (s.fields.length() == 0 and not(s.esim) and not(s.smsChoice) and s.eid == noEid and s.copied == NotCopied and not(T::busy(s.eidRead)) and not(T::busy(s.copying)))
+  ((s.read.read.status != R::Loaded or not(s.showing)) implies
+    (s.fields.length() == 0 and not(s.esim) and not(s.smsChoice) and s.eid == noEid and s.copied == NotCopied and not(T::busy(s.eidRead)) and not(T::busy(s.copying))))
+    and (not(s.showing) implies not(T::busy(s.read)))
 ```
 
 ### The EID is its own read, asked by the owner after the identifiers and only on a phone with an eSIM, so it never delays them

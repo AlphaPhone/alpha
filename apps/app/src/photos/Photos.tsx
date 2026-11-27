@@ -1,4 +1,4 @@
-// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"
+// spec/app/photos/index.md, "Story: Browse the library"; spec/app/photos/index.md, "Story: Select photos"; spec/app/photos/index.md, "Story: Change albums from what I am looking at"; spec/app/photos/albums.md, "Story: Keep albums"; spec/app/photos/changes.md, "Story: Change many photos at once"
 import { Effect } from "effect";
 import { Camera, ChevronLeft, ChevronRight, Ellipsis, Folder, Heart, Image, Images, ListChecks, Pencil, Plus, Search, Share2, Trash2, Video, X } from "lucide-react";
 import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -10,24 +10,23 @@ import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts"
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Event, Filter } from "../../gen/app__photos.ts";
 import type { Event as TrashEvent } from "../../gen/app__photos__trash.ts";
-import type { Shown, Resident } from "../runtime/area.tsx";
-import { Time } from "../runtime/time.vibe";
+import type { Shown, Resident } from "../runtime/ui.tsx";
+import { Time } from "../runtime/index.vibe";
 import { Catalog } from "./catalog.vibe";
 import { returnsToCamera } from "./area.vibe";
 import { MediaGrid } from "./Grid.tsx";
 import { MediaViewer } from "./Viewer.tsx";
 import type { agentPhotos } from "./agent.vibe";
 import { consumeImageChoice, importImageChoice, openCameraAlbum, PhotoChooser, type library } from "./photos.vibe";
-import { native } from "../platform/device.vibe";
-import { renderBrowserPhoto, type BrowserEditFrame } from "../platform/photoCanvas.vibe";
+import { native, renderBrowserPhoto, type BrowserEditFrame } from "../platform/index.vibe";
 import type { trash } from "./trash.vibe";
 import type { viewer } from "./viewer.vibe";
 import type { Layer } from "effect";
 import { Scan } from "../files/Scan.tsx";
 import { scanSelectedImage, type imageScan } from "../files/scan.vibe";
 import { useMachine as useScan } from "../../gen/app__files__scan.react.ts";
-import { AppBack } from "../shell/AppBack.tsx";
-import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
+import { AppBack } from "../shell/ui.tsx";
+import { launcherFirstHeader, launcherInnerHeader, launcherTop } from "../shell/ui.tsx";
 
 type PhotosRuntime = Layer.Success<typeof agentPhotos> | Layer.Success<typeof library> | Layer.Success<typeof viewer> | Layer.Success<typeof trash> | Layer.Success<typeof imageScan> | Resident;
 

@@ -3,11 +3,11 @@ import { type Account as CloudProfile, checkoutFromResponse, CloudError, isCrede
 import * as Codes from "../../gen/app__account__codes.effect.vibe"
 import { changeIsOpen } from "./change.vibe"
 import * as Billing from "../../gen/app__account__billing.effect.vibe"
-import { type Account, Cloud, openCloudCheckout } from "../platform/cloud.vibe"
-import { billReturned, Device, takeBillingReturn } from "../platform/device.vibe"
-import { attemptedUsing } from "../platform/remote.vibe"
-import type { Attempts } from "../runtime/attempts.vibe"
-import { contained, due, type Job, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Account, Cloud, openCloudCheckout } from "../platform/index.vibe"
+import { billReturned, Device, takeBillingReturn } from "../platform/index.vibe"
+import { attemptedUsing } from "../platform/index.vibe"
+import type { Attempts } from "../runtime/index.vibe"
+import { contained, due, type Job, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { accountIsInFront, AccountWrites, type Buyer, buyerOf, type Catalog, type PurchaseVisibility, readAccount, readCatalog, sameBuyer } from "./profile.vibe"
 
 interface Purchase {

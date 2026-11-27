@@ -1,0 +1,130 @@
+{
+  "key": "alpha/app/home/index@1",
+  "spec": "spec/app/home/index.md",
+  "shape": "dc7b8da236d38695",
+  "state": {
+    "host": "AsLauncher",
+    "installed": {
+      "read": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "apps": [
+        "org.mozilla.firefox"
+      ],
+      "pending": false,
+      "quiet": false
+    },
+    "tiles": {
+      "favourites": [
+        {
+          "tag": "Own",
+          "view": "Notes"
+        },
+        {
+          "tag": "Installed",
+          "app": "org.mozilla.firefox"
+        }
+      ],
+      "saved": [
+        {
+          "tag": "Own",
+          "view": "Notes"
+        },
+        {
+          "tag": "Installed",
+          "app": "org.mozilla.firefox"
+        }
+      ],
+      "load": {
+        "status": "Loaded",
+        "ticket": 4
+      },
+      "save": {
+        "id": 2,
+        "outcome": "Confirmed"
+      }
+    },
+    "editing": false,
+    "adding": false,
+    "handoff": {
+      "ask": {
+        "tag": "Shade"
+      },
+      "attempt": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "until": 0
+    }
+  },
+  "kept": [
+    "tiles.save.id"
+  ],
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "299b554681",
+      "state": {
+        "host": "AsLauncher",
+        "installed": {
+          "read": {
+            "status": "Loaded",
+            "ticket": 1
+          },
+          "apps": [
+            "org.mozilla.firefox"
+          ],
+          "pending": false,
+          "quiet": false
+        },
+        "tiles": {
+          "favourites": [
+            {
+              "tag": "Own",
+              "view": "Notes"
+            },
+            {
+              "tag": "Installed",
+              "app": "org.mozilla.firefox"
+            }
+          ],
+          "saved": [
+            {
+              "tag": "Own",
+              "view": "Notes"
+            },
+            {
+              "tag": "Installed",
+              "app": "org.mozilla.firefox"
+            }
+          ],
+          "load": {
+            "status": "Loaded",
+            "ticket": 4
+          },
+          "save": {
+            "id": 2,
+            "outcome": "Confirmed"
+          }
+        },
+        "editing": false,
+        "adding": false,
+        "handoff": {
+          "ask": {
+            "tag": "Shade"
+          },
+          "attempt": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "until": 0
+        },
+        "query": "",
+        "menu": {
+          "tag": "NoMenu"
+        }
+      }
+    }
+  ]
+}

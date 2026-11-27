@@ -31,12 +31,12 @@ import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts
 import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
 import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import { loadsImages } from "../../gen/app__settings__preferences.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import { openInboxAccount } from "../account/profile.vibe";
-import { useTimed } from "../runtime/react.ts";
-import type { Cloud } from "../platform/cloud.vibe";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import type { Cloud } from "../platform/index.vibe";
+import { untimed } from "../runtime/index.vibe";
+import { Time } from "../runtime/index.vibe";
 import { Compose, FileOffer, Suggested } from "./Compose.tsx";
 import type { Offers } from "./suggestion.vibe";
 import type { Machine as Offering } from "../../gen/app__inbox__suggestion.effect.vibe";
@@ -48,8 +48,8 @@ import { gmailAuthorizationWindow } from "./authorization.vibe";
 import { MailSignIn } from "./mailbox.vibe";
 import { connectMailFrame, frameDocument, prepareMessage } from "./mail-html.ts";
 import { AttachmentPreviews, canPreviewAttachment, canSaveAttachment } from "./attachment.vibe";
-import { InboxAttachmentFiles } from "../platform/inboxAttachments.vibe";
-import type { Telephony } from "../platform/telephony.vibe";
+import { InboxAttachmentFiles } from "../platform/index.vibe";
+import type { Telephony } from "../platform/index.vibe";
 import { ThreadPages } from "./thread.vibe";
 
 export interface InboxProps {

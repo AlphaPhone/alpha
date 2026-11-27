@@ -1,0 +1,38 @@
+{
+  "key": "alpha/app/account/billing@1",
+  "spec": "spec/app/account/billing.md",
+  "shape": "b47ddb972ae21838",
+  "state": {
+    "review": {
+      "tag": "NoPurchaseReview"
+    },
+    "reviewNumber": 0,
+    "offers": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "visit": {
+      "open": false,
+      "number": 0,
+      "orphan": false,
+      "at": 0
+    },
+    "goal": "Subscribe",
+    "chosen": "Plus",
+    "amount": 0,
+    "resumedFor": 0,
+    "pending": false,
+    "pendingEnds": 0,
+    "checkout": {
+      "signIn": 0,
+      "command": "",
+      "session": ""
+    },
+    "confirm": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "unsettled": false,
+    "notice": "Quiet"
+  }
+}

@@ -9,13 +9,13 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
-  aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, apkUpdateReceipt, integrityQuery, listAndroidArtifactEntries, manifestFacts, parseXmlTree, qaEvidenceAdmission,
+  aaptManifestTree, apkReleaseBlockers, apkUpdateAdmission, apkUpdateReceipt, integrityQuery, listAndroidArtifactEntries, manifestFacts, qaEvidenceAdmission,
   readApkBuildFlags, readApkSignerDigest, readbackInventory, snapshotAndroidArtifact,
 } from "@elizaos/os";
-import { Data, Effect, Schema } from "effect";
+import { Data, Effect } from "effect";
 import * as Channel from "../gen/release.ts";
 import {
-  type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelHealthy, channelManifest, channelRepository, channelRepositoryId, channelTag, distributable,
+  type Apk, type Blockers, type Compare, type Custody, type Readback, admitted, channelHealthy, channelManifest, channelRepository, channelRepositoryId, channelTag, clear, distributable,
   earlierRepositories, legacyFloor, manifestNamed, maxApkBytes, custodyProven, retainedFloor, retiredTag, updatedItself, upstreamBlocks,
 } from "../gen/release.ts";
 import * as Pilot from "../gen/release__pilot.ts";
@@ -24,24 +24,10 @@ import { type OsBuild, type OsPlan, type OsSigned, osBuildAdmitted, osPlanAdmitt
 const app = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SIGNER = join(app, "aosp/signing/release-signer.json");
 const PACKAGE = "ai.alphacompute.alphaphone";
+const LAUNCHER_MARK = "android.permission.READ_CONTACTS";
 const KEYSTORE_PASSWORD = "ALPHA_APP_RELEASE_KEYSTORE_PASSWORD";
 const PILOT_LOCKS = join(homedir(), ".local", "state", "alpha-pilot");
 const ELIZA_LOCK = join(app, "../../eliza.lock.json");
-const SAFE_SHELL_ARG = /^[A-Za-z0-9_./:@%+=,-]+$/;
-
-function shellQuote(value: string): string {
-  return SAFE_SHELL_ARG.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function pidAlive(pid: number): boolean {
-  if (!(pid > 0 && Number.isSafeInteger(pid))) return false;
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    return error instanceof Error && "code" in error && error.code === "EPERM";
-  }
-  return true;
-}
 
 export class UsageError extends Data.TaggedError("UsageError")<{ readonly message: string }> {}
 export class ReleaseRefused extends Data.TaggedError("ReleaseRefused")<{ readonly message: string }> {}
@@ -92,7 +78,6 @@ const reviewedSigner = () => signerRecord().signerSha256;
 interface Rules<S, E> {
   readonly initial: S;
   readonly parseState: (kept: unknown) => S | undefined;
-  readonly parseEvent?: (event: unknown) => E | undefined;
   readonly enabled: (state: S, event: E) => boolean;
   readonly step: (state: S, event: E) => S;
 }
@@ -109,25 +94,13 @@ export function ledger<S, E extends { readonly type: string }>(rules: Rules<S, E
   const taken = [...(kept.taken ?? [])];
   return {
     get state() { return state; },
-    can: (event: E) => (rules.parseEvent === undefined || rules.parseEvent(event) !== undefined) && rules.enabled(state, event),
+    can: (event: E) => rules.enabled(state, event),
     take(event: E) {
-      if (rules.parseEvent !== undefined && rules.parseEvent(event) === undefined) {
-        throw new ReleaseRefused({ message: `the spec refuses malformed event ${JSON.stringify(event)}` });
-      }
       if (!rules.enabled(state, event)) throw new ReleaseRefused({ message: `the spec refuses ${JSON.stringify(event)} from ${JSON.stringify(state)}` });
-      const next = rules.step(state, event);
-      const nextTaken = [...taken, event];
-      const partial = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.partial`;
-      try {
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(partial, `${JSON.stringify({ state: next, taken: nextTaken }, null, 2)}\n`);
-        renameSync(partial, file);
-      } catch (cause) {
-        rmSync(partial, { force: true });
-        throw cause;
-      }
-      state = next;
+      state = rules.step(state, event);
       taken.push(event);
+      writeFileSync(`${file}.partial`, `${JSON.stringify({ state, taken }, null, 2)}\n`);
+      renameSync(`${file}.partial`, file);
       return state;
     },
   };
@@ -206,60 +179,30 @@ const whole = (text: string, name: string) => {
   return number;
 };
 
-const apkManifest = Schema.Struct({
-  schema: Schema.Literal(1), applicationId: Schema.Literal(PACKAGE), variant: Schema.Literal("launcher"),
-  testMocks: Schema.Boolean, results: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-});
-
-/** The release verifier's one launcher result, checked against the run and APK when supplied. */
-function recordedBlockers(file: string, expected: { signed: boolean; versionCode?: number; sha256?: string; platformCertificate?: string }) {
-  const recorded = Schema.decodeUnknownSync(apkManifest)(JSON.parse(readFileSync(file, "utf8")));
-  const rows = recorded.results.filter((row) => row.mode === "release" && row.variant === "launcher");
-  const [row] = rows;
-  if (rows.length !== 1 || row === undefined) throw new ReleaseRefused({ message: `${file} must record exactly one launcher release` });
-  if (expected.versionCode !== undefined && row.versionCode !== expected.versionCode)
-    throw new ReleaseRefused({ message: `${file} does not record launcher version ${expected.versionCode}` });
-  if (expected.sha256 !== undefined && row.sha256 !== expected.sha256)
-    throw new ReleaseRefused({ message: `${file} does not record the signed APK's digest` });
-  const review = { reviewedSigner: reviewedSigner(), manifestTestMocks: recorded.testMocks,
-    ...(expected.platformCertificate === undefined ? {} : { image: { platformCertificateSha256: expected.platformCertificate } }) };
-  const reasons = apkReleaseBlockers(row, review).filter((reason) => expected.signed || (reason !== "Unsigned" && reason !== "NotRecordedDistributable"));
-  return { rows: rows.length, blockers: blockersOf(reasons, expected.signed), reasons };
-}
-
-function hasExportedHomeLauncherActivity(xmlTree: string): boolean {
-  const root = parseXmlTree(xmlTree);
-  const stack = [...root.children];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === undefined) continue;
-    if (node.name === "activity" && (node.attrs.exported === "0xffffffff" || node.attrs.exported === "true")) {
-      for (const child of node.children) {
-        if (child.name !== "intent-filter") continue;
-        const hasMain = child.children.some((item) => item.name === "action" && item.attrs.name === "android.intent.action.MAIN");
-        const hasHome = child.children.some((item) => item.name === "category" && item.attrs.name === "android.intent.category.HOME");
-        const hasDefault = child.children.some((item) => item.name === "category" && item.attrs.name === "android.intent.category.DEFAULT");
-        if (hasMain && hasHome && hasDefault) return true;
-      }
-    }
-    for (const child of node.children) stack.push(child);
-  }
-  return false;
+/** What every row of the verification's APK manifest blocks, together; none at all is a blocker of its own. */
+function recordedBlockers(file: string, platform: string | undefined, signed: boolean) {
+  const recorded = JSON.parse(readFileSync(file, "utf8")) as { readonly apks?: readonly unknown[] };
+  const review = { reviewedSigner: reviewedSigner(), ...(platform === undefined ? {} : { image: { platformCertificateSha256: platform } }) };
+  const rows = (recorded.apks ?? []).map((row) => blockersOf(apkReleaseBlockers(row, review), signed));
+  const all = rows.reduce<Blockers>((sum, row) => ({
+    mocks: sum.mocks || row.mocks, audit: sum.audit || row.audit, signer: sum.signer || row.signer, runtime: sum.runtime || row.runtime,
+    notices: sum.notices || row.notices, voice: sum.voice || row.voice, platform: sum.platform || row.platform, upstream: sum.upstream || row.upstream,
+  }), clear);
+  return { rows: rows.length, blockers: rows.length === 0 ? { ...clear, audit: true } : all };
 }
 
 /** The facts the admission rule reads from the APK's own bytes, never from a record of it. */
 const apkFacts = (file: string) => Effect.gen(function* () {
   const snapshot = yield* snapshotAndroidArtifact(file, { maxArtifactBytes: maxApkBytes });
-  const xmlTree = yield* aaptManifestTree(file);
-  const facts = manifestFacts(xmlTree);
+  const facts = manifestFacts(yield* aaptManifestTree(file));
   const signer = yield* readApkSignerDigest(file);
   const entries = yield* Effect.exit(listAndroidArtifactEntries(file, { artifactBytes: snapshot.bytes }));
   const flagged = yield* readApkBuildFlags(file, { artifactBytes: snapshot.bytes });
   const apk: Apk = {
-    launcher: facts.packageName === PACKAGE && hasExportedHomeLauncherActivity(xmlTree),
+    launcher: facts.packageName === PACKAGE && facts.permissions.includes(LAUNCHER_MARK),
     signer: signer === reviewedSigner(),
     version: facts.versionCode ?? 0,
-    debuggable: !facts.application.declared || facts.application.debuggable === "0xffffffff",
+    debuggable: facts.application.debuggable !== null,
     bytes: snapshot.sizeBytes,
     entries: entries._tag === "Success" && flagged === "MocksOff",
   };
@@ -429,8 +372,8 @@ const commands = {
   blockers: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["apk-manifest", "platform-certificate"]));
     const [file = ""] = yield* attempt(() => found.need("apk-manifest"));
-    const { rows, blockers, reasons } = yield* attempt(() => recordedBlockers(file, { signed: true, platformCertificate: found.values["platform-certificate"] }));
-    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)} (${reasons.join(", ")})` });
+    const { rows, blockers } = yield* attempt(() => recordedBlockers(file, found.values["platform-certificate"], true));
+    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `not distributable: ${JSON.stringify(blockers)}` });
     return { distributable: true, rows, blockers };
   }),
   admit: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
@@ -466,20 +409,17 @@ const commands = {
   candidate: (argv: readonly string[], port: ChannelPort) => Effect.gen(function* () {
     const found = yield* attempt(() => flags(argv, ["run", "number", "attempt", "apk-manifest", "upstream", "platform-certificate"]));
     const [file = "", number = "", tried = "", recorded = "", upstream = ""] = yield* attempt(() => found.need("run", "number", "attempt", "apk-manifest", "upstream"));
-    const versionCode = yield* attempt(() => whole(number, "number"));
     const reached = compared(yield* attempt(() => JSON.parse(readFileSync(upstream, "utf8")) as Partial<UpstreamRecord>), yield* attempt(() => elizaLock()));
-    const { blockers: recordedOnly, reasons } = yield* attempt(() => recordedBlockers(recorded, { signed: false, versionCode, platformCertificate: found.values["platform-certificate"] }));
-    const blockers = { ...recordedOnly, upstream: upstreamBlocks(reached) };
-    const event = { type: "build" as const, number: versionCode, attempt: yield* attempt(() => whole(tried, "attempt")), blockers };
+    const event = { type: "build" as const, number: yield* attempt(() => whole(number, "number")), attempt: yield* attempt(() => whole(tried, "attempt")),
+      blockers: { ...(yield* attempt(() => recordedBlockers(recorded, found.values["platform-certificate"], false))).blockers, upstream: upstreamBlocks(reached) } };
     const run = yield* attempt(() => runOf(file));
-    const released = (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0;
-    for (const version of [released, retainedFloor(retainedVersions(yield* port.listed))])
+    const lastRecorded = (yield* attempt(() => signerRecord(port.recordFile))).lastRelease?.versionCode ?? 0;
+    for (const version of [lastRecorded, retainedFloor(retainedVersions(yield* port.listed))])
       if (run.can({ type: "retainElsewhere", version })) yield* attempt(() => run.take({ type: "retainElsewhere", version }));
-    if (!distributable(blockers)) {
-      const refusal = { type: "refuseBuild" as const, number: versionCode, blockers };
+    if (!distributable(event.blockers)) {
+      const refusal = { type: "refuseBuild" as const, number: event.number, blockers: event.blockers };
       if (run.can(refusal)) yield* attempt(() => run.take(refusal));
-      const detail = reasons.length > 0 ? `${JSON.stringify(blockers)} (${reasons.join(", ")})` : JSON.stringify(blockers);
-      return yield* new ReleaseRefused({ message: `launcher version ${versionCode} is no candidate, and its number is spent: ${detail}` });
+      return yield* new ReleaseRefused({ message: `${event.number} is no candidate, and its number is spent: ${JSON.stringify(event.blockers)}` });
     }
     return yield* attempt(() => run.take(event));
   }),
@@ -537,72 +477,39 @@ const commands = {
     const rotation = yield* attempt(() => Object.hasOwn(signerRecord(), "apkSigningRotation"));
     if (!run.can({ type: "sign", guarded, signers: 1, rotation }))
       return yield* new ReleaseRefused({ message: guarded ? "signing needs the reviewed plan of this attempt" : `signing needs the protected keystore and ${KEYSTORE_PASSWORD}` });
-    if (existsSync(out)) return yield* new ReleaseRefused({ message: `${out} already exists; --out requires a new file` });
-    if (
-      plan.number !== run.state.number
-      || plan.packageName !== PACKAGE
-      || plan.attempt !== run.state.attempt
-      || plan.unsignedSha256 !== (yield* attempt(() => sha256File(apk)))
-      || plan.signerSha256 !== reviewedSigner()
-    ) {
+    if (plan.attempt !== run.state.attempt || plan.unsignedSha256 !== (yield* attempt(() => sha256File(apk))) || plan.signerSha256 !== reviewedSigner())
       return yield* new ReleaseRefused({ message: `${apk} is not the APK ${planFile} plans to sign` });
-    }
-    yield* attempt(() => mkdirSync(dirname(out), { recursive: true }));
-    const partial = `${out}.${process.pid}.${randomBytes(6).toString("hex")}.partial`;
+    const partial = `${out}.partial`;
     const signed = spawnSync(found.values.apksigner ?? "apksigner", [
       "sign", "--ks", keystore, "--ks-type", "PKCS12", "--ks-key-alias", label, "--ks-pass", `env:${KEYSTORE_PASSWORD}`, "--key-pass", `env:${KEYSTORE_PASSWORD}`,
       "--v4-signing-enabled", "false", "--out", partial, apk,
     ], { encoding: "utf8" });
-    if (signed.error !== undefined || signed.status !== 0) {
-      rmSync(partial, { force: true });
-      const detail = signed.error !== undefined
-        ? signed.error.message
-        : ((signed.stderr ?? "") || (signed.stdout ?? "")).trim().split("\n").at(-1) ?? "";
-      return yield* new ReleaseRefused({ message: `apksigner could not sign ${apk}: ${detail}` });
-    }
+    if (signed.status !== 0) return yield* new ReleaseRefused({ message: `apksigner could not sign ${apk}: ${(signed.stderr || signed.stdout).trim().split("\n").at(-1) ?? ""}` });
     const signer = yield* Effect.option(readApkSignerDigest(partial));
     const signers = signer._tag === "Some" ? 1 : 0;
     if (signer._tag === "Some" && signer.value !== plan.signerSha256) {
       yield* attempt(() => rmSync(partial, { force: true }));
       return yield* new ReleaseRefused({ message: `${apk} was signed by ${signer.value}, not Alpha's one key ${plan.signerSha256}` });
     }
-    try {
-      const state = yield* attempt(() => run.take({ type: "sign", guarded, signers, rotation }));
-      yield* attempt(() => state.stage === "Signed" ? renameSync(partial, out) : rmSync(partial, { force: true }));
-      return { signed: state.stage === "Signed" ? out : undefined, state };
-    } catch (cause) {
-      rmSync(partial, { force: true });
-      throw cause;
-    }
+    const state = yield* attempt(() => run.take({ type: "sign", guarded, signers, rotation }));
+    yield* attempt(() => state.stage === "Signed" ? renameSync(partial, out) : rmSync(partial, { force: true }));
+    return { signed: state.stage === "Signed" ? out : undefined, state };
   }),
   deliver: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
     const [file = "", apk = "", recorded = "", to = ""] = yield* attempt(() => flags(argv, ["run", "apk", "apk-manifest", "to"]).need("run", "apk", "apk-manifest", "to"));
     const run = yield* attempt(() => runOf(file));
-    const now = hours();
-    if (!run.can({ type: "deliver", now })) return yield* new ReleaseRefused({ message: "no signed release waits to be delivered" });
+    if (!run.can({ type: "deliver", now: hours() })) return yield* new ReleaseRefused({ message: "no signed release waits to be delivered" });
+    const verified = yield* attempt(() => recordedBlockers(recorded, undefined, true).blockers);
+    if (!distributable(verified)) return yield* new ReleaseRefused({ message: `the signed build is not recorded distributable: ${JSON.stringify(verified)}` });
     const read = yield* admit(apk, run.state.number);
-    const { blockers, reasons } = yield* attempt(() => recordedBlockers(recorded, { signed: true, versionCode: run.state.number, sha256: read.sha256 }));
-    if (!distributable(blockers)) return yield* new ReleaseRefused({ message: `the signed build is not recorded distributable: ${reasons.join(", ")}` });
     return yield* attempt(() => {
       mkdirSync(to, { recursive: true });
       const target = join(to, `alpha-phone-${run.state.number}.apk`);
-      const receiptFile = join(to, "receipt.json");
       copyFileSync(apk, target, constants.COPYFILE_EXCL);
-      if (sha256File(target) !== read.sha256) {
-        rmSync(target, { force: true });
-        throw new ReleaseRefused({ message: `${target} did not read back with digest ${read.sha256}` });
-      }
-      const preview = Channel.step(run.state, { type: "deliver", now });
-      const receipt = { number: preview.number, attempt: preview.attempt, sha256: read.sha256, sizeBytes: read.apk.bytes, deliveredAt: preview.deliveredAt, expiresAt: preview.deliveredAt + Channel.receiptHours };
-      try {
-        writeFileSync(receiptFile, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
-        const state = run.take({ type: "deliver", now });
-        return { delivered: target, receipt, state };
-      } catch (cause) {
-        rmSync(receiptFile, { force: true });
-        rmSync(target, { force: true });
-        throw cause;
-      }
+      const state = run.take({ type: "deliver", now: hours() });
+      const receipt = { number: state.number, attempt: state.attempt, sha256: read.sha256, sizeBytes: read.apk.bytes, deliveredAt: state.deliveredAt, expiresAt: state.deliveredAt + Channel.receiptHours };
+      writeFileSync(join(to, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+      return { delivered: target, receipt, state };
     });
   }),
   qualify: (argv: readonly string[], _port: ChannelPort) => Effect.gen(function* () {
@@ -687,9 +594,7 @@ const commands = {
     const [out = ""] = yield* attempt(() => found.need("out"));
     const secrets = Object.fromEntries(CUSTODY_SECRETS.map((name) => [name, process.env[name] ?? ""]));
     for (const name of CUSTODY_SECRETS) delete process.env[name];
-    const scratchDir = found.values.scratch ?? "/dev/shm";
-    yield* attempt(() => assertMemoryBackedScratch(scratchDir));
-    const proof = yield* attempt(() => custodyProof({ secrets, enrolled: enrolledKeys(), scratch: scratchDir }));
+    const proof = yield* attempt(() => custodyProof({ secrets, enrolled: enrolledKeys(), scratch: found.values.scratch ?? "/dev/shm" }));
     yield* attempt(() => writeFileSync(out, `${JSON.stringify(proof, null, 2)}\n`, { flag: "wx" }));
     if (!custodyProven(proof.custody)) return yield* new ReleaseRefused({ message: `the protected keys are not the enrolled ones; the proof is ${out}` });
     return proof;
@@ -721,10 +626,8 @@ const AGENT_REFUSED = /Private IPC recovery refused/;
 
 /** What dumpsys says of the installed package: its version and the identity an in-place update keeps. */
 export function packageFacts(dump: string) {
-  const versionCode = /versionCode=([^\s]+)/.exec(dump)?.[1];
-  const uid = /(?:userId|appId)=(\d+)/.exec(dump)?.[1] ?? "";
-  const firstInstall = /firstInstallTime=([^\r\n]+)/.exec(dump)?.[1]?.trim() ?? "";
-  return { versionCode: Number(versionCode ?? Number.NaN), identity: { uid, firstInstall } };
+  const field = (name: string) => new RegExp(`${name}=([^\\s]+)`).exec(dump)?.[1];
+  return { versionCode: Number(field("versionCode") ?? Number.NaN), identity: { uid: field("userId") ?? "", firstInstall: field("firstInstallTime") ?? "" } };
 }
 
 const quiet = (adb: Adb, args: readonly string[]) => { try { return adb(args); } catch (failure) { return failure instanceof Error ? failure.message : String(failure); } };
@@ -772,28 +675,9 @@ function startedAgent(adb: Adb, user: string): Pilot.Agent {
 function claimed(locks: string, serial: string) {
   mkdirSync(locks, { recursive: true, mode: 0o700 });
   const lock = join(locks, `${sha256(new TextEncoder().encode(serial))}.lock`);
-  for (let attemptIndex = 0; attemptIndex < 2; attemptIndex += 1) {
-    try {
-      writeFileSync(lock, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
-      return () => rmSync(lock, { force: true });
-    } catch {
-      if (attemptIndex === 0) {
-        try {
-          const holderPid = Number(readFileSync(lock, "utf8").trim());
-          if (Number.isInteger(holderPid) && holderPid > 0 && !pidAlive(holderPid)) {
-            const stale = `${lock}.stale-${randomBytes(4).toString("hex")}`;
-            renameSync(lock, stale);
-            rmSync(stale, { force: true });
-            continue;
-          }
-        } catch {
-          void 0;
-        }
-      }
-      throw new ReleaseRefused({ message: `another pilot run holds this phone (${lock})` });
-    }
-  }
-  throw new ReleaseRefused({ message: `another pilot run holds this phone (${lock})` });
+  try { writeFileSync(lock, `${process.pid}\n`, { flag: "wx" }); }
+  catch { throw new ReleaseRefused({ message: `another pilot run holds this phone (${lock})` }); }
+  return () => rmSync(lock, { force: true });
 }
 
 interface PilotRequest {
@@ -837,8 +721,8 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS }
       if (original.home === "AlphaHome") {
         const stock = stockHomeOf(adb, user, stockHome);
         try {
-          adb(["shell", "cmd", "role", "add-role-holder", "--user", shellQuote(user), HOME_ROLE, shellQuote(stock.split("/")[0] ?? "")]);
-          adb(["shell", "cmd", "package", "set-home-activity", "--user", shellQuote(user), shellQuote(stock)]);
+          adb(["shell", "cmd", "role", "add-role-holder", "--user", user, HOME_ROLE, stock.split("/")[0] ?? ""]);
+          adb(["shell", "cmd", "package", "set-home-activity", "--user", user, stock]);
         } finally { take({ type: "handOff", confirmed: homeOf(adb, user).home === "StockHome" }); }
       }
       observe();
@@ -858,7 +742,7 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS }
         observe();
         const after = packageFacts(adb(["shell", "dumpsys", "package", PACKAGE]));
         const path = /^package:(\/\S+\.apk)$/m.exec(adb(["shell", "pm", "path", PACKAGE]))?.[1] ?? "";
-        const installed = path === "" ? "" : /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", shellQuote(path)]).trim())?.[1] ?? "";
+        const installed = /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", path]).trim())?.[1] ?? "";
         receipt = apkUpdateReceipt({
           candidate: { sha256: apk.sha256, versionCode: apk.versionCode }, installed: { sha256: installed, versionCode: after.versionCode },
           before: before.identity, after: after.identity, dataBefore, dataAfter: evidence === "Inventory" ? inventory() : dataBefore,
@@ -874,8 +758,8 @@ export function pilotUpdate({ adb, serial, apk, stockHome, locks = PILOT_LOCKS }
     quiet(adb, ["shell", "am", "force-stop", PACKAGE]);
     take({ type: "finishStop", stopped: running(adb).length === 0 });
     if (state.moved) {
-      quiet(adb, ["shell", "cmd", "role", "add-role-holder", "--user", shellQuote(user), HOME_ROLE, PACKAGE]);
-      quiet(adb, ["shell", "cmd", "package", "set-home-activity", "--user", shellQuote(user), shellQuote(original.activity)]);
+      quiet(adb, ["shell", "cmd", "role", "add-role-holder", "--user", user, HOME_ROLE, PACKAGE]);
+      quiet(adb, ["shell", "cmd", "package", "set-home-activity", "--user", user, original.activity]);
     }
     const restored = homeOf(adb, user);
     take({ type: "restoreHome", restored: restored.home === "AlphaHome" && restored.activity === original.activity, home: restored.home });
@@ -923,7 +807,7 @@ export function readBack({ adb, offer, before }: { readonly adb: Adb; readonly o
   const observed: Observed = {
     offer, versionCode: facts.versionCode, identity: facts.identity,
     initiator: /installInitiatingPackageName=([^\s,}]+)/.exec(dump)?.[1] ?? "",
-    sha256: path === "" ? "" : /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", shellQuote(path)]).trim())?.[1] ?? "",
+    sha256: path === "" ? "" : /^([0-9a-f]{64})\b/.exec(adb(["shell", "sha256sum", path]).trim())?.[1] ?? "",
     home: { holders: home.holders, activity: home.activity },
   };
   if (before === undefined) return { observed, readback: undefined, passed: false };
@@ -1023,27 +907,6 @@ export function avbMetadata(publicKey: Buffer, bits: number) {
   return Buffer.concat([header, bigEndian(n, bits / 8), bigEndian((1n << BigInt(2 * bits)) % n, bits / 8)]);
 }
 
-function assertMemoryBackedScratch(scratch: string): void {
-  if (process.platform !== "linux") return;
-  const resolved = realpathSync(scratch);
-  const mounts = readFileSync("/proc/mounts", "utf8").split(/\r?\n/);
-  let matchedMount = "";
-  let matchedType = "";
-  for (const line of mounts) {
-    const [, mountPoint = "", fsType = ""] = line.split(" ");
-    if (mountPoint === "") continue;
-    const decodedMount = mountPoint.replaceAll("\\040", " ");
-    const matches = resolved === decodedMount || (decodedMount === "/" ? resolved.startsWith("/") : resolved.startsWith(`${decodedMount}/`));
-    if (matches && decodedMount.length >= matchedMount.length) {
-      matchedMount = decodedMount;
-      matchedType = fsType;
-    }
-  }
-  if (matchedType !== "tmpfs" && matchedType !== "ramfs") {
-    refuse(`scratch directory ${resolved} is mounted on ${matchedType || "unknown"}, not tmpfs/ramfs`);
-  }
-}
-
 /**
  * Proves the protected keys are the enrolled ones: each private key pairs with its public identity, which is the one
  * Alpha enrolled and committed, none is a test key, and no two are the same. Secrets stay in memory and in `scratch`,
@@ -1052,10 +915,7 @@ function assertMemoryBackedScratch(scratch: string): void {
 export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets: Readonly<Record<string, string>>; readonly enrolled: Enrolled; readonly scratch: string }) {
   const [part1 = "", part2 = "", passphrase = "", keystore = "", password = ""] = CUSTODY_SECRETS.map((name) => secrets[name] ?? "");
   if (passphrase === "" || password === "") refuse("a key password is missing");
-  const sensitiveBuffers: Buffer[] = [];
-  const track = (buf: Buffer) => { sensitiveBuffers.push(buf); return buf; };
-  const archiveBytes = track(Buffer.concat([track(decoded(part1)), track(decoded(part2))]));
-  const files = keyArchive(archiveBytes);
+  const files = keyArchive(Buffer.concat([decoded(part1), decoded(part2)]));
   const fingerprints = JSON.parse((files.get("fingerprints.json") ?? Buffer.alloc(0)).toString("utf8")) as {
     readonly schemaVersion?: number; readonly testKeys?: boolean; readonly keys?: readonly { readonly name: string; readonly kind?: string; readonly certificateSha256?: string; readonly avbPublicKeySha256?: string }[];
   };
@@ -1070,12 +930,7 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
     const decrypted = (file: string, encoding: "DER" | "PEM") => {
       const encrypted = join(stage, file);
       writeFileSync(encrypted, files.get(file) ?? Buffer.alloc(0), { mode: 0o600 });
-      const rawKey = track(openssl(["pkcs8", "-inform", encoding, "-in", encrypted, "-passin", "env:ALPHA_PROOF_PASSWORD"], undefined, passphrase));
-      try {
-        return publicOf(rawKey);
-      } finally {
-        rawKey.fill(0);
-      }
+      return publicOf(openssl(["pkcs8", "-inform", encoding, "-in", encrypted, "-passin", "env:ALPHA_PROOF_PASSWORD"], undefined, passphrase));
     };
     for (const name of OS_CERTIFICATES) {
       const certificate = files.get(`${name}.x509.pem`) ?? Buffer.alloc(0);
@@ -1096,11 +951,9 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
       keys.push({ name, publicKey, enrolled: pairs && known });
     }
     const store = join(stage, "app.p12");
-    const keystoreBytes = track(decoded(keystore));
-    writeFileSync(store, keystoreBytes, { mode: 0o600 });
+    writeFileSync(store, decoded(keystore), { mode: 0o600 });
     const read = (...more: string[]) => openssl(["pkcs12", "-in", store, "-passin", "env:ALPHA_PROOF_PASSWORD", ...more], undefined, password);
-    const certificate = read("-clcerts", "-nokeys");
-    const privateKey = track(read("-nocerts", "-noenc"));
+    const [certificate, privateKey] = [read("-clcerts", "-nokeys"), read("-nocerts", "-noenc")];
     const alias = new RegExp(`^\\s*friendlyName: ${KEYSTORE_ALIAS}\\s*$`, "m");
     const single = alias.test(certificate.toString()) && alias.test(privateKey.toString())
       && certificate.toString().split("-----BEGIN CERTIFICATE-----").length === 2 && privateKey.toString().split("-----BEGIN PRIVATE KEY-----").length === 2;
@@ -1110,8 +963,6 @@ export function custodyProof({ secrets, enrolled, scratch }: { readonly secrets:
       && (appEntry === undefined || appEntry.certificateSha256 === enrolled.appSigner)
       && publicOf(privateKey).equals(app.publicKey) && identityOf(committed("alphaphone_app.x509.pem")).sha256 === app.sha256 });
   } finally {
-    for (const buf of sensitiveBuffers) buf.fill(0);
-    for (const buf of files.values()) buf.fill(0);
     rmSync(stage, { recursive: true, force: true });
   }
   const custody: Custody = {
@@ -1331,12 +1182,9 @@ export function signOsUpdate({ plan: text, reviewed, target, tools, work, secret
   if (!osPlanAdmitted(facts)) throw new ReleaseRefused({ message: `the OS signing plan is not admitted: ${JSON.stringify(facts)}` });
   const { build, postTime } = osBuildOf(target, plan, pin, binding);
   if (!osBuildAdmitted(build)) throw new ReleaseRefused({ message: `the OS build is not one a preserving update may be signed from: ${JSON.stringify(build)}` });
-  assertMemoryBackedScratch(scratch);
+  if (execFileSync("stat", ["-f", "-c", "%T", scratch], { encoding: "utf8" }).trim() !== "tmpfs") throw new ReleaseRefused({ message: `${scratch} is not memory that never reaches a disk` });
   const [part1 = "", part2 = "", passphrase = ""] = CUSTODY_SECRETS.slice(0, 3).map((name) => secrets[name] ?? "");
-  const sensitiveBuffers: Buffer[] = [];
-  const track = (buf: Buffer) => { sensitiveBuffers.push(buf); return buf; };
-  const archiveBytes = track(Buffer.concat([track(decoded(part1)), track(decoded(part2))]));
-  const files = keyArchive(archiveBytes);
+  const files = keyArchive(Buffer.concat([decoded(part1), decoded(part2)]));
   const certificate = files.get("releasekey.x509.pem") ?? Buffer.alloc(0);
   const identity = identityOf(certificate);
   const expected = (JSON.parse(readFileSync(join(app, "aosp/signing/os-custody-expected.json"), "utf8")) as { readonly osCertificateSha256: Readonly<Record<string, string>> }).osCertificateSha256.releasekey;
@@ -1350,13 +1198,13 @@ export function signOsUpdate({ plan: text, reviewed, target, tools, work, secret
   try {
     const encrypted = join(stage, "releasekey.pk8.enc");
     writeFileSync(encrypted, files.get("releasekey.pk8.enc") ?? Buffer.alloc(0), { mode: 0o600 });
-    const key = track(openssl(["pkcs8", "-inform", "DER", "-in", encrypted, "-passin", "env:ALPHA_PROOF_PASSWORD"], undefined, passphrase));
+    const key = openssl(["pkcs8", "-inform", "DER", "-in", encrypted, "-passin", "env:ALPHA_PROOF_PASSWORD"], undefined, passphrase);
     if (!publicOf(key).equals(identity.publicKey)) throw new ReleaseRefused({ message: "the OS release key does not pair with its certificate" });
     if (!new RegExp(`Public-Key: \\(${bits} bit\\)`).test(openssl(["pkey", "-pubin", "-inform", "DER", "-text", "-noout"], identity.publicKey).toString())) throw new ReleaseRefused({ message: "the OS release key has another size than its manifest" });
     const prefix = join(stage, "releasekey");
     writeFileSync(`${prefix}.x509.pem`, certificate, { mode: 0o600 });
     writeFileSync(`${prefix}.pem`, key, { mode: 0o600 });
-    writeFileSync(`${prefix}.pk8`, track(openssl(["pkcs8", "-topk8", "-nocrypt", "-outform", "DER"], key)), { mode: 0o600 });
+    writeFileSync(`${prefix}.pk8`, openssl(["pkcs8", "-topk8", "-nocrypt", "-outform", "DER"], key), { mode: 0o600 });
     mkdirSync(join(work, "tmp"), { mode: 0o700 });
     const signer = ["pkeyutl", "-sign", "-inkey", `${prefix}.pem`, "-pkeyopt", "digest:sha256"].join(" ");
     const run = spawnSync(join(toolsAt, "bin/ota_from_target_files"), ["-k", prefix, "--payload_signer", "/usr/bin/openssl", "--payload_signer_args", signer,
@@ -1366,8 +1214,6 @@ export function signOsUpdate({ plan: text, reviewed, target, tools, work, secret
     });
     if (run.status !== 0) throw new ReleaseRefused({ message: "ota_from_target_files did not sign the update" });
   } finally {
-    for (const buf of sensitiveBuffers) buf.fill(0);
-    for (const buf of files.values()) buf.fill(0);
     rmSync(stage, { recursive: true, force: true });
   }
   const signed = osSignedOf(output, plan, postTime, expected, work);

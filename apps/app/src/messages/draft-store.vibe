@@ -1,7 +1,7 @@
 // spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/platform/adoption.md, "A value is moved by copying it only where the new place is still empty, and its earlier place is cleared only once the new place holds a value"
 import { MMS_ATTACHMENT_TYPES, MMS_MAX_ATTACHMENTS, MMS_MAX_BODY, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, normalizePhoneNumber, operationIdOf, type OperationId, type PhoneNumber, type SmsSendStatus, type ThreadId } from "@elizaos/os-bridges"
-import { telephony, type Telephony } from "../platform/telephony.vibe"
-import { Vault, type SmsDraftSlot, type VaultFailed } from "../platform/vault.vibe"
+import { telephony, type Telephony } from "../platform/index.vibe"
+import { Vault, type SmsDraftSlot, type VaultFailed } from "../platform/index.vibe"
 import { androidInboundOf, canonicalDraftRecipients, decodeDraftRecord, draftSlot, encodeDraftRecord, sameDraftSource, type DraftRecord, type DraftSource } from "./draft-record.vibe"
 
 type Secret = Redacted.Redacted<string>
@@ -71,15 +71,14 @@ export effect function settleDraftRecord(held: HeldDraft, sent: SentDraft): { re
 }
 
 module legacy {
-  import { allowsTestOrigin } from "../platform/build.ts"
-  import { replyTo } from "../platform/portReply.ts"
+  import { allowsTestMocks, replyTo } from "../platform/index.vibe"
 
   interface DraftPort extends EventTarget { postMessage(data: string): void }
   type Request = { kind: "read"; threadId: string | null }
     | { kind: "retire"; threadId: string | null; expected: string }
 
   export async function request(input: Request, signal: AbortSignal): Promise<unknown> {
-    if (typeof window === "undefined" || (!allowsTestOrigin() && (window.top !== window || window.location.origin !== "https://localhost"))) {
+    if (typeof window === "undefined" || (!(import.meta.env.DEV || allowsTestMocks()) && (window.top !== window || window.location.origin !== "https://localhost"))) {
       throw new Error("Installed Messages drafts are unavailable.")
     }
     const candidate = (window as Window & { alphaLegacySmsDrafts?: DraftPort }).alphaLegacySmsDrafts

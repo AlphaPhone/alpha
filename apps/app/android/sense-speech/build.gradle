@@ -1,0 +1,9 @@
+// Sense is a separate APK and owns its complete local-speech runtime from pinned @elizaos/os.
+def elizaRoot = project.hasProperty('elizaRootDir')
+    ? file(project.elizaRootDir)
+    : file('../../../../.eliza')
+ext.elizaParadeeSourceDir = new File(elizaRoot, 'packages/os/android/local-inference')
+if (project.hasProperty('elizaParadeeNativeDir')) {
+    ext.elizaParadeeNativeDir = file(project.elizaParadeeNativeDir)
+}
+apply from: new File(elizaParadeeSourceDir, 'consumer.gradle')

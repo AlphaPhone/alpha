@@ -142,7 +142,7 @@ pure def stepAMismatchIsEvicted(before: Install, via: str, after: Install, out: 
   (via == "downloaded" and after.phase == Ended) implies (after.cache == 0 and out.some(e => match e { | Evict => true | _ => false }))
 ```
 
-### Every version an install targets is above the version it started from
+### Every version an install targets is above the version it started from, with a download address
 
 ```quint
 pure def alwaysTheTargetIsAboveTheBaseline(s: Install): bool =

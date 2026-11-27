@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { cn } from "../../lib/cn.ts";
+import { cn, focusRing } from "../../lib/cn.ts";
 
 export type SmsReviewCardProps = {
   /** Who the text goes to: the number, or the contact's name. */
@@ -37,7 +37,7 @@ export type SmsReviewCardProps = {
  */
 export function SmsReviewCard({ to, number, body, note, hint, review, onSend, onDecline, sendDisabled = false, declineDisabled = false, className }: SmsReviewCardProps) {
   const row = "relative flex min-h-14 w-full items-center gap-3 border-b border-border px-4 py-3 text-left";
-  const label = "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold after:absolute after:inset-0 disabled:cursor-default disabled:opacity-50";
+  const label = cn(focusRing, "inline-flex min-h-9 shrink-0 items-center rounded-action px-4 text-sm font-semibold after:absolute after:inset-0 after:content-[''] disabled:cursor-default disabled:opacity-50");
   const details = (
     <div className="min-w-0 grow">
       <div className="text-sm font-semibold">Review SMS</div>
@@ -50,18 +50,20 @@ export function SmsReviewCard({ to, number, body, note, hint, review, onSend, on
   return (
     <section aria-label={`Text to ${to}`} data-alpha-sms-review="" data-alpha-review={review}
       className={cn("overflow-hidden rounded-tile bg-secondary text-foreground", className)}>
-      {onSend ? (
-        <div className={row}>
-          {details}
-          <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled}
-            className={cn(label, "bg-alpha text-alpha-foreground")} onClick={onSend}>Send</button>
-        </div>
-      ) : <div className={row}>{details}</div>}
+      <div className={row}>
+        {details}
+        {onSend ? (
+          <button type="button" aria-label="Send this text" data-alpha-review-send="" disabled={sendDisabled} className={cn(label, "bg-alpha text-alpha-foreground")} onClick={onSend}>
+            Send
+          </button>
+        ) : null}
+      </div>
       {onDecline ? (
         <div className={row}>
           <div className="min-w-0 grow text-meta leading-details text-muted-foreground">Keep things as they are.</div>
-          <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled}
-            className={cn(label, "bg-accent text-foreground")} onClick={onDecline}>Decline</button>
+          <button type="button" aria-label="Decline Keep things as they are." disabled={declineDisabled} className={cn(label, "bg-accent text-foreground")} onClick={onDecline}>
+            Decline
+          </button>
         </div>
       ) : null}
     </section>

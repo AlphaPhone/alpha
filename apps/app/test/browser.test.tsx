@@ -23,6 +23,7 @@ import type { Alpha } from "../src/runtime/area.tsx";
 import home from "../src/home/index.tsx";
 import inbox from "../src/inbox/index.tsx";
 import { Offers } from "../src/inbox/suggestion.vibe";
+import { say } from "../src/notices/toasts.vibe";
 import { TabHost } from "../src/platform/browser.vibe";
 import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, readInboxFirst, typeInto, underAct, until } from "./alpha.tsx";
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
@@ -41,6 +42,18 @@ const selectedTab = (runtime: BrowserRuntime) => runtime.runSync(Effect.map(Effe
 const selectedPage = (runtime: BrowserRuntime, tab = selectedTab(runtime)) => runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
 
 /** Alpha on an Alpha image with the Browser on screen. */
+/** Whether the phone gives a touch at (x, y) to the page, as `HostRect.pageOwnsPoint` decides it below Alpha. */
+function pageOwns(shown: { shown?: { x: number; y: number; width: number; height: number }; hostRects: readonly { x: number; y: number; width: number; height: number; cornerRadius: number }[] }, x: number, y: number): boolean {
+  const page = shown.shown;
+  if (page === undefined || x < page.x || y < page.y || x >= page.x + page.width || y >= page.y + page.height) return false;
+  return !shown.hostRects.some((rect) => {
+    if (x < rect.x || x > rect.x + rect.width || y < rect.y || y > rect.y + rect.height) return false;
+    const radius = Math.min(rect.cornerRadius, rect.width / 2, rect.height / 2);
+    const cx = Math.min(Math.max(x, rect.x + radius), rect.x + rect.width - radius), cy = Math.min(Math.max(y, rect.y + radius), rect.y + rect.height - radius);
+    return (x - cx) ** 2 + (y - cy) ** 2 <= radius ** 2;
+  });
+}
+
 async function onBrowser(world = { ...scene(), phone: true, image: true }, notices = false) {
   const running = await open(world, notices ? only("home", "notice", "view:Browser") : only("home", "view:Browser"));
   await until(running.alpha, home.runtime(running.alpha), Home, (h) => h.tiles.load.status === "Loaded");
@@ -100,7 +113,7 @@ async function ask(running: Awaited<ReturnType<typeof askingOnBrowser>>, text: s
   const { alpha, asking, world } = running;
   world.ask.metadata = [];
   await drawn(() => {
-    const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha" || one.getAttribute("aria-label") === "Ask about this page");
+    const box = [...document.querySelectorAll("textarea")].find((one) => one.getAttribute("aria-label") === "Message Alpha");
     if (!box) throw new Error("no composer");
     typeInto(box, text);
   });
@@ -401,30 +414,75 @@ describe("The Browser on a phone", () => {
       if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
       return undefined;
     });
-    const computed = globalThis.getComputedStyle.bind(globalThis);
-    const styled = vi.spyOn(globalThis, "getComputedStyle").mockImplementation((element, pseudo) => {
-      const style = computed(element, pseudo);
-      if (!element.matches('[role="search"][aria-label="Find in page"]')) return style;
-      const drawn = { boxShadow: "currentcolor 0px 12px 34px 0px, currentcolor 0px 0px 0px 1px", borderTopLeftRadius: "20px" };
-      return new Proxy(style, { get: (target, key): unknown => typeof key === "string" && key in drawn ? drawn[key as keyof typeof drawn] : Reflect.get(target, key) });
-    });
-    onTestFinished(() => styled.mockRestore());
     const { tab, page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
     const full = { id: `tab${tab}`, x: 0, y: 104, width: 390, height: 650 };
     await drawn(() => vi.waitFor(() => expect(world.browser.shown).toEqual(full)));
-    expect(world.browser.hostRects).toEqual([]);
+    expect([world.browser.layer, world.browser.hostRects]).toEqual(["above-host", []]);
+    expect(document.documentElement.dataset.alphaBrowserUnder).toBeUndefined();
 
     await press("Menu");
     await press("Find in page");
     await until(alpha, page, Page, (p) => p.finding);
-    // spec/app/browser/address.md, "The find bar opens over a shown page": the hole takes the bar's ring and its shadow (0 12px 34px), which v119 drew over the page
-    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: -24, y: 84, width: 438, height: 120, cornerRadius: 42 }])));
+    // spec/app/browser/address.md, "The find bar opens over a shown page": as on v119, the page is drawn below Alpha, whose surface clears over it, so the bar's ring and shadow fall on the page
+    await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["below-host", [{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }]])));
     expect(world.browser.shown).toEqual(full);
+    expect(document.documentElement.dataset.alphaBrowserUnder).toBe("");
+    expect(["top", "bottom"].map((side) => document.documentElement.style.getPropertyValue(`--alpha-browser-under-${side}`))).toEqual(["104px", "754px"]);
+    // spec/app/browser/address.md, "The find bar opens over a shown page": only the bar is Alpha's to touch; beside it and just under it, where its shadow falls, the touch reaches the page
+    expect([[200, 130], [5, 130], [385, 130], [200, 170], [200, 600]].map(([x, y]) => pageOwns(world.browser, x ?? 0, y ?? 0))).toEqual([false, true, true, true, true]);
+
+    // spec/app/browser/address.md, "The find bar opens over a shown page": all of the page is Alpha's while Ask Alpha is raised over it
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "raise", detent: "Sheet" }))));
+    await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["below-host", [{ x: 0, y: 104, width: 390, height: 650, cornerRadius: 0 }]])));
+    await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goBack" }, (before) => before.assistant === "Sheet"))));
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([{ x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 }])));
 
     await press("Close find in page");
     await until(alpha, page, Page, (p) => !p.finding);
-    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([])));
+    await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["above-host", []])));
     expect(world.browser.shown).toEqual(full);
+    expect(document.documentElement.dataset.alphaBrowserUnder).toBeUndefined();
+  });
+
+  async function openFindBelowHost(alpha: Awaited<ReturnType<typeof onBrowser>>["alpha"], runtime: Awaited<ReturnType<typeof onBrowser>>["runtime"], extra?: (node: Element) => DOMRect | undefined) {
+    await until(alpha, runtime, Tabs, (s) => s.hydrated);
+    layOutNativePage((node) => {
+      if (node.hasAttribute("data-alpha-browser-page")) return new DOMRect(0, 104, 390, 650);
+      if (node.matches('[role="search"][aria-label="Find in page"]')) return new DOMRect(10, 106, 370, 52);
+      return extra?.(node);
+    });
+    const { page } = await goSecure(alpha, runtime, "news.example/on-device-agents");
+    await press("Menu");
+    await press("Find in page");
+    await until(alpha, page, Page, (p) => p.finding);
+  }
+
+  it("Measures Alpha's chrome again while it changes over a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser(undefined, true);
+    await openFindBelowHost(alpha, runtime, (node) =>
+      node.matches("[data-host-chrome]") && node.textContent === "Saved" ? new DOMRect(95, 170, 200, 48) : undefined);
+    const bar = { x: 10, y: 106, width: 370, height: 52, cornerRadius: 0 };
+    await drawn(() => vi.waitFor(() => expect([world.browser.layer, world.browser.hostRects]).toEqual(["below-host", [bar]])));
+
+    // spec/app/browser/address.md, "The find bar opens over a shown page": a toast that appears over the page is Alpha's to touch at once
+    await drawn(() => alpha.runtime.runPromise(say("Saved")));
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([bar, { x: 95, y: 170, width: 200, height: 48, cornerRadius: 0 }])));
+    expect(pageOwns(world.browser, 195, 194)).toBe(false);
+
+    // spec/app/browser/address.md, "The find bar opens over a shown page": once it has gone, its place is the page's again
+    await later(alpha, 1_900);
+    await drawn(() => vi.waitFor(() => expect(world.browser.hostRects).toEqual([bar])));
+    expect(pageOwns(world.browser, 195, 194)).toBe(true);
+  });
+
+  it("Keeps Home hidden under a page below Alpha (spec/app/browser/address.md, \"The find bar opens over a shown page\")", async () => {
+    const { alpha, runtime, world } = await onBrowser();
+    await openFindBelowHost(alpha, runtime);
+    await drawn(() => vi.waitFor(() => expect(world.browser.layer).toBe("below-host")));
+    // spec/app/browser/address.md, "The find bar opens over a shown page": while the page is below, Home's layer is never drawn over it, even as the Browser rises over Home
+    const home = document.querySelector("[data-alpha-home-layer]");
+    expect(home?.className).toMatch(/(^|\s)(invisible|in-data-\[alpha-browser-under\]:invisible)(\s|$)/);
+    expect(document.documentElement.dataset.alphaBrowserUnder).toBe("");
   });
 
   it('Explains unavailable Android page reading (spec/app/browser/reading.md, "An explicit reading starts from the current committed HTTPS page")', async () => {

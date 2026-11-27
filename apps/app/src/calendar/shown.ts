@@ -134,6 +134,12 @@ export interface ShownStore {
   readonly lastSeen: (id: number) => Row | undefined;
   /** The event numbered `id`, wherever it was last read. @throws {never} */
   readonly find: (id: number) => Row | undefined;
+  /** Keep the summaries the agent lists for its calendars, the primary one's for a new event. @throws {never} */
+  readonly listed: (calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }>) => void;
+  /** The summary the agent listed for `calendarId`, or else its primary calendar's, or "" where it listed none. @throws {never} */
+  readonly listedName: (calendarId: string) => string;
+  /** The summary the agent listed for `calendarId` itself, or "" where it listed none for it. @throws {never} */
+  readonly listedSummary: (calendarId: string) => string;
   /** Clear every cached row, revision, and id mapping when the runtime scope closes. @throws {never} */
   readonly reset: () => void;
 }
@@ -148,6 +154,8 @@ function makeShownStore(onReset?: () => void): ShownStore {
   const windows = new Map<Source, ReadonlyArray<Row>>();
   const last = new Map<number, Row>();
   const cut = new Set<Source>();
+  const names = new Map<string, string>();
+  let primaryName = "";
   const version = createShelf(0);
   let nextNumber = 0;
   let present = false;
@@ -246,6 +254,10 @@ function makeShownStore(onReset?: () => void): ShownStore {
       for (const key of [...numbers.keys()]) if (key.startsWith(prefix)) numbers.delete(key);
       for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
       if (source === "Phone") calendars.clear();
+      if (source === "Google") {
+        names.clear();
+        primaryName = "";
+      }
       told();
     },
     present: () => present,
@@ -268,7 +280,23 @@ function makeShownStore(onReset?: () => void): ShownStore {
       }
       return undefined;
     },
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
+    listed(list) {
+      names.clear();
+      primaryName = "";
+      for (const one of list) {
+        const summary = one.summary?.trim() ?? "";
+        if (summary === "") continue;
+        names.set(one.calendarId, summary);
+        if (one.primary === true || primaryName === "") primaryName = summary;
+      }
+      told();
+    },
+    listedName: (calendarId) => names.get(calendarId) ?? primaryName,
+    listedSummary: (calendarId) => names.get(calendarId) ?? "",
     reset() {
+      names.clear();
+      primaryName = "";
       numbers.clear();
       calendars.clear();
       seen.clear();

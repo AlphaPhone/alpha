@@ -1,0 +1,103 @@
+{
+  "key": "alpha/app/home/cards@1",
+  "spec": "spec/app/home/cards.md",
+  "shape": "cac25f1d2c9a6024",
+  "state": {
+    "calendar": {
+      "read": {
+        "status": "Idle",
+        "ticket": 3
+      },
+      "source": "Ready",
+      "day": 20409,
+      "items": [
+        {
+          "id": 51,
+          "origin": "PhoneCalendar",
+          "calendar": 1,
+          "begin": 1795000000000,
+          "end": 1795003600000,
+          "allDay": false,
+          "overdue": false,
+          "done": false
+        }
+      ],
+      "since": 0,
+      "asked": 0
+    },
+    "agent": {
+      "read": {
+        "status": "Idle",
+        "ticket": 2
+      },
+      "source": "Ready",
+      "day": 20409,
+      "items": [
+        {
+          "id": 52,
+          "origin": "AgentCalendar",
+          "calendar": 2,
+          "begin": 1795007200000,
+          "end": 1795009000000,
+          "allDay": false,
+          "overdue": false,
+          "done": false
+        }
+      ],
+      "since": 0,
+      "asked": 0
+    },
+    "today": 20409
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "26f8019918 (#1643)",
+      "state": {
+        "calendar": {
+          "read": {
+            "status": "Idle",
+            "ticket": 3
+          },
+          "source": "Ready",
+          "day": 20409,
+          "items": [
+            {
+              "id": 51,
+              "origin": "PhoneCalendar",
+              "calendar": 1,
+              "begin": 1795000000000,
+              "end": 1795003600000,
+              "allDay": false,
+              "overdue": false,
+              "done": false
+            }
+          ],
+          "since": 0
+        },
+        "agent": {
+          "read": {
+            "status": "Idle",
+            "ticket": 2
+          },
+          "source": "Ready",
+          "day": 20409,
+          "items": [
+            {
+              "id": 52,
+              "origin": "AgentCalendar",
+              "calendar": 2,
+              "begin": 1795007200000,
+              "end": 1795009000000,
+              "allDay": false,
+              "overdue": false,
+              "done": false
+            }
+          ],
+          "since": 0
+        },
+        "today": 20409
+      }
+    }
+  ]
+}

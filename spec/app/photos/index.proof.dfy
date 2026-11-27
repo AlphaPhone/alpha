@@ -73,6 +73,7 @@ lemma sendNext_ensures(s: Photos, items: seq<int>, by_: app__photos__actor_Actor
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepChangesAreTheOwners(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepAFavouriteToggles(s, "sendNext", sendNext(s, items, by_).state))
   ensures (inv(s) ==> canSendNext(s, items, by_) ==> stepAlbumChangesCarryTheSelection(s, "sendNext", sendNext(s, items, by_).state, sendNext(s, items, by_).out))
+
 {
   if inv(s) && canSendNext(s, items, by_) {
     SentBatch(s.job, items);
@@ -146,13 +147,15 @@ lemma accessIs_ensures(s: Photos, grant: kit__permission_Grant, videos: bool, by
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepChangesAreTheOwners(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out))
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepAFavouriteToggles(s, "accessIs", accessIs(s, grant, videos, by_).state))
   ensures (inv(s) ==> canAccessIs(s, by_) ==> stepAlbumChangesCarryTheSelection(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out))
+
 {
   if inv(s) && canAccessIs(s, by_) {
-    var access := kit__permission_observe(s.access, grant);
-    if !kit__permission_allows(access) {
-      AccessRevoked(s, grant, videos, by_);
+    var d := accessIs(s, grant, videos, by_);
+    if !kit__permission_allows(kit__permission_observe(s.access, grant)) {
+      assert d.out[0].Revoke?;
+      assert d.out[0] in d.out;
     } else {
-      AccessAllowed(s, grant, videos, by_);
+      assert forall e :: e in d.out ==> !e.Revoke?;
     }
   }
 }
@@ -172,6 +175,7 @@ lemma toggle_ensures(s: Photos, photo: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepChangesAreTheOwners(s, "toggle", toggle(s, photo, by_), []))
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepAFavouriteToggles(s, "toggle", toggle(s, photo, by_)))
   ensures (inv(s) ==> canToggle(s, photo, by_) ==> stepAlbumChangesCarryTheSelection(s, "toggle", toggle(s, photo, by_), []))
+
 {
   if inv(s) && canToggle(s, photo, by_) {
     var after := toggle(s, photo, by_);
@@ -305,6 +309,7 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepChangesAreTheOwners(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAFavouriteToggles(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state))
   ensures (inv(s) ==> canListed(s, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "listed", listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).state, listed(s, ticket, ok, rows, owned, starred, cameraItem, revision, more, by_).out))
+
 {
   if inv(s) && canListed(s, ticket, by_) {
     if !ok {
@@ -340,5 +345,30 @@ lemma cameraAlbumsLoaded_ensures(s: Photos, photo: int, ticket: int, choices: se
       Joined(choices, [s.album]);
       assert s.album in after.albums;
     }
+  }
+}
+
+lemma changed_ensures(s: Photos, attempt: int, done: seq<int>, stale: seq<int>, declined: bool, known: bool, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysVideosNeedTheirAccess(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysOnlyOwnWithoutAccess(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysTheAlbumShowingIsListed(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysNothingShownWhileHidden(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysTheLockScreenListsOnlyItsSession(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysSelectionIsListed(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysRunsAreTheOwners(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> alwaysDialogNamesItsSubject(changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepNothingChangesWithoutAccess(s, changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAPageKeepsWhatWasListed(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepChangesAreTheOwners(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAFavouriteToggles(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state))
+  ensures (inv(s) ==> canChanged(s, attempt, done, stale, by_) ==> stepAlbumChangesCarryTheSelection(s, "changed", changed(s, attempt, done, stale, declined, known, by_).state, changed(s, attempt, done, stale, declined, known, by_).out))
+
+{
+  if inv(s) && canChanged(s, attempt, done, stale, by_) {
+    var r := app__photos__changes_answered(s.job, attempt, done, stale, declined, known);
+    var res := if (known && s.job.change.Trash? && (s.cameraItem in done)) then clearCameraVisit(s) else s;
+    assert res.rows == s.rows && res.mine == s.mine && res.selected == s.selected && res.starred == s.starred;
+    assert s.secure ==> |r.left| == 0;
   }
 }

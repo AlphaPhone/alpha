@@ -5,6 +5,7 @@ lemma OrderedIs(rows: seq<Row>)
 
 lemma lawAPinnedNoteLeads_ensures(rows: seq<Row>)
   ensures (lawAPinnedNoteLeads(rows) == true)
+
 {
   if exists r :: r in rows && r.pinned {
     var r :| r in rows && r.pinned;
@@ -39,6 +40,7 @@ lemma RenamedKeepsFolders(folders: seq<Folder>, id: int, name: string, x: int)
 
 lemma lawRenamingKeepsEveryNoteInItsFolder_ensures(rows: seq<Row>, folders: seq<Folder>, folder: int, name: string)
   ensures (lawRenamingKeepsEveryNoteInItsFolder(rows, folders, folder, name) == true)
+
 {
   var a := tidied(rows, renamed(folders, folder, name));
   var b := tidied(rows, folders);
@@ -51,9 +53,18 @@ lemma lawRenamingKeepsEveryNoteInItsFolder_ensures(rows: seq<Row>, folders: seq<
   assert a == b;
 }
 
-// shownRow, with the heap-free filter the library's lemmas speak of
 lemma ShownRowIs(s: Notes, id: int)
   ensures shownRow(s, id) == (if 0 < |ProofLib.Filter((r: Row) => (r.id == id), shown(s))| then ProofLib.Filter((r: Row) => (r.id == id), shown(s))[0] else blankRow)
+{
+}
+
+lemma RowOfIs(s: Notes, id: int)
+  ensures rowOf(s, id) == (if 0 < |ProofLib.Filter((r: Row) => (r.id == id), s.rows)| then ProofLib.Filter((r: Row) => (r.id == id), s.rows)[0] else blankRow)
+{
+}
+
+lemma ShownIs(s: Notes)
+  ensures shown(s) == ordered(ProofLib.Filter((r: Row) => inView(s, r), s.rows))
 {
 }
 
@@ -78,6 +89,7 @@ lemma openRow_ensures(s: Notes, id: int, covered: bool, by_: app__notes__note_Ac
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepLeavingKeepsTheProposal(s, "openRow", openRow(s, id, covered, by_).state))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepNoAnswerForAFormerOwner(s, "openRow", openRow(s, id, covered, by_).state))
   ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepNoLateAnswerAfterRestart(s, "openRow", openRow(s, id, covered, by_).state))
+
 {
   if inv(s) && canOpenRow(s, id, covered, by_) {
     var x :| x in shown(s) && x.id == id;
@@ -88,16 +100,6 @@ lemma openRow_ensures(s: Notes, id: int, covered: bool, by_: app__notes__note_Ac
     assert f[0] in f;
     ProofLib.FilterMember((r: Row) => (r.id == id), shown(s), f[0]);
   }
-}
-
-lemma RowOfIs(s: Notes, id: int)
-  ensures rowOf(s, id) == (if 0 < |ProofLib.Filter((r: Row) => (r.id == id), s.rows)| then ProofLib.Filter((r: Row) => (r.id == id), s.rows)[0] else blankRow)
-{
-}
-
-lemma ShownIs(s: Notes)
-  ensures shown(s) == ordered(ProofLib.Filter((r: Row) => inView(s, r), s.rows))
-{
 }
 
 lemma agentOpen_ensures(s: Notes, id: int, covered: bool, req: app__notes__note_Request, by_: app__notes__note_Actor)
@@ -122,27 +124,27 @@ lemma agentOpen_ensures(s: Notes, id: int, covered: bool, req: app__notes__note_
   ensures (inv(s) ==> canAgentOpen(s, id, covered, req, by_) ==> stepNoAnswerForAFormerOwner(s, "agentOpen", agentOpen(s, id, covered, req, by_).state))
   ensures (inv(s) ==> canAgentOpen(s, id, covered, req, by_) ==> stepNoLateAnswerAfterRestart(s, "agentOpen", agentOpen(s, id, covered, req, by_).state))
 {
-  if inv(s) && canAgentOpen(s, id, covered, req, by_) && agentOpens(s, id, covered, req, by_) {
-    var x :| x in s.rows && x.id == id;
-    ProofLib.FilterMember((r: Row) => (r.id == id), s.rows, x);
-    RowOfIs(s, id);
-    var f := ProofLib.Filter((r: Row) => (r.id == id), s.rows);
-    assert 0 < |f|;
-    assert f[0] in f;
-    ProofLib.FilterMember((r: Row) => (r.id == id), s.rows, f[0]);
-    var row := f[0];
-    var after := agentOpen(s, id, covered, req, by_).state;
-    assert row in after.rows && inView(after, row);
-    ShownIs(after);
-    var vis := ProofLib.Filter((r: Row) => inView(after, r), after.rows);
-    ProofLib.FilterMember((r: Row) => inView(after, r), after.rows, row);
-    assert row in vis;
-    OrderedIs(vis);
-    if row.pinned {
-      ProofLib.FilterMember((r: Row) => r.pinned, vis, row);
-      assert row in shown(after);
-    } else {
-      ProofLib.FilterMember((r: Row) => !(r.pinned), vis, row);
+  if inv(s) && canAgentOpen(s, id, covered, req, by_) {
+    if agentOpens(s, id, covered, req, by_) {
+      var x :| x in s.rows && x.id == id;
+      ProofLib.FilterMember((r: Row) => (r.id == id), s.rows, x);
+      RowOfIs(s, id);
+      var f := ProofLib.Filter((r: Row) => (r.id == id), s.rows);
+      assert 0 < |f|;
+      assert f[0] in f;
+      ProofLib.FilterMember((r: Row) => (r.id == id), s.rows, f[0]);
+      var row := rowOf(s, id);
+      var after := agentOpen(s, id, covered, req, by_).state;
+      assert row in after.rows && inView(after, row);
+      var viewed := ProofLib.Filter((r: Row) => inView(after, r), after.rows);
+      ProofLib.FilterMember((r: Row) => inView(after, r), after.rows, row);
+      ShownIs(after);
+      OrderedIs(viewed);
+      if row.pinned {
+        ProofLib.FilterMember((r: Row) => r.pinned, viewed, row);
+      } else {
+        ProofLib.FilterMember((r: Row) => !(r.pinned), viewed, row);
+      }
       assert row in shown(after);
     }
   }

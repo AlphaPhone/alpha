@@ -20,10 +20,12 @@ export type AssistantCardFrameProps = Omit<ComponentProps<"div">, "title"> & {
   settled?: boolean;
   /** What ends a live card's head in place of its chevron. */
   trailing?: ReactNode;
+  /** A last row under the card's controls, edge to edge, shown only while the card is live. */
+  foot?: ReactNode;
 };
 
 /** The surface every card of a reply shares: its head with the kind's mark on Alpha blue, what it holds and its controls, quiet once settled. */
-export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, trailing, className, ...props }: AssistantCardFrameProps) {
+export function AssistantCardFrame({ icon, title, detail, children, actions, onOpen, settled = false, trailing, foot, className, ...props }: AssistantCardFrameProps) {
   const head = (
     <>
       <span aria-hidden className={cn("flex size-11.5 shrink-0 items-center justify-center rounded-lg [&_svg:not([class*='size-'])]:size-5.5", settled ? "bg-accent text-muted-foreground" : "bg-alpha text-alpha-foreground")}>{icon}</span>
@@ -44,6 +46,7 @@ export function AssistantCardFrame({ icon, title, detail, children, actions, onO
       )}
       {children ? <div className="flex flex-col gap-2 px-3.5 pb-3.5 text-base">{children}</div> : null}
       {actions && !settled ? <div className="flex flex-wrap gap-2 px-3.5 pb-3.5">{actions}</div> : null}
+      {foot && !settled ? foot : null}
     </Card>
   );
 }

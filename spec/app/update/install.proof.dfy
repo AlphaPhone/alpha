@@ -21,6 +21,7 @@ lemma downloaded_ensures(s: Install, ticket: int, bytes: int, digest: int)
   ensures (inv(s) ==> canDownloaded(s, ticket) ==> stepACommitIsSentOnce(s, downloaded(s, ticket, bytes, digest).state, downloaded(s, ticket, bytes, digest).out))
   ensures (inv(s) ==> canDownloaded(s, ticket) ==> stepTheConfirmationOpensOnlyWhenAllowed(s, downloaded(s, ticket, bytes, digest).state, downloaded(s, ticket, bytes, digest).out))
   ensures (inv(s) ==> canDownloaded(s, ticket) ==> stepPagesReconnectOnlyAfterACancel(s, downloaded(s, ticket, bytes, digest).state, downloaded(s, ticket, bytes, digest).out))
+
 {
   if inv(s) && canDownloaded(s, ticket) {
     var after := downloaded(s, ticket, bytes, digest);
@@ -54,6 +55,7 @@ lemma openPage_ensures(s: Install, page: int)
   ensures (inv(s) ==> canOpenPage(s, page) ==> stepACommitIsSentOnce(s, openPage(s, page).state, openPage(s, page).out))
   ensures (inv(s) ==> canOpenPage(s, page) ==> stepTheConfirmationOpensOnlyWhenAllowed(s, openPage(s, page).state, openPage(s, page).out))
   ensures (inv(s) ==> canOpenPage(s, page) ==> stepPagesReconnectOnlyAfterACancel(s, openPage(s, page).state, openPage(s, page).out))
+
 {
   if inv(s) && canOpenPage(s, page) {
     var after := openPage(s, page).state;
@@ -101,6 +103,7 @@ lemma closePage_ensures(s: Install, page: int)
   ensures (inv(s) ==> canClosePage(s, page) ==> stepACommitIsSentOnce(s, closePage(s, page), []))
   ensures (inv(s) ==> canClosePage(s, page) ==> stepTheConfirmationOpensOnlyWhenAllowed(s, closePage(s, page), []))
   ensures (inv(s) ==> canClosePage(s, page) ==> stepPagesReconnectOnlyAfterACancel(s, closePage(s, page), []))
+
 {
   if inv(s) && canClosePage(s, page) {
     var after := closePage(s, page);
@@ -141,6 +144,7 @@ lemma answer_ensures(s: Install, page: int, activation: int, ready: bool)
   ensures (inv(s) ==> canAnswer(s, page, activation) ==> stepACommitIsSentOnce(s, answer(s, page, activation, ready), []))
   ensures (inv(s) ==> canAnswer(s, page, activation) ==> stepTheConfirmationOpensOnlyWhenAllowed(s, answer(s, page, activation, ready), []))
   ensures (inv(s) ==> canAnswer(s, page, activation) ==> stepPagesReconnectOnlyAfterACancel(s, answer(s, page, activation, ready), []))
+
 {
   if inv(s) && canAnswer(s, page, activation) {
     var after := answer(s, page, activation, ready);
@@ -189,6 +193,7 @@ lemma seal_ensures(s: Install)
   ensures (inv(s) ==> canSeal(s) ==> stepACommitIsSentOnce(s, seal(s).state, seal(s).out))
   ensures (inv(s) ==> canSeal(s) ==> stepTheConfirmationOpensOnlyWhenAllowed(s, seal(s).state, seal(s).out))
   ensures (inv(s) ==> canSeal(s) ==> stepPagesReconnectOnlyAfterACancel(s, seal(s).state, seal(s).out))
+
 {
   if inv(s) && canSeal(s) {
     assert s.waiting == [];

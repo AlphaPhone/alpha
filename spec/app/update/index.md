@@ -216,7 +216,9 @@ pure def sometimesAnOfferApplies(s: Updates): bool = applies(s)
 The permission and the activity are read again, after a reboot too, when
 Android may be starting once more. A check under way is taken as failed, so
 its late answer is refused; an offer kept from before waits for a check
-that succeeds before an automatic update.
+that succeeds before an automatic update. A state kept before Alpha counted
+the failed checks is read with one failed check if its last check failed,
+and with none otherwise.
 
 ```quint
 pure def restart(s: Updates): Updates =
@@ -703,7 +705,7 @@ pure def good(signer: int, version: int): Release =
 
 pure val installedValues = Set(0, 1, 2, 3)
 pure val signerValues = Set(1, 2)
-pure val ticketValues = Set(1, 2, 3, 4)
+pure val ticketValues = 1.to(20)
 pure val nowValues = Set(0, 30000, 60000, 900000, 2000000)
 pure val quiet: Activity = { ...unknownActivity, home: true, front: true, audio: true }
 pure val activityValues =

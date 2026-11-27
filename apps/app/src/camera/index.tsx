@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Camera } from "./Camera.tsx";
 import { camera, cameraBack } from "./camera.vibe";
 

@@ -3,7 +3,7 @@ import {
   type WorkflowCalendarReadOperation, type WorkflowCalendarRow, type WorkflowReadResult, WORKFLOW_READ_RESULT_MAX_BYTES,
   validateWorkflowReadResult, workflowBytes, workflowCalendarRevisionInput, workflowSha,
 } from "@elizaos/plugin-workflow-client"
-import { PhoneCalendar } from "../platform/calendar.vibe"
+import { PhoneCalendar } from "../platform/index.vibe"
 
 const event = Schema.Struct({
   id: Schema.String, calendarId: Schema.String, title: Schema.String,

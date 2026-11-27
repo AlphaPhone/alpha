@@ -2,10 +2,10 @@
 import { cn, focusRing } from "@repo/ui";
 import { ExternalLink } from "lucide-react";
 import { useSyncExternalStore } from "react";
-import { TabHost } from "../platform/browser.vibe";
-import { emptyFrames, type FrameRequest } from "../platform/browserWeb.vibe";
-import type { Alpha } from "../runtime/area.tsx";
-import type { DesktopPreview } from "../shell/canvas.vibe";
+import { TabHost } from "../platform/index.vibe";
+import { emptyFrames, type FrameRequest } from "../platform/index.vibe";
+import type { Alpha } from "../runtime/ui.tsx";
+import type { DesktopPreview } from "../shell/index.vibe";
 
 const noFrames = () => emptyFrames;
 const noChanges = () => () => {};

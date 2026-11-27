@@ -60,7 +60,14 @@ type Moved = { state: Card, out: List[Effect] }
 A notice, a summary, a generic card, plain text, map choices, retry, a
 proposal and a calendar change open nothing. Map choices, retry and the
 plan-action cards answer the latest reply only. A proposal and a calendar
-change are decided elsewhere.
+change are decided elsewhere. A phone step's proposal is drawn as v119
+drew it: its title, what it does and its button, then a last row "Keep
+things as they are." with Decline at its end. How the owner's decision on
+it ended shows under it as v119's result chip, drawn as one of Alpha's
+lines: Alpha's mark, then a quiet chip with an Alpha blue bar at its start
+that fills the rest of the row, in the column of Alpha's reply text, which
+is never spoken (v119 45f6bed30 agent-adapter.ts:2840, template.html:4534,
+phone.css:442-444).
 
 ```quint
 pure def opens(kind: Kind): bool =
@@ -73,6 +80,32 @@ pure def answersTheLatest(kind: Kind): bool =
 pure def handsOn(kind: Kind): bool = kind == Proposal or kind == Review
 
 pure def live(c: Card): bool = c.shown and not(c.settled)
+```
+
+### A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it
+
+As v119 drew a phone step's proposal, its first row has no picture: the
+title and what it does, with a compact Approve at the row's end. Once the
+owner's decision has ended and the card has gone, its result chip shows
+under the reply that offered the card, before any answer that followed,
+and stays there for the rest of the conversation. A reply that did nothing
+but offer that one review gives way to the chip, as v119 hid its review
+instruction once an outcome showed; while the card is still shown, or when
+the reply carried more than that one review, the reply stays. A reviewed
+read that answered says on its chip what the phone read, in v119's words:
+the last four digits of the latest text's sender, or the number where the
+agent asked for it, that there was no text or no readable number, or that
+the open conversation or voicemail was shared.
+
+```quint
+pure def offerShown(onlyOffered: bool, cardShown: bool, ended: bool): bool =
+  not(onlyOffered and ended and not(cardShown))
+
+pure def lawAShownReviewKeepsTheReplyThatOfferedIt(onlyOffered: bool, ended: bool): bool = offerShown(onlyOffered, true, ended)
+
+pure def lawAReplyThatSaidMoreStays(cardShown: bool, ended: bool): bool = offerShown(false, cardShown, ended)
+
+pure def lawAPendingReviewKeepsItsReply(onlyOffered: bool, cardShown: bool): bool = offerShown(onlyOffered, cardShown, false)
 ```
 
 ### What the simulator tries

@@ -206,7 +206,8 @@ pure def browse(s: Files): Browse =
   else Reading
 
 pure def has(items: List[F::Item], id: int): bool = items.some(i => i.id == id)
-pure def chosen(s: Files): List[F::Item] = s.items.select(i => s.picked.includes(i.id))
+pure def pickedFrom(items: List[F::Item], picked: List[int]): List[F::Item] = items.select(i => picked.includes(i.id))
+pure def chosen(s: Files): List[F::Item] = pickedFrom(s.items, s.picked)
 pure def names(s: Files): List[str] = s.items.listMap(i => i.name)
 pure def here(s: Files): int = s.trail.nthOr(s.trail.length() - 1, 0)
 pure def where(s: Files): S::Where = { trail: s.trail, inCategory: s.inCategory, category: s.category }
@@ -521,7 +522,7 @@ pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::
 pure def listed(s: Files, ticket: int, ok: bool, gone: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
   val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => F::fitsKind(s.category, i.kind)) else entries
   val picked = s.picked.select(id => has(items, id))
-  val same = chosen(s) == items.select(i => picked.includes(i.id))
+  val same = chosen(s) == pickedFrom(items, picked)
   val back = entered(List(), false, F::Other, s)
   if (not(ok) and gone and not(s.inCategory)) { state: { ...back.state, missing: true }, out: back.out }
   else { state: { ...s, listing: R::answer(s.listing, ok), items: items, partial: ok and not(complete), picked: picked,

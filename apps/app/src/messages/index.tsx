@@ -1,10 +1,10 @@
 import { Effect, type Layer } from "effect";
-import { say } from "../notices/toasts.vibe";
-import { registered } from "../platform/device.vibe";
-import { messagesBack } from "../phone/back.vibe";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
-import { useFirstPageBack } from "../shell/AppBack.tsx";
+import { say } from "../notices/index.vibe";
+import { registered } from "../platform/index.vibe";
+import { messagesBack } from "../comms/index.vibe";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
+import { useFirstPageBack } from "../shell/ui.tsx";
 import { voiceReported } from "../update/activity.vibe";
 import { voiceArea } from "./dictation.vibe";
 import { Messages } from "./Messages.tsx";

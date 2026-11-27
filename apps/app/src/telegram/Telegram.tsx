@@ -42,11 +42,11 @@ import type { Machine as ConversationMachine } from "../../gen/app__telegram__co
 import { composable } from "../../gen/app__telegram__conversation.ts";
 import { useMachine as useConversation } from "../../gen/app__telegram__conversation.react.ts";
 import type { Machine as NoticesMachine } from "../../gen/app__telegram__notices.effect.vibe";
-import type { TelegramDialogSummary } from "../platform/telegram.vibe";
-import { useTimed } from "../runtime/react.ts";
+import type { TelegramDialogSummary } from "../platform/index.vibe";
+import { useTimed } from "../runtime/ui.tsx";
 import { swapComposerTarget } from "../messaging/composer.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { untimed } from "../runtime/index.vibe";
+import { Time } from "../runtime/index.vibe";
 import {
   type TelegramSnapshot,
   TelegramStore,

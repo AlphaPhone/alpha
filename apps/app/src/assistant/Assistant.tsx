@@ -1,6 +1,6 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"; spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Send what I wrote"; spec/app/assistant/dock.md, "Focusing the composer on the bar raises Ask Alpha to typing"; spec/app/assistant/dock.md, "Sending from the bar opens the sheet, where the reply shows"; spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"; spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet"; spec/app/assistant/search.md, "Story: Search my conversations"; spec/app/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
 import {
-  Alert, AssistantCard, AssistantCardFrame, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
+  Alert, AssistantCard, AssistantCardFrame, AssistantDeviceReceipt, Button, AssistantConversation, AssistantGrabber, AssistantMessageDraftCard, AssistantNoticeCard, AssistantPhotoPreview, ConfirmDialog, Sheet, SheetContent, SmsReviewCard, Textarea,
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
@@ -14,6 +14,7 @@ import { useMachine as useAttachments } from "../../gen/app__assistant__attachme
 import type { Machine as ChatsMachine } from "../../gen/app__assistant__chats.effect.vibe";
 import { loading as pageLoading } from "../../gen/app__assistant__chats.ts";
 import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts";
+import { offerShown } from "../../gen/app__assistant__cards.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
 import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
@@ -34,17 +35,17 @@ import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vi
 import { Machine as CanvasMachine } from "../../gen/app__shell__keyboard.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
-import { type Backs, home } from "../shell/shell.vibe";
+import { type Backs, home } from "../shell/index.vibe";
 import { isCommsView } from "../shell/views.tsx";
-import { type MediaCard, MediaReview, namedReviewQuery } from "./media-review.vibe";
-import type { Agent } from "../platform/agent.vibe";
-import { native, type Device } from "../platform/device.vibe";
-import type { NoteStore } from "../platform/notes.vibe";
+import { type MediaCard, type MediaNote, MediaReview, namedReviewQuery } from "./media-review.vibe";
+import type { Agent } from "../platform/index.vibe";
+import { native, type Device } from "../platform/index.vibe";
+import type { NoteStore } from "../platform/index.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
-import type { Documents } from "../platform/documents.vibe";
+import type { Documents } from "../platform/index.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
 import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
@@ -58,12 +59,12 @@ import {
   actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
 } from "./recording-summary.vibe";
 import { type Attached, type Board, type Line, type Seen, Talk } from "./talk.vibe";
-import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
-import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
-import { displayNumber } from "../phone/words.ts";
+import { CommsTarget, type CommsTargetServices } from "../comms/ui.tsx";
+import { CommsBriefing, commsViewOf } from "../comms/index.vibe";
+import { displayNumber } from "../comms/index.vibe";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
-import { AskedRequest, asked, boundIn } from "../calendar/asked.ts";
+import { AskedRequest, asked, boundIn, filedBy } from "../calendar/asked.ts";
 import { shownInAskAlpha } from "../../gen/app__calendar__agent.ts";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboard.ts";
@@ -145,6 +146,7 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
       : undefined;
   const line = card.sms?.subscription ?? card.composeLine?.subscription;
   const textCard = text !== undefined && card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.notice === undefined;
+  const decisionCard = text === undefined && card.phone?.tag !== "Choices" && card.phone?.tag !== "Unavailable" && card.notice === undefined;
   return (
     <div className="grid gap-2" aria-busy={deciding}>
       {card.phone?.tag === "Choices" ? (
@@ -164,18 +166,19 @@ function DeviceReview({ runtime, card }: { runtime: AssistantProps["runtime"]; c
         <Alert role="status">{`${card.title}: ${card.detail}. ${card.notice}`}</Alert>
       ) : text !== undefined ? (
         <SmsReviewCard review={card.id} body={text.body}
-          to={card.phone?.tag === "Exact" ? card.phone.selected.name : text.recipients.map(displayNumber).join(", ")}
-          number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : undefined}
+          to={card.phone?.tag === "Exact" ? card.phone.selected.name : card.recipientName ?? text.recipients.map(displayNumber).join(", ")}
+          number={card.phone?.tag === "Exact" ? displayNumber(card.phone.selected.number) : card.recipientName !== undefined ? text.recipients.map(displayNumber).join(", ") : undefined}
           note={line === undefined ? undefined : `SIM ${line.slot + 1} · ${line.displayName}`}
           sendDisabled={deciding || unavailable} declineDisabled={deciding}
           onSend={(event) => decide(true, event.nativeEvent.isTrusted ? "Tap" : undefined)} onDecline={unavailable ? undefined : () => decide(false)} />
       ) : (
-        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve" }}
+        <AssistantCard card={{ kind: "decision", variant: "proposal", title: card.title, detail: card.detail, waiting: deciding, action: card.operation.type === "sms_compose" ? "Open draft" : card.operation.type === "browser_navigate" ? "Open" : "Approve",
+          ...(unavailable ? {} : { onDecline: () => decide(false), declineDisabled: deciding }) }}
           onHandOn={unavailable ? undefined : () => decide(true)} />
       )}
       {unavailable
         ? <Alert role="status">Alpha couldn’t confirm the decision. Check Activity before trying again.</Alert>
-        : !textCard && <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
+        : !textCard && !decisionCard && <Button className="justify-self-end" variant="ghost" disabled={deciding} onClick={() => decide(false)}>Decline</Button>}
     </div>
   );
 }
@@ -655,7 +658,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const replyWords = replyBlocks(seen.reply, true).words;
   const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, streaming: true, onOpenLink } as const] : [];
+  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, onOpenLink } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,
@@ -666,21 +669,35 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const calendarCard = calendarReview !== undefined && !talking.context.sensitive && shownInAskAlpha(calendar.shown, bound !== undefined, latestFiled)
     ? [{ id: `calendar review ${bound ?? ""}`, author: "alpha" as const, text: "",
       children: <AskedRequest.Provider value={bound}>{calendarReview}</AskedRequest.Provider> }] : [];
+  // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": how a change ended draws under the reply that filed it, as v119 kept each reply's own card, so it never reads as a later reply's; a filing reply that draws no row here keeps the outcome at the foot so it is never lost.
+  const filer = calendar.shown === "ChangeEnded" ? filedBy(calendar, shown.chosen) : undefined;
+  const drawn = [...rows.messages, ...(rows.messagesAfterLater ?? [])];
+  const endedUnder = filer !== undefined && drawn.some((row) => row.id === filer) ? filer : undefined;
+  // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it"
+  const notes = talking.context.sensitive ? [] : seen.mediaNotes.filter((note) => note.conversation === shown.chosen);
+  const offerDrawn = (note: MediaNote) => note.offer !== undefined && drawn.some((row) => row.id === note.offer?.reply);
+  const receipt = (note: MediaNote) => ({ id: `media result ${note.offer?.card ?? "latest"}`, author: "alpha" as const, text: "", children: <AssistantDeviceReceipt text={note.text} /> });
+  const under = (placed: typeof rows.messages) => placed.flatMap((row) => {
+    const chips = notes.filter((note) => offerDrawn(note) && note.offer?.reply === row.id);
+    const offer = chips.every((note) => note.offer === undefined || offerShown(note.offer.only, seen.media.some((card) => card.id === note.offer?.card), true));
+    return [...(offer ? [row] : []), ...chips.map(receipt), ...(row.id === endedUnder ? calendarCard : [])];
+  });
   const offer = seen.recordingSummary;
   const recordingSummary = offer !== undefined && !talking.context.sensitive && offer.conversation === shown.chosen
     && lines.some((line) => !line.mine && line.id === offer.message)
     ? [{ id: `recording summary ${offer.message}`, author: "alpha" as const, text: "",
       children: <RecordingSummaryReview runtime={runtime} offer={offer} /> }] : [];
-  const mediaNote = talking.context.sensitive || seen.mediaNote?.conversation !== shown.chosen
-    ? [] : [{ id: "media result", author: "alpha" as const, text: seen.mediaNote.text, onOpenLink }];
+  const mediaNote = notes.filter((note, at) => note.offer === undefined || (at === notes.length - 1 && !offerDrawn(note))).map(receipt);
   const failure = seen.failure;
   const liveFix = failure?.kind === "OutOfFunds" ? "FundingFix" : failure?.fix ?? "NoFix";
   const readAgain = failure?.messageId !== undefined && lines.some((line) => line.id === failure.messageId && line.failure === failure.kind);
   const failed = failure === undefined || (readAgain && !liveAddsToHistory(failure.kind, liveFix, failure.waitMs)) ? [] : [{ id: "failure", author: "alpha", text: "", children: <ReplyFailure kind={failure.kind} fix={liveFix} waitMs={failure.waitMs} cutOff={failure.cutOff} live onRetry={retry} onSettings={settingsAction ? onSettings : undefined} /> } as const];
   return {
     ...rows,
+    messages: under(rows.messages),
+    messagesAfterLater: rows.messagesAfterLater && under(rows.messagesAfterLater),
     holdMessage: open ? holdMessage : undefined,
-    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...calendarCard, ...mediaNote, ...recordingSummary],
+    liveMessages: [...writingReply, ...draftCards, ...failed, ...mediaCards, ...(endedUnder === undefined ? calendarCard : []), ...mediaNote, ...recordingSummary],
     interim: open && shown.around === 0 && !talking.context.sensitive ? interim : undefined,
     position: { page: `${shown.chosen}/${shown.page.ticket}`, around: board.messageId(shown.around), earlier, later },
     visible: open,
@@ -840,7 +857,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
         style={onComms && !live && assistantDetent === "Full" ? { ...sheetStyle, height: "calc(100dvh - 52px)" } : sheetStyle}
         header={{
           title: seen.titles.get(shown.chosen) ?? "Ask Alpha",
-          context: { view, selected: talking.context.selected, sensitive: talking.context.sensitive },
+          context: { view, sensitive: talking.context.sensitive },
           subtitle: onComms ? <CommsTarget runtime={runtime} placement="context" /> : undefined,
           returnOnClose: textAsk,
           onHome: textAsk ? onBack : () => void runtime.runPromise(home()),
@@ -881,7 +898,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           } : undefined,
           value: subject === undefined ? seen.typed : request,
           onValueChange: type,
-          placeholder: onComms ? "Ask Alpha" : assistantDetent === "Bar" && currentView === "Browser" ? "Ask about this page" : undefined,
+          placeholder: onComms ? "Ask Alpha" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !draftEditable,
           notice: buildDraftNotice(notice, onComms, writing, seen, board, composer, conversation),

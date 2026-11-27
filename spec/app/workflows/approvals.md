@@ -228,7 +228,8 @@ pure def noticeOpened(a: Approvals, runId: int, digest: int): Moved =
 pure def opening(a: Approvals, ok: bool, owner: int, waiting: bool, expires: int, now: int): Opening =
   if (not(ok)) Unreadable
   else if (owner != a.owner) OtherAgent
-  else if (not(waiting) or a.tapDigest < a.digest or (a.decided >= 1 and a.tapDigest == a.decided and a.decision.outcome != A::Unknown) or a.decision.outcome == A::Sent) Gone
+  else if (not(waiting) or a.tapDigest < a.digest or a.decision.outcome == A::Sent
+    or (a.tapDigest == a.decided and a.decision.outcome != A::Unknown)) Gone
   else if (expires <= now) Lapsed
   else Ready
 

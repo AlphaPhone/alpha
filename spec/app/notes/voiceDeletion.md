@@ -165,7 +165,7 @@ pure def foundCanonical(r: Recovery, note: int, recording: int, operation: str, 
 
 pure def alwaysCanonicalRowBelongsToThisRun(r: Recovery): bool =
   (holding(r) and r.row.operation != "") implies
-    (r.row.process == r.process and r.row.note > 0 and r.row.recording > 0 and isOwner(r.owner))
+    (r.row.process == r.process and r.row.note > 0 and r.row.recording > 0 and isOwner(r.owner) and r.stage != Claimed)
 ```
 
 ### The phone claims the row only when no other process holds its lease, and then looks at what is there
@@ -303,11 +303,23 @@ pure val fair_planDone = "weak"
 pure def sometimesErasedByThePhone(r: Recovery): bool =
   r.stage == Free and r.attempt.outcome == A::Confirmed and r.plan == MoveThenErase and not(r.byOwner)
 
+pure val eval_witness_sometimesErasedByThePhone = (
+  ("ownerChanged", 1, Phone), ("restart", Phone),
+  ("found", 1, 7, 1, true, false, Phone), ("claim", true, Phone),
+  ("inspected", 1, true, Gone, true, true, false, NoReceipt, false, Phone),
+  ("planDone", 1, true, true, Phone))
+
 pure def sometimesLeftForTheOwner(r: Recovery): bool = r.stage == Asking and r.review.showing
 
 pure def sometimesSettledByTheOwner(r: Recovery): bool = r.stage == Free and r.attempt.outcome == A::Confirmed and r.byOwner
 
 pure def sometimesErasedByTheOwner(r: Recovery): bool = r.stage == Acting and r.byOwner and r.plan == EraseRecording
+
+pure val eval_witness_sometimesErasedByTheOwner = (
+  ("ownerChanged", 1, Phone), ("restart", Phone),
+  ("found", 1, 7, 1, true, true, Phone), ("claim", true, Phone),
+  ("inspected", 1, true, Gone, true, true, false, NoReceipt, false, Phone),
+  ("showRow", false, Owner), ("decide", EraseRecording, Owner))
 
 pure def sometimesUnknown(r: Recovery): bool = r.stage == Asking and r.attempt.outcome == A::Unknown
 ```

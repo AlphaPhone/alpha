@@ -16,18 +16,19 @@ import type { FileActionReport, FileReview, FilesReadContext } from "../files/ag
 import { latestSenderResult, sameVoicemail, selectedVoicemail, type VoicemailReadContext, type VoicemailTarget } from "../contacts/reads.vibe"
 import { composeDraftOnly, composeRecipient, reviewedCompose, type MessageDraftTarget } from "../messages/agent.vibe"
 import { composeLine, readAgentSms, type ComposeLine } from "../messages/agent-send.vibe"
+import { Inbox } from "../messages/messages.vibe"
 import { activeSmsSelection, currentSmsSelection, type MessageSmsRequest, type SmsSelection, type SmsSelectionContext } from "../messages/agent-sim.vibe"
 import { calendarCapabilities, calendarOperation, calendarOperationWords } from "../calendar/device-actions.vibe"
 import { notesOperation, notesOperationWords } from "../notes/device-actions.vibe"
-import type { ReviewedVoicemailDeletion } from "../phone/agent.vibe"
-import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../phone/named-review.vibe"
-import { displayNumber } from "../phone/words.ts"
-import { Agent, type Runtime } from "../platform/agent.vibe"
-import type { SmsApproval } from "../platform/composerPort.vibe"
-import { Device, registered } from "../platform/device.vibe"
-import { nativeReadingAvailable } from "../platform/voice.vibe"
-import { ownerAt } from "../platform/owner.vibe"
-import { Telephony } from "../platform/telephony.vibe"
+import type { ReviewedVoicemailDeletion } from "../comms/index.vibe"
+import { phoneContactChoices, phoneQuery, pickPhoneContact, type NamedPhoneReview, type ReviewedPhoneContact } from "../comms/index.vibe"
+import { displayNumber } from "../comms/index.vibe"
+import { Agent, type Runtime } from "../platform/index.vibe"
+import type { SmsApproval } from "../platform/index.vibe"
+import { Device, registered } from "../platform/index.vibe"
+import { nativeReadingAvailable } from "../platform/index.vibe"
+import { ownerAt } from "../platform/index.vibe"
+import { Telephony } from "../platform/index.vibe"
 import { Talk } from "./talk.vibe"
 import { navigateFilesForReply, opensAtOnce } from "./views.vibe"
 
@@ -209,6 +210,8 @@ export interface SpokenReview {
 }
 
 interface DeviceActionReply {
+  /** The reply's own message, under which a review it offered shows how it ended. */
+  readonly messageId?: string
   readonly spoken?: SpokenReview
   readonly directFiles?: DirectFiles
   readonly outsideFiles?: OutsideFiles
@@ -395,8 +398,47 @@ export interface MediaCard {
   readonly spokenSms?: SpokenSmsReview
   readonly decision?: "Deciding" | "Unconfirmed"
   readonly phone?: NamedPhoneReview
+  /** The contact name Messages shows for a text's one recipient number, shown with that number on its review. */
+  readonly recipientName?: string
   /** Why the card can only be declined here: a Files change waiting for Files to be opened. */
   readonly notice?: string
+  /** The typed reply that offered this card for review. */
+  readonly offeredBy?: OfferedBy
+}
+
+/** The reply that offered a review card, and whether offering that one review was all the reply did. */
+export interface OfferedBy { readonly reply: string; readonly only: boolean }
+
+/** How the owner's decision on a phone step ended; `offer` names the card and the reply it stands under once the card has gone. */
+export interface MediaNote {
+  readonly conversation: number
+  readonly text: string
+  readonly offer?: OfferedBy & { readonly card: string }
+}
+
+/** The notes that stand under the reply that offered their card. */
+export function standing(notes: ReadonlyArray<MediaNote>): ReadonlyArray<MediaNote> {
+  return notes.filter((note) => note.offer !== undefined)
+}
+
+/** The notes after `note`: every one standing under its reply, then `note` in place of any other. */
+export function noted(notes: ReadonlyArray<MediaNote>, note: MediaNote): ReadonlyArray<MediaNote> {
+  return [...standing(notes), note]
+}
+
+function offeredBy(reply: DeviceActionReply, actions: ReadonlyMap<string, ReplyAction>, proposal: string): OfferedBy | undefined {
+  if (reply.messageId === undefined || actions.get(proposal) !== "Review") return undefined
+  return { reply: reply.messageId, only: actions.size === 1 && reply.actionResults.every(({ action }) => action === "PROPOSE_DEVICE_ACTION") }
+}
+
+/** What a reviewed read found, in v119's words (Alpha 45f6bed30: `ui/telephony/telephony-receipt-text.ts:179-196`). */
+function readSaid(result: NonNullable<ReturnType<typeof latestSenderResult>> | { readonly kind: "messages-read" | "voicemail-read" }): string {
+  switch (result.kind) {
+    case "messages-read": return "Shared the open thread."
+    case "voicemail-read": return "Shared the open voicemail."
+    case "sms-latest-sender": return result.status !== "found" ? result.status === "empty" ? "No incoming SMS messages." : "The latest incoming SMS has no readable phone number."
+      : "address" in result ? result.address : `Latest incoming SMS sender ends in ${result.numberEnding}.`
+  }
 }
 
 const openFilesNotice = "Open Files to review this action."
@@ -584,6 +626,8 @@ export service MediaReview {
   spokenFilesFrom(session: Session, message: string, request: FilesContinuation, route: FilesRouteSteps, actions: DeviceActionReply["actionResults"]): boolean!!
   /** Opens at once, through the approvals path, the one page the reply to `message` offered as asked by the owner's whole message, while `current`. */
   openAsked(session: Session, message: string, actions: DeviceActionReply["actionResults"], current: Effect.Effect<boolean>): boolean!!
+  /** Whether the reply proposed a text to send (sms_send) for the owner's review on this enrollment, read from the proposals it names. */
+  proposedText(session: Session, actions: DeviceActionReply["actionResults"]): boolean!!
   messageTarget(): (MessageDraftTarget | undefined)!!
   voicemailTarget(): (VoicemailTarget | undefined)!!
   pending(session: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply): readonly MediaCard[]!!Conversation
@@ -929,11 +973,12 @@ interface PendingReviewContext {
   readonly actOnFiles: ReturnType<typeof filesActions>["actOnFiles"]
   readonly continueInFiles: ReturnType<typeof filesActions>["continueInFiles"]
   readonly preferences: Prefs.Machine.Shape
+  readonly recipientName: (number: string) => Effect.Effect<string | undefined>
 }
 
 function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pending"] {
   const { proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences } = context
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences, recipientName } = context
   return effect (opened: Session, message: string, conversation: number, revision: number, target: MessageDraftTarget | undefined, reply: DeviceActionReply) => {
     const view = try Conversation
     const spoken = reply.spoken
@@ -1027,6 +1072,8 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       if (query !== undefined && (!(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !(try reviewContext(revision, view)))) return undefined
       const phone = query === undefined ? undefined : try Effect.provideService(phoneContactChoices(query), Telephony, telephony)
       if (phone !== undefined && (!isLatest(opened) || !(try reviewContext(revision, view)))) return undefined
+      const contactName = op.type === "sms_send" && op.recipients.length === 1 ? try recipientName(op.recipients[0] ?? "") : undefined
+      const offer = offeredBy(reply, actions, proposal.id)
       const card: MediaCard = { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message, conversation, revision, enrollmentId: opened.identity.enrollmentId, ...labelled,
         ...(selected && bound !== undefined ? { target: bound } : {}),
         ...(voicemail === undefined ? {} : { voicemail }),
@@ -1036,8 +1083,10 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
         ...(spoken === undefined ? {} : { spoken }),
         ...(origin === undefined ? {} : { read: { origin, pageTicket: reply.pageTicket } }),
         ...(phone === undefined ? {} : { phone }),
+        ...(contactName === undefined ? {} : { recipientName: contactName }),
         ...(files === undefined ? {} : { files, detail: filesDetail(op, files, labelled.detail) }),
-        ...(notice === undefined ? {} : { notice }) }
+        ...(notice === undefined ? {} : { notice }),
+        ...(spoken === undefined && offer !== undefined ? { offeredBy: offer } : {}) }
       return { card, fromTerminal: request === undefined && origin === undefined }
     }, { concurrency: 4 })
     if (spoken !== undefined && (!(try enrollmentIsCurrent(opened)) || !isLatest(opened) ||
@@ -1066,6 +1115,10 @@ const mediaReviewContext = effect {
   const preferences = try Prefs.Machine
   const smsContext = try Effect.context<SmsSelectionContext>()
   const sameSms = (selection: SmsSelection) => Effect.provideContext(currentSmsSelection(selection), smsContext)
+  // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a text's review names its number's contact as Messages names it.
+  const inbox = Option.getOrUndefined(try Effect.serviceOption(Inbox))
+  const recipientName = (number: string) => inbox === undefined ? Effect.succeed(undefined)
+    : Effect.map(inbox.get(), (texts) => texts.names.get(number) || undefined)
   const voicemailContext = try Effect.context<VoicemailReadContext>()
   const voicemailTarget = () => Effect.provideContext(selectedVoicemail(), voicemailContext)
   const [lock, enrolling] = [try Semaphore.make(1), try Semaphore.make(1)]
@@ -1190,7 +1243,7 @@ const mediaReviewContext = effect {
       && decoded.agentId === identity.agentId && decoded.origin === identity.origin && decoded.installationId === identity.installationId
       && decoded.enrollmentId === identity.enrollmentId && decoded.agentAttemptId === proposal.execution.attemptId
   }
-  effect function readAttempt(opened: Session, card: MediaCard): (string | undefined)!! {
+  effect function readAttempt(opened: Session, card: MediaCard): ({ readonly attempt: string; readonly said: string } | undefined)!! {
     if (!reviewedRead(card.operation)) return undefined
     const entry = (tryPromise(() => journal().get(card.id)) |> flatMap(%, Schema.decodeUnknownEffect(readReceipt))) catch () => undefined
     if (entry === undefined || entry.proposalId !== card.id || entry.operationId !== card.id || entry.digest !== card.digest
@@ -1202,11 +1255,14 @@ const mediaReviewContext = effect {
     if (operation.type === "voicemail_read_selected") {
       const result = readResult<"voicemail_read_selected">(operation, entry.evidence.result)
       return card.voicemail !== undefined && result?.status === "read" && JSON.stringify(result) === JSON.stringify(card.voicemail.result)
-        ? entry.agentAttemptId : undefined
+        ? { attempt: entry.agentAttemptId, said: readSaid(result) } : undefined
     }
-    const verified = operation.type === "sms_latest_sender" ? latestSenderResult(operation, entry.evidence.result) !== undefined
-      : readResult<"messages_read_selected">(operation, entry.evidence.result)?.status === "read"
-    return verified ? entry.agentAttemptId : undefined
+    if (operation.type === "sms_latest_sender") {
+      const sender = latestSenderResult(operation, entry.evidence.result)
+      return sender === undefined ? undefined : { attempt: entry.agentAttemptId, said: readSaid(sender) }
+    }
+    const shared = readResult<"messages_read_selected">(operation, entry.evidence.result)
+    return shared?.status === "read" ? { attempt: entry.agentAttemptId, said: readSaid(shared) } : undefined
   }
   const readyToDecline = (proposal: Proposal, at: number) => proposal.state === "pending" && Date.parse(proposal.expiresAt) > at
   const toSettle = (proposal: Proposal) => proposal.state === "executing" || proposal.state === "reconciliation_required"
@@ -1260,7 +1316,7 @@ const mediaReviewContext = effect {
   }
   return {
     runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
-    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow, recipientName,
   }
 }
 
@@ -1271,8 +1327,9 @@ function makeSpokenReview(deps: {
   readonly isLatest: (opened: Session) => boolean
   readonly telephony: Telephony.Shape
   readonly sameSms: (selection: SmsSelection) => boolean!!
+  readonly recipientName: (number: string) => (string | undefined)!!
 }): Pick<MediaReview.Shape, "hasSpokenReview" | "spokenSms"> {
-  const { proposals, enrollmentIsCurrent, isLatest, telephony, sameSms } = deps
+  const { proposals, enrollmentIsCurrent, isLatest, telephony, sameSms, recipientName } = deps
   return {
     effect hasSpokenReview(opened, message, reply) {
       const source = reply.spoken
@@ -1308,8 +1365,9 @@ function makeSpokenReview(deps: {
         || !(try sameSms(source.selection)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try source.current)
         || (try Clock.currentTimeMillis) >= expiresAt) return undefined
       const review = words(op)
+      const named = try recipientName(op.recipients[0] ?? "")
       return { id: proposal.id, digest: proposal.digest, operation: op, expiresAt, message: again?.message ?? message, conversation: source.conversation,
-        revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review,
+        revision: source.revision, enrollmentId: opened.identity.enrollmentId, ...review, ...(named === undefined ? {} : { recipientName: named }),
         detail: `SIM ${source.selection.subscription.slot + 1}\n${review.detail}`, sms: source.selection, spokenSms: source }
     },
   }
@@ -1318,22 +1376,30 @@ function makeSpokenReview(deps: {
 export const mediaReview = Layer.effect(MediaReview, effect {
   const {
     runtime, executors, device, telephony, shell, layers, preferences, sameSms, voicemailTarget, lock, isLatest, scopes, pinnedFiles,
-    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow,
+    messageTarget, session, proposals, enrollmentIsCurrent, reviewContext, readAttempt, history, workflowOffers, decideWorkflow, recipientName,
   } = try mediaReviewContext
   const { methods: files, actOnFiles, continueInFiles } = filesActions({
     device, shell, layers, preferences, executors, lock, scopes, isLatest, enrollmentIsCurrent, proposals,
   })
   const pending = pendingProposals({
     proposals, messageTarget, voicemailTarget, reviewContext, enrollmentIsCurrent, isLatest, sameSms,
-    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences,
+    executors, telephony, pinnedFiles, actOnFiles, continueInFiles, preferences, recipientName,
   })
-  const spokenReview = makeSpokenReview({ proposals, enrollmentIsCurrent, isLatest, telephony, sameSms })
+  const spokenReview = makeSpokenReview({ proposals, enrollmentIsCurrent, isLatest, telephony, sameSms, recipientName })
   return {
     session,
     effect turnHeaders(opened, filesOnly) {
       return turnHeaders(opened, filesOnly, opensAtOnce(try preferences.get()))
     },
     openAsked: askedOpens({ preferences, lock, scopes, isLatest, enrollmentIsCurrent, proposals }),
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"
+    effect proposedText(opened, results) {
+      const actions = repliedDeviceActions(results)
+      if (![...actions.values()].some((action) => action === "Review")) return false
+      const answer = try proposals(opened)
+      return answer?.some((proposal) => actions.get(proposal.id) === "Review" && fromThisEnrollment(proposal, opened)
+        && operation(proposal.payload.operation)?.type === "sms_send") === true
+    },
     ...spokenReview,
     effect workflowDevice() {
       const opened = try session()
@@ -1447,20 +1513,20 @@ export const mediaReview = Layer.effect(MediaReview, effect {
       effect function current(session: Session): boolean!! {
         return (try matches(session)) && (try enrollmentIsCurrent(session)) && (try matches(session))
       }
-      effect function completeRead(session: Session): boolean!! {
-        if (card.read === undefined) return false
-        const attemptId = try readAttempt(session, card)
-        if (attemptId === undefined || !(try current(session))) return false
+      effect function completeRead(session: Session): (string | undefined)!! {
+        if (card.read === undefined) return undefined
+        const read = try readAttempt(session, card)
+        if (read === undefined || !(try current(session))) return undefined
         const { origin, pageTicket } = card.read
-        const body = { ...origin, proposalId: card.id, digest: card.digest, attemptId }
+        const body = { ...origin, proposalId: card.id, digest: card.digest, attemptId: read.attempt }
         const response = (tryPromise(() => runtime.request(`${prefix}/proposals/${encodeURIComponent(card.id)}/read-completion`, body, session.headers))
           |> flatMap(%, Schema.decodeUnknownEffect(readReply))) catch () => undefined
-        if (response === undefined || !sameReadOrigin(response.reply, origin) || response.reply.messageId === origin.inReplyTo) return false
-        if (!(try current(session))) return true
+        if (response === undefined || !sameReadOrigin(response.reply, origin) || response.reply.messageId === origin.inReplyTo) return undefined
+        if (!(try current(session))) return read.said
         const { messageId, text } = response.reply
         board.messageNumber(messageId)
         board.append(pageTicket, card.conversation, { id: messageId, mine: false, text })
-        return true
+        return read.said
       }
       effect function canStage(session: Session): boolean!! {
         const context = (try conversation.get()).context
@@ -1486,7 +1552,11 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         }
         if (!board.snapshot().media.includes(deciding ?? card)) return
         if (deciding === undefined) replace(card)
-        const report = (text: string) => board.change({ mediaNote: { conversation: card.conversation, text } })
+        const report = (text: string) => {
+          const { media, mediaNotes } = board.snapshot()
+          const offer = card.offeredBy === undefined || media.some((one) => one.id === card.id) ? undefined : { ...card.offeredBy, card: card.id }
+          board.change({ mediaNotes: noted(mediaNotes, { conversation: card.conversation, text, ...(offer === undefined ? {} : { offer }) }) })
+        }
         if (!live || held === undefined) {
           if (deciding !== undefined) replace(deciding)
           if (spoken === undefined || ((try spoken.current) && (try reviewContext(card.revision, conversation)))) {
@@ -1531,9 +1601,9 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         if (card.read !== undefined) {
-          const read = result?.kind === "settled" && result.result.tag === "Applied" && result.synced && (try completeRead(held))
-          if ((try finishDecision(held, result?.kind === "settled" && result.synced)) !== "Unavailable" && !read && (try current(held))) {
-            report("Alpha couldn’t complete that read.")
+          const said = result?.kind === "settled" && result.result.tag === "Applied" && result.synced ? try completeRead(held) : undefined
+          if ((try finishDecision(held, result?.kind === "settled" && result.synced)) !== "Unavailable" && (try current(held))) {
+            report(said ?? "Alpha couldn’t complete that read.")
           }
           return
         }

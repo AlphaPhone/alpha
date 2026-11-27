@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { CallStrip } from "./CallStrip.tsx";
 
 function StageCall({ runtime }: Shown<Resident>) {

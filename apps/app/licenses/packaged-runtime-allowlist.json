@@ -1,0 +1,9 @@
+{
+  "description": "Recorded reasons for unverified items that exist only when a resident runtime is staged (PACKAGED). Read in addition to unverified-allowlist.json only then. This file gates nothing (owner decision P-09); a reason is a record, not legal sign-off.",
+  "entries": [
+    {
+      "name": "Node.js embedded runtime (libeliza_node.so)",
+      "reason": "The packaged Android resident runtime embeds Node.js (MIT) with bundled native dependencies (V8, libuv, OpenSSL, ICU, zlib, c-ares, nghttp2). Individual embedded library notices are tracked upstream in @elizaos/os."
+    }
+  ]
+}
