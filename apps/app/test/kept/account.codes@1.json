@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/account/codes@1",
   "spec": "spec/app/account/codes.md",
-  "shape": "ceff845c5fab996d",
+  "shape": "6194b17621cd6afc",
   "sealed": {
-    "shape": "ceff845c5fab996d",
+    "shape": "6194b17621cd6afc",
     "state": "474406ca372a72f3"
   },
   "state": {

@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/account/records@1",
   "spec": "spec/app/account/records.md",
-  "shape": "1d98cdf8466e1bc5",
+  "shape": "d5bc45f31af7826e",
   "sealed": {
-    "shape": "1d98cdf8466e1bc5",
+    "shape": "d5bc45f31af7826e",
     "state": "831682916a6419a8"
   },
   "state": {

@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/clock/stopwatch@1",
   "spec": "spec/app/clock/stopwatch.md",
-  "shape": "707035cf2bd189fb",
+  "shape": "12df45691261a1ba",
   "sealed": {
-    "shape": "707035cf2bd189fb",
+    "shape": "12df45691261a1ba",
     "state": "6b6842b5785124db"
   },
   "state": {

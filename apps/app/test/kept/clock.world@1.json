@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/clock/world@1",
   "spec": "spec/app/clock/world.md",
-  "shape": "ae25dd03389ce5f2",
+  "shape": "377b88c715d641cd",
   "sealed": {
-    "shape": "ae25dd03389ce5f2",
+    "shape": "377b88c715d641cd",
     "state": "d225cfd732654816"
   },
   "state": {

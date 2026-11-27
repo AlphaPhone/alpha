@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/notes/linkNote@1",
   "spec": "spec/app/notes/linkNote.md",
-  "shape": "c7350ae861a9e2b5",
+  "shape": "7d321082b70eb6cf",
   "sealed": {
-    "shape": "c7350ae861a9e2b5",
+    "shape": "7d321082b70eb6cf",
     "state": "35faa1779362a22e"
   },
   "state": {

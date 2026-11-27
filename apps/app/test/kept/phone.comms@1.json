@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/phone/comms@1",
   "spec": "spec/app/phone/comms.md",
-  "shape": "3d2159f3f0bf363e",
+  "shape": "298d3f1aa6801630",
   "sealed": {
-    "shape": "3d2159f3f0bf363e",
+    "shape": "298d3f1aa6801630",
     "state": "8026549f8776b2bb"
   },
   "state": {

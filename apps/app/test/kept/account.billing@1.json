@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/account/billing@1",
   "spec": "spec/app/account/billing.md",
-  "shape": "b47ddb972ae21838",
+  "shape": "7a8fb06a71d851db",
   "sealed": {
-    "shape": "b47ddb972ae21838",
+    "shape": "7a8fb06a71d851db",
     "state": "5346531ab6d15a54"
   },
   "state": {

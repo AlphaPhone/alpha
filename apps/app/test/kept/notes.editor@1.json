@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/notes/editor@1",
   "spec": "spec/app/notes/editor.md",
-  "shape": "bfa4eac725464283",
+  "shape": "8fe4804078f9624c",
   "sealed": {
-    "shape": "bfa4eac725464283",
+    "shape": "8fe4804078f9624c",
     "state": "00dfb92681020e00"
   },
   "state": {

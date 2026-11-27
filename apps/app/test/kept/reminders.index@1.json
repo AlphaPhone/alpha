@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/reminders/index@1",
   "spec": "spec/app/reminders/index.md",
-  "shape": "8e061c7b3c009229",
+  "shape": "32f48785fe09cb72",
   "sealed": {
-    "shape": "8e061c7b3c009229",
+    "shape": "32f48785fe09cb72",
     "state": "7fdd66c3bae33f69"
   },
   "state": {

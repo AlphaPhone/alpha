@@ -367,12 +367,13 @@ it("Keep my phone's state across restarts: a kept value Alpha can no longer read
 
 /**
  * One durable record (`reacting(…, { keep })`) and every shape it was kept in on develop: `state` is what today's build
- * writes under `key`, `shape` the fingerprint of today's decode, `sealed` the shape and the fingerprint of the `state`
- * last written, `kept` the paths of the owner's data a restart keeps, and `earlier` each earlier shape, as a build of
- * that time wrote it.
+ * writes under `key`, `spec` the spec that declares its machine, `shape` the fingerprint of today's decode, `sealed` the
+ * shape and the fingerprint of the `state` last written, `kept` the paths of the owner's data a restart keeps, and
+ * `earlier` each earlier shape, as a build of that time wrote it.
  */
 interface KeptRecord {
   readonly key: string;
+  readonly spec: string;
   readonly shape: string;
   readonly sealed?: { readonly shape: string; readonly state: string };
   readonly state: Readonly<Record<string, unknown>>;
@@ -398,11 +399,70 @@ const machineOf = (key: string) => {
   return load();
 };
 
-/** The fingerprint of what decides whether a kept value is a state: the generated `parseState`, `inv` and each `always` rule. */
-function shapeOf(key: string) {
-  const lines = fs.readFileSync(path.join(import.meta.dirname, "../gen", `${generatedName(key)}.ts`), "utf8").split("\n");
-  const checked = lines.flatMap((line, at) => (/^export function (parseState|inv|always\w*)\(/.test(line) ? [lines.slice(at, lines.indexOf("}", at) + 1).join("")] : []));
-  return createHash("sha256").update(checked.join("").replace(/\s+/g, "")).digest("hex").slice(0, 16);
+/**
+ * A spec's Quint as far as deciding a kept state needs it: the spec each import alias names, the specs imported whole,
+ * its types and `always` rules by name, and the type of its `initial`, where it has one.
+ */
+interface Quint {
+  readonly aliases: ReadonlyMap<string, string>;
+  readonly whole: readonly string[];
+  readonly types: ReadonlyMap<string, string>;
+  readonly rules: ReadonlyMap<string, string>;
+  readonly initial: string | undefined;
+}
+const repository = path.join(import.meta.dirname, "../../..");
+const quints = new Map<string, Quint>();
+/** The top-level declarations of the Quint blocks of `spec`, a path from the repository's root, read once. */
+function quintOf(spec: string): Quint {
+  const known = quints.get(spec);
+  if (known) return known;
+  const quint = [...fs.readFileSync(path.join(repository, spec), "utf8").matchAll(/^```quint\n([\s\S]*?)^```/gm)].map(([, block]) => block).join("\n");
+  const declarations = quint.split(/\n(?=(?:pure|type|import|const)\b)/);
+  const specAt = (from: string) => {
+    const at = path.join(path.dirname(spec), from);
+    return fs.existsSync(path.join(repository, `${at}.md`)) ? `${at}.md` : path.join(at, "index.md");
+  };
+  const named = (pattern: RegExp, value: (declaration: string, match: RegExpExecArray) => string) => new Map(declarations.flatMap((one) => {
+    const match = pattern.exec(one);
+    return match?.[1] === undefined ? [] : [[match[1], value(one, match)] as const];
+  }));
+  const found: Quint = {
+    aliases: named(/^import \w+ as (\w+) from "(.+)"/, (_, match) => specAt(match[2] ?? "")),
+    whole: [...named(/^import \w+\.\* from "(.+)"/, (_, match) => specAt(match[1] ?? "")).values()],
+    types: named(/^type (\w+)/, (one) => one),
+    rules: named(/^pure def (always\w*)\(/, (one) => one),
+    initial: /^pure val initial\s*:\s*([\w:]+)/m.exec(quint)?.[1],
+  };
+  quints.set(spec, found);
+  return found;
+}
+
+/** A declaration of `spec` without its spacing or trailing commas, each import alias in it replaced by the spec it names. */
+const normalised = (spec: string, declaration: string) => declaration
+  .replace(/\b(\w+)::/g, (_, alias: string) => `${quintOf(spec).aliases.get(alias) ?? alias}::`)
+  .replace(/\s+/g, "")
+  .replace(/,(?=[)\]}])/g, "");
+
+/**
+ * The fingerprint of what decides whether a kept value is a state, read from the record's spec rather than from what the
+ * tools print for it: the type of its `initial` and every type that type reaches, in whichever spec declares each, and
+ * the spec's `always` rules, of which `parseState` takes exactly the values that have the type and keep every rule.
+ */
+function shapeOf(spec: string) {
+  const deciding = new Map<string, string>();
+  const reach = (from: string, name: string) => {
+    const at = quintOf(from).types.has(name) ? from : quintOf(from).whole.find((other) => quintOf(other).types.has(name));
+    const declaration = at === undefined ? undefined : quintOf(at).types.get(name);
+    if (at === undefined || declaration === undefined || deciding.has(`${at}::${name}`)) return;
+    deciding.set(`${at}::${name}`, normalised(at, declaration));
+    for (const [, alias, used = ""] of declaration.matchAll(/(?:\b(\w+)::)?\b([A-Z]\w*)\b(?!\s*\()/g)) reach(alias === undefined ? at : quintOf(at).aliases.get(alias) ?? at, used);
+  };
+  const { initial, aliases, rules } = quintOf(spec);
+  const [stateName, alias] = initial?.split("::").toReversed() ?? [];
+  if (stateName === undefined) throw new Error(`${spec} declares no initial state`);
+  reach(alias === undefined ? spec : aliases.get(alias) ?? spec, stateName);
+  for (const [name, rule] of rules) deciding.set(`${spec}::${name}`, normalised(spec, rule));
+  return createHash("sha256").update(JSON.stringify([...deciding].toSorted(([a], [b]) => (a < b ? -1 : 1)))).digest("hex").slice(0, 16);
 }
 
 /** The fingerprint of a kept state, whatever the order of its fields. */
@@ -461,7 +521,7 @@ it("Keep my phone's state across restarts: every shape a durable record was ever
   const today = await keptOver(new Map(keptRecords.map(({ key, state }) => [key, state])));
   for (const record of keptRecords) {
     const { parseState, initial } = await machineOf(record.key);
-    const shape = shapeOf(record.key);
+    const shape = shapeOf(record.spec);
     if (shape !== record.shape) problems.push(`${record.key}: its kept shape changed (now ${shape}, test/kept has ${record.shape}). Move its "state" into "earlier", bring that earlier shape forward in the record's migration, then write today's "state" and "shape"`);
     const seal = unsealed(record);
     if (seal !== undefined) problems.push(seal);

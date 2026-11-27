@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/settings/reset@1",
   "spec": "spec/app/settings/reset.md",
-  "shape": "5c3e28309793682e",
+  "shape": "20d8441b8ca4442f",
   "sealed": {
-    "shape": "5c3e28309793682e",
+    "shape": "20d8441b8ca4442f",
     "state": "8c1c5960b00e263c"
   },
   "state": {
