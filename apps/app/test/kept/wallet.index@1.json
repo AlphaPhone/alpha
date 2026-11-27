@@ -1,0 +1,41 @@
+{
+  "key": "alpha/app/wallet/index@1",
+  "spec": "spec/app/wallet/index.md",
+  "shape": "6056077e16c1d338",
+  "state": {
+    "showing": false,
+    "standing": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "custody": "NoWallet",
+    "canHold": false,
+    "accounts": [],
+    "change": "Making",
+    "changing": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "holdings": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "held": [],
+    "unread": [],
+    "desk": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "waiting": [],
+    "activity": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "past": [],
+    "receiving": false,
+    "copy": {
+      "status": "Idle",
+      "ticket": 0
+    }
+  }
+}

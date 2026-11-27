@@ -1,0 +1,11 @@
+{
+  "key": "alpha/app/clock/stopwatch@1",
+  "spec": "spec/app/clock/stopwatch.md",
+  "shape": "707035cf2bd189fb",
+  "state": {
+    "status": "Reset",
+    "startedAt": 0,
+    "accumulatedMs": 0,
+    "laps": []
+  }
+}

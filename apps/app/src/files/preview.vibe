@@ -24,7 +24,7 @@ import { type Said, say } from "../notices/index.vibe"
 import { adopt, keptAt } from "../platform/index.vibe"
 import { Documents, previewUrl } from "../platform/index.vibe"
 import { type Files, called } from "../platform/index.vibe"
-import { type Job, answer, following, reacting, run, started, stop, together } from "../runtime/index.vibe"
+import { type Job, answer, filledStore, following, reacting, run, started, stop, together } from "../runtime/index.vibe"
 import { createShelf, type Shelf } from "../runtime/index.vibe"
 import { Handles, type Spot } from "./handles.vibe"
 
@@ -74,18 +74,6 @@ module kept {
       return new Map()
     }
   }
-  /** @throws {never} */
-  export function upgradePreview(raw: string | undefined): unknown {
-    if (raw === undefined) return undefined
-    try {
-      const found: unknown = JSON.parse(raw)
-      return typeof found === "object" && found !== null && !Array.isArray(found) && !("renaming" in found)
-        ? { ...found, renaming: 0 } : undefined
-    } catch {
-      return undefined
-    }
-  }
-
   /** @throws {never} */
   export function namesOf(raw: string | undefined): Map<number, string> {
     try {
@@ -164,7 +152,7 @@ module kept {
     }
   }
 }
-import { base64, earlierOf, grantsOf, namesOf, pageImage, textFromBase64, upgradePreview } from kept
+import { base64, earlierOf, grantsOf, namesOf, pageImage, textFromBase64 } from kept
 
 /**
  * The documents Recent holds access to, each by its grant's number, kept across restarts with what the owner calls
@@ -861,17 +849,11 @@ function carryRecent(fx: Recent.Effect): Job<Recent.Event, Files | Documents | O
 }
 
 // spec/app/files/preview.md, "A restart closes the viewer and reports an insert cut off as unknown, so no answer from before it is taken"
-function storedPreview(key: string, start?: Shown.Preview) {
-  return Layer.unwrap(effect {
-    const store = try KeyValueStore.KeyValueStore
-    const raw = store.get(key) catch () => undefined
-    const upgraded = upgradePreview(raw)
-    if (upgraded !== undefined) {
-      const decoded = Shown.decodeState(upgraded) catch () => undefined
-      if (decoded !== undefined) try ignore(store.set(key, JSON.stringify(decoded)))
-    }
-    return Shown.stored(key, start)
-  })
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** A viewer kept while it inserted into mail itself, or before it offered an item or renamed one: read without that mail, offering and renaming nothing. */
+function storedPreview(key: string, start = Shown.initial) {
+  const { offered, renaming } = Shown.initial
+  return Layer.provide(Shown.stored(key, start), filledStore(key, ({ inserted: _inserted, email: _email, account: _account, draft: _draft, ...kept }) => ({ offered, renaming, ...kept }), Shown.parseState))
 }
 const previewing = reacting({ ...Shown, stored: storedPreview }, { keep: 1, open: [{ type: "restart" }, "Phone"], carry: carryShown })
 

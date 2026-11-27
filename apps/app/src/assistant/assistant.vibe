@@ -43,7 +43,7 @@ import { Attempts, fresh } from "../runtime/index.vibe"
 import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
-import { type Job, answer, applying, contained, following, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
+import { type Job, answer, applying, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
@@ -1941,12 +1941,32 @@ export const assistantBack = effect {
   return false
 }
 
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** A conversation kept before its context named the section shown: read as at the top. */
+function storedConversation(key: string, start = Conversation.initial) {
+  const { section } = Conversation.initial.context
+  return Layer.provide(Conversation.stored(key, start), filledStore(key, (kept) => ({ ...kept, context: withFields(kept.context, { section }) }), Conversation.parseState))
+}
+
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** Chats kept before a fresh chat was remembered: read as none being fresh. */
+function storedChats(key: string, start = Chats.initial) {
+  return Layer.provide(Chats.stored(key, start), filledStore(key, (kept) => ({ fresh: Chats.initial.fresh, ...kept }), Chats.parseState))
+}
+
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** A composer kept before its editor and what it held could carry a question: read as carrying none. */
+function storedComposer(key: string, start = Composer.initial) {
+  const { question } = Composer.initial.editor
+  return Layer.provide(Composer.stored(key, start), filledStore(key, (kept) => ({ ...kept, editor: withFields(kept.editor, { question }), held: withFields(kept.held, { question }) }), Composer.parseState))
+}
+
 export const assisting = Layer.provideMerge(
   together(
     mediaReview,
-    reacting(Conversation, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
-    reacting(Chats, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
-    reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
+    reacting({ ...Conversation, stored: storedConversation }, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
+    reacting({ ...Chats, stored: storedChats }, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
+    reacting({ ...Composer, stored: storedComposer }, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),

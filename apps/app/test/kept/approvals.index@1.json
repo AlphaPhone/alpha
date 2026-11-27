@@ -1,0 +1,23 @@
+{
+  "key": "alpha/app/approvals/index@1",
+  "spec": "spec/app/approvals/index.md",
+  "shape": "d1850f7a67e3ebeb",
+  "state": {
+    "proposals": {},
+    "ids": [],
+    "since": {},
+    "running": 0,
+    "pass": {
+      "message": 0,
+      "started": 0,
+      "open": false,
+      "paged": false
+    },
+    "interrupted": [],
+    "leases": {},
+    "waiting": {
+      "status": "Idle",
+      "ticket": 0
+    }
+  }
+}

@@ -1,0 +1,397 @@
+{
+  "key": "alpha/app/files/index@1",
+  "spec": "spec/app/files/index.md",
+  "shape": "edf620a9a0fe7da1",
+  "state": {
+    "access": "Granted",
+    "supported": true,
+    "open": false,
+    "storage": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "volumes": [],
+    "tally": {
+      "counts": [],
+      "trashed": 0
+    },
+    "trail": [],
+    "inCategory": false,
+    "category": "Other",
+    "listing": {
+      "status": "Loaded",
+      "ticket": 3
+    },
+    "items": [
+      {
+        "id": 4,
+        "name": "Receipts",
+        "revision": 1,
+        "kind": "Folder",
+        "volume": 1,
+        "bytes": 0,
+        "children": 0
+      },
+      {
+        "id": 2,
+        "name": "scan.jpg",
+        "revision": 1,
+        "kind": "Image",
+        "volume": 1,
+        "bytes": 0,
+        "children": 0
+      }
+    ],
+    "partial": false,
+    "picked": [],
+    "missing": false,
+    "layout": "Grid",
+    "order": "ByName",
+    "reversed": true,
+    "trash": false,
+    "details": 0,
+    "handed": false,
+    "begun": {
+      "trail": [],
+      "inCategory": false,
+      "category": "Other"
+    },
+    "search": {
+      "filter": {
+        "text": "",
+        "kind": "Other",
+        "anyKind": true,
+        "from": 0,
+        "to": 8640000000000000
+      },
+      "searching": false,
+      "within": {
+        "trail": [],
+        "inCategory": false,
+        "category": "Other"
+      },
+      "query": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "hits": [],
+      "complete": false,
+      "asker": 0,
+      "peek": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "peeker": 0
+    },
+    "deleting": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "change": {
+      "attempt": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "work": "NewFolder",
+      "items": [],
+      "name": "",
+      "folder": 0,
+      "dest": {
+        "folder": 0,
+        "path": [],
+        "names": []
+      },
+      "approval": 0,
+      "clash": {
+        "showing": false,
+        "revision": 0,
+        "shown": 0
+      },
+      "replace": false,
+      "done": [],
+      "unsure": [],
+      "panel": 0,
+      "panels": 0,
+      "sharing": [],
+      "mail": false,
+      "asker": 0,
+      "stale": false,
+      "sending": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "sentTo": "Chooser"
+    },
+    "sheet": {
+      "open": false,
+      "trail": [],
+      "reading": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "folders": [],
+      "names": []
+    }
+  },
+  "kept": [
+    "access",
+    "layout",
+    "order",
+    "reversed"
+  ],
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "b7b4c1cd94",
+      "state": {
+        "access": "Granted",
+        "supported": true,
+        "open": false,
+        "storage": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "volumes": [],
+        "trail": [],
+        "inCategory": false,
+        "category": "Other",
+        "listing": {
+          "status": "Loaded",
+          "ticket": 3
+        },
+        "items": [
+          {
+            "id": 4,
+            "name": "Receipts",
+            "revision": 1,
+            "kind": "Folder",
+            "volume": 1
+          },
+          {
+            "id": 2,
+            "name": "scan.jpg",
+            "revision": 1,
+            "kind": "Image",
+            "volume": 1
+          }
+        ],
+        "picked": [],
+        "missing": false,
+        "layout": "Grid",
+        "order": "ByName",
+        "reversed": true,
+        "search": {
+          "filter": {
+            "text": "",
+            "kind": "Other",
+            "anyKind": true,
+            "from": 0,
+            "to": 8640000000000000
+          },
+          "searching": false,
+          "within": {
+            "trail": [],
+            "inCategory": false,
+            "category": "Other"
+          },
+          "query": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "hits": [],
+          "asker": 0,
+          "peek": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "peeker": 0
+        },
+        "deleting": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "change": {
+          "attempt": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "work": "NewFolder",
+          "items": [],
+          "name": "",
+          "folder": 0,
+          "dest": {
+            "folder": 0,
+            "path": [],
+            "names": []
+          },
+          "approval": 0,
+          "clash": {
+            "showing": false,
+            "revision": 0,
+            "shown": 0
+          },
+          "replace": false,
+          "done": [],
+          "unsure": [],
+          "panel": 0,
+          "panels": 0,
+          "sharing": [],
+          "mail": false,
+          "asker": 0,
+          "stale": false,
+          "sending": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "sentTo": "Chooser"
+        },
+        "sheet": {
+          "open": false,
+          "trail": [],
+          "reading": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "folders": [],
+          "names": []
+        }
+      }
+    },
+    {
+      "from": "b7b4c1cd94, 173bd6f26b",
+      "until": "4a3a1ff0a1 (#1813)",
+      "state": {
+        "access": "Granted",
+        "supported": true,
+        "open": false,
+        "storage": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "volumes": [],
+        "tally": {
+          "counts": [],
+          "trashed": 0
+        },
+        "trail": [],
+        "inCategory": false,
+        "category": "Other",
+        "listing": {
+          "status": "Loaded",
+          "ticket": 3
+        },
+        "items": [
+          {
+            "id": 4,
+            "name": "Receipts",
+            "revision": 1,
+            "kind": "Folder",
+            "volume": 1,
+            "bytes": 0
+          },
+          {
+            "id": 2,
+            "name": "scan.jpg",
+            "revision": 1,
+            "kind": "Image",
+            "volume": 1,
+            "bytes": 0
+          }
+        ],
+        "partial": false,
+        "picked": [],
+        "missing": false,
+        "layout": "Grid",
+        "order": "ByName",
+        "reversed": true,
+        "trash": false,
+        "details": 0,
+        "handed": false,
+        "begun": {
+          "trail": [],
+          "inCategory": false,
+          "category": "Other"
+        },
+        "search": {
+          "filter": {
+            "text": "",
+            "kind": "Other",
+            "anyKind": true,
+            "from": 0,
+            "to": 8640000000000000
+          },
+          "searching": false,
+          "within": {
+            "trail": [],
+            "inCategory": false,
+            "category": "Other"
+          },
+          "query": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "hits": [],
+          "complete": false,
+          "asker": 0,
+          "peek": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "peeker": 0
+        },
+        "deleting": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "change": {
+          "attempt": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "work": "NewFolder",
+          "items": [],
+          "name": "",
+          "folder": 0,
+          "dest": {
+            "folder": 0,
+            "path": [],
+            "names": []
+          },
+          "approval": 0,
+          "clash": {
+            "showing": false,
+            "revision": 0,
+            "shown": 0
+          },
+          "replace": false,
+          "done": [],
+          "unsure": [],
+          "panel": 0,
+          "panels": 0,
+          "sharing": [],
+          "mail": false,
+          "asker": 0,
+          "stale": false,
+          "sending": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "sentTo": "Chooser"
+        },
+        "sheet": {
+          "open": false,
+          "trail": [],
+          "reading": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "folders": [],
+          "names": []
+        }
+      }
+    }
+  ]
+}

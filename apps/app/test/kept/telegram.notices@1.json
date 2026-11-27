@@ -1,0 +1,19 @@
+{
+  "key": "alpha/app/telegram/notices@1",
+  "spec": "spec/app/telegram/notices.md",
+  "shape": "a071bd3fa79b1e7b",
+  "state": {
+    "authenticated": false,
+    "notifyAllowed": false,
+    "check": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "since": 0,
+    "frontChat": 0,
+    "muted": [],
+    "archived": [],
+    "upChats": [],
+    "posts": 0
+  }
+}

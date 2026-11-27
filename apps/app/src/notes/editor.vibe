@@ -8,7 +8,7 @@ import { NoteStore } from "../platform/index.vibe"
 import { type Agent } from "../platform/index.vibe"
 import { ownerAt } from "../platform/index.vibe"
 import { fresh } from "../runtime/index.vibe"
-import { type Job, answer, migratedStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { type Job, answer, filledStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { type Collection, type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind" | "pinned">
@@ -327,17 +327,11 @@ const pinning = started(effect {
   })
 }, "pin the note the owner asked to pin once its save lands")
 
-/** An editor kept before a Delete or a Pin could wait on a save has no `binning` or `pinning`: it is read as asking for none, so its draft is not set aside. */
-effect function editorRecord(raw: string | undefined): (string | undefined)!! {
-  if (raw === undefined) return undefined
-  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
-  if (fields === undefined || ("binning" in fields && "pinning" in fields)) return raw
-  const migrated = Editor.decodeState({ binning: Editor.initial.binning, pinning: Editor.initial.pinning, ...fields }) catch () => undefined
-  return migrated === undefined ? raw : JSON.stringify(migrated)
-}
-
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** An editor kept before a Share, a Delete or a Pin could wait on a save is read as waiting for none, so its draft is not set aside. */
 function stored(key: string, start = Editor.initial) {
-  return Layer.provide(Editor.stored(key, start), migratedStore(key, editorRecord))
+  const { asked, binning, pinning } = Editor.initial
+  return Layer.provide(Editor.stored(key, start), filledStore(key, (kept) => ({ asked, binning, pinning, ...kept }), Editor.parseState))
 }
 
 /** On leaving or reloading Notes, the saved words live in the phone vault, with only revision metadata in the machine. */

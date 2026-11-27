@@ -1,0 +1,90 @@
+{
+  "key": "alpha/app/home/index@1",
+  "spec": "spec/app/home/index.md",
+  "shape": "dc7b8da236d38695",
+  "state": {
+    "host": "InBrowser",
+    "installed": {
+      "read": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "apps": [],
+      "pending": false,
+      "quiet": false
+    },
+    "tiles": {
+      "favourites": [],
+      "saved": [],
+      "load": {
+        "status": "Idle",
+        "ticket": 4
+      },
+      "save": {
+        "id": 2,
+        "outcome": "Confirmed"
+      }
+    },
+    "editing": false,
+    "adding": false,
+    "handoff": {
+      "ask": {
+        "tag": "Shade"
+      },
+      "attempt": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "until": 0
+    }
+  },
+  "kept": [
+    "tiles.save.id"
+  ],
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "299b554681",
+      "state": {
+        "host": "InBrowser",
+        "installed": {
+          "read": {
+            "status": "Idle",
+            "ticket": 0
+          },
+          "apps": [],
+          "pending": false,
+          "quiet": false
+        },
+        "tiles": {
+          "favourites": [],
+          "saved": [],
+          "load": {
+            "status": "Idle",
+            "ticket": 4
+          },
+          "save": {
+            "id": 2,
+            "outcome": "Confirmed"
+          }
+        },
+        "editing": false,
+        "adding": false,
+        "handoff": {
+          "ask": {
+            "tag": "Shade"
+          },
+          "attempt": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "until": 0
+        },
+        "query": "",
+        "menu": {
+          "tag": "NoMenu"
+        }
+      }
+    }
+  ]
+}

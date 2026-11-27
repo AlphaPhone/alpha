@@ -1,0 +1,19 @@
+{
+  "key": "alpha/app/inbox/marking@1",
+  "spec": "spec/app/inbox/marking.md",
+  "shape": "7365ede35b8baaba",
+  "state": {
+    "account": 0,
+    "message": 0,
+    "unread": false,
+    "automatic": false,
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "attempts": 0,
+    "told": "Quiet",
+    "opened": [],
+    "doubtful": []
+  }
+}

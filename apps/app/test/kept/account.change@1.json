@@ -1,0 +1,29 @@
+{
+  "key": "alpha/app/account/change@1",
+  "spec": "spec/app/account/change.md",
+  "shape": "f8c41e006987a05a",
+  "state": {
+    "step": "Idle",
+    "act": "ChangePlan",
+    "target": "Plus",
+    "ticket": 0,
+    "quote": 0,
+    "quoteEnds": 0,
+    "change": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "leave": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "unsettled": false,
+    "notice": "Quiet"
+  }
+}

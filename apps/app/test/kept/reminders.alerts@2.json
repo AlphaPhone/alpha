@@ -1,0 +1,10 @@
+{
+  "key": "alpha/app/reminders/alerts@2",
+  "spec": "spec/app/reminders/alerts.md",
+  "shape": "a670e992f21c6668",
+  "state": {
+    "entries": [],
+    "bannerId": 0,
+    "nextAttempt": 1
+  }
+}

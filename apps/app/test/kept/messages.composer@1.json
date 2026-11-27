@@ -1,0 +1,166 @@
+{
+  "key": "alpha/app/messages/composer@1",
+  "spec": "spec/app/messages/composer.md",
+  "shape": "215e8fe3df6cd9ea",
+  "state": {
+    "thread": 0,
+    "recipients": 0,
+    "slot": {
+      "author": "Nobody",
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      }
+    },
+    "saved": {},
+    "suggestion": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "sending": {
+      "grant": "Unasked",
+      "asked": false
+    },
+    "simInfo": {
+      "grant": "Unasked",
+      "asked": false
+    },
+    "sims": 1,
+    "sim": 0,
+    "pictures": 0,
+    "carriedDraft": {
+      "author": "Nobody",
+      "pictures": 0
+    },
+    "savedPictures": 0,
+    "saveFailed": false,
+    "sendRevision": 0,
+    "pendingClear": {
+      "source": "ConversationDraft",
+      "thread": 0,
+      "revision": 0,
+      "id": 0,
+      "visit": 0
+    },
+    "outgoing": {
+      "thread": 0,
+      "op": {
+        "id": 0,
+        "outcome": "Planned"
+      },
+      "denied": false,
+      "recipients": 0,
+      "radioed": 0,
+      "sent": 0,
+      "failed": 0,
+      "reported": 0,
+      "retired": 0
+    },
+    "newSend": {
+      "visit": 0,
+      "revision": 0
+    }
+  },
+  "earlier": [
+    {
+      "from": "53114c4151",
+      "until": "bd0da2aa89",
+      "state": {
+        "thread": 0,
+        "recipients": 0,
+        "slot": {
+          "author": "Nobody",
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          }
+        },
+        "saved": {},
+        "suggestion": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "sending": {
+          "grant": "Unasked",
+          "asked": false
+        },
+        "simInfo": {
+          "grant": "Unasked",
+          "asked": false
+        },
+        "sims": 1,
+        "sim": 0,
+        "pictures": 0,
+        "outgoing": {
+          "thread": 0,
+          "op": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "denied": false,
+          "recipients": 0,
+          "radioed": 0,
+          "sent": 0,
+          "failed": 0,
+          "reported": 0,
+          "retired": 0
+        }
+      }
+    },
+    {
+      "from": "bd0da2aa89",
+      "until": "81faf5087c",
+      "state": {
+        "thread": 0,
+        "recipients": 0,
+        "slot": {
+          "author": "Nobody",
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          }
+        },
+        "saved": {},
+        "suggestion": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "sending": {
+          "grant": "Unasked",
+          "asked": false
+        },
+        "simInfo": {
+          "grant": "Unasked",
+          "asked": false
+        },
+        "sims": 1,
+        "sim": 0,
+        "pictures": 0,
+        "outgoing": {
+          "thread": 0,
+          "op": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "denied": false,
+          "recipients": 0,
+          "radioed": 0,
+          "sent": 0,
+          "failed": 0,
+          "reported": 0,
+          "retired": 0
+        },
+        "newSend": {
+          "visit": 0,
+          "revision": 0
+        }
+      }
+    }
+  ]
+}

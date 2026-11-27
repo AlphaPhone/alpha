@@ -1,0 +1,45 @@
+{
+  "key": "alpha/app/telegram/index@1",
+  "spec": "spec/app/telegram/index.md",
+  "shape": "cb6269b552622481",
+  "state": {
+    "authenticated": false,
+    "credentialRev": 0,
+    "selected": {
+      "tab": "AllChats",
+      "folderId": 0,
+      "query": ""
+    },
+    "list": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "further": false,
+    "failure": "Fine",
+    "pages": 0,
+    "total": 0,
+    "cursor": 0,
+    "spent": [],
+    "saved": false,
+    "kept": {
+      "tab": "AllChats",
+      "folderId": 0,
+      "query": ""
+    },
+    "keptPages": 0,
+    "keptTotal": 0,
+    "keptCredential": 0,
+    "muteOp": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "mutedChats": [],
+    "count": {
+      "credentialRev": 0,
+      "unread": 0,
+      "mentions": 0,
+      "at": 0,
+      "fresh": false
+    }
+  }
+}
