@@ -12,6 +12,7 @@ import { shell } from "../src/shell/shell.vibe";
 import { placeOf, VoiceWords, voicing } from "../src/voice/voice.vibe";
 import { DictationClock } from "../src/voice/dictation-clock.vibe";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
+import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { Machine as Chats } from "../gen/app__assistant__chats.effect.vibe";
 import { Machine as Messages } from "../gen/app__messages.effect.vibe";
 import { Machine as Phone } from "../gen/app__phone.effect.vibe";
@@ -657,11 +658,9 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it("keeps voice and mic open across agent navigation to an app, to Home, and to Home again, keeping a raised Sheet where the view is in sight and lowering it or Full where they would hide it, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
-    let told = 0;
-    await until(runtime, Conversation, (s) => { told = s.context.revision; return s.observing; });
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
-    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included": the turn is sent once the screen it tells of shows the raised sheet, so its prepared view opens on that screen.
-    await until(runtime, Conversation, (s) => s.context.revision > told);
+    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included": the turn is sent once the conversation has been told the Home the raised sheet is over, so its prepared view opens on that screen.
+    await until(runtime, Conversation, (s) => s.observing && !s.context.sensitive && s.context.revision > 0 && s.context.showing.tag === "Home");
     const shows = (viewId: string) => (metadata: unknown) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, false)];
 
     world.ask.nextReplyChunks = ["Opening Calendar."];
@@ -2553,37 +2552,30 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(memory.dequeueSentence(2)?.text).toBe("Turn two sentence.");
   });
 
-  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
-  it("preserves Cloud credit refusals during real-time Talk and keeps actionable Talk failures visible when fallback is unavailable", async () => {
+  // spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
+  it("ends real-time Talk quietly when Cloud refuses it for spent funds or asks for sign-in with no phone speech to fall back on: no toast, and Talk is offered again", async () => {
     const world = { ...scene(), phone: true };
     world.voice.onDevice = false;
     world.voice.localReady = false;
     world.voice.liveCaptureAvailable = false;
     const { alpha, area } = await onComposer(world, ...only("notice"));
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.route.account === "CloudAccount" && s.route.consent && s.warmed);
+    const toasts = () => alpha.runtime.runPromise(Effect.flatMap(Toasts, (m) => m.get()));
+    const raised = (await toasts()).issued;
 
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
-    const sessionId = world.voice.activeMicSession;
-    expect(sessionId).toBeDefined();
-
-    await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code: "insufficient_credits" }));
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off" && s.failure === "NoFailure");
-    await vi.waitFor(async () => {
-      await drawn(() => undefined);
-      expect(document.body.textContent).toContain("Voice needs more Eliza Cloud credits. Add credits, then try again.");
-    });
-
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
-    const secondSession = world.voice.activeMicSession;
-    expect(secondSession).toBeDefined();
-
-    await drawn(() => world.voice.emitCloud?.({ sessionId: secondSession ?? "", type: "error", code: "unauthorized" }));
-    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
-    await vi.waitFor(async () => {
-      await drawn(() => undefined);
-      expect(document.body.textContent).toContain("Sign in to use Cloud voice.");
-    });
+    for (const code of ["insufficient_credits", "unauthorized"]) {
+      await press("Talk");
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+      const sessionId = world.voice.activeMicSession;
+      expect(sessionId).toBeDefined();
+      await drawn(() => world.voice.emitCloud?.({ sessionId: sessionId ?? "", type: "error", code }));
+      await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle" && s.mic === "Off");
+      for (let turn = 0; turn < 10; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+      const after = await area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+      const shown = await toasts();
+      expect([code, after.failure, after.retries, shown.issued - raised, shown.showing, world.voice.activeMicSession, button("Talk") !== undefined]).toEqual([
+        code, "NoFailure", 0, 0, false, undefined, true,
+      ]);
+    }
   });
 });

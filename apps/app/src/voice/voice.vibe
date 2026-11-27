@@ -17,7 +17,7 @@ export { placeOf, viewOfPlace }
 import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/media-review.vibe"
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
-import { SystemSettings, classifyVoiceFault, cloudSpeechFault, interruptedByCall, refusedForFunds, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/index.vibe"
+import { SystemSettings, classifyVoiceFault, interruptedByCall, refusedForFunds, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/index.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/index.vibe"
 import { fresh } from "../runtime/index.vibe"
@@ -1000,23 +1000,13 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
           return { type: "callInterrupted", session, foreground: try (try Device).showing() } as Voice.Event
         }
         if (refusedForFunds(failure.cause)) {
-          try say("Voice needs more Eliza Cloud credits. Add credits, then try again.", true)
           return { type: "refusedForFunds", session, turn: (try (try Voice.Machine).get()).turn } as Voice.Event
         }
         if (!network) return { type: "micFailed", session } as Voice.Event
         const { fault, waitMs } = classifyVoiceFault(failure, true)
-        const notice = failure.cause !== "session-changed" ? cloudSpeechFault(failure.cause).notice : undefined
+        if (fault === "NotTheNetwork") return { type: "micFailed", session } as Voice.Event
         const status = bridge.probeStatus(false) catch () => ({ ready: false, ttsReady: false, liveCapture: false })
-        const deviceReady = status.ready && status.liveCapture
-        if (fault === "NotTheNetwork") {
-          if (!deviceReady && notice !== undefined) try say(notice, true)
-          return { type: "micFailed", session } as Voice.Event
-        }
-        const retries = (try (try Voice.Machine).get()).retries
-        if (!deviceReady && notice !== undefined && (fault === "SignInNeeded" || retries >= 2 || waitMs > 30_000)) {
-          try say(notice, true)
-        }
-        return { type: "speechFailed", session, fault, wait: waitMs, deviceReady, now: untimed } as Voice.Event
+        return { type: "speechFailed", session, fault, wait: waitMs, deviceReady: status.ready && status.liveCapture, now: untimed } as Voice.Event
       }
     }, { type: "micFailed", session });
     when { tag: "SetSpeakerOutput", let session, let speakerTicket, let muted }: answer(`speaker ${session}:${speakerTicket}`, effect {
@@ -1243,7 +1233,7 @@ const bridgeEvents = hearing(
     const bridge = try VoiceBridge
     const voice = try Voice.Machine
     const { memory } = try VoiceWords
-    return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge | Toasts | Said) => {
+    return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
       if (event.kind === "speechEnd" && event.text !== "") {
         // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": a gap that ends while the microphone Unmute reopened is still opening ends the turn as soon as it is open.
         const settled = try Stream.runHead(Stream.filter(voice.changes, (live) => !Voice.turnEndWaits(live, event.session)))
@@ -1258,20 +1248,13 @@ const bridgeEvents = hearing(
         if (event.reason === "ended") return undefined
         if (event.reason === "call-active") return { type: "callInterrupted", session: event.session, foreground: try (try Device).showing() }
         if (event.reason === "insufficient_credits") {
-          try say("Voice needs more Eliza Cloud credits. Add credits, then try again.", true)
           return { type: "refusedForFunds", session: event.session, turn: (try voice.get()).turn }
         }
-        const live = try voice.get()
         const classified = event.fault !== undefined
           ? { fault: event.fault, waitMs: event.waitMs ?? 0 }
-          : classifyVoiceFault(event.cause ?? event.reason, live.network)
-        const notice = cloudSpeechFault(event.cause ?? event.reason).notice
+          : classifyVoiceFault(event.cause ?? event.reason, (try voice.get()).network)
         const status = bridge.probeStatus(false) catch () => ({ ready: false, ttsReady: false, liveCapture: false })
-        const deviceReady = status.ready && status.liveCapture
-        if (!deviceReady && notice !== undefined && (classified.fault === "NotTheNetwork" || classified.fault === "SignInNeeded" || live.retries >= 2 || classified.waitMs > 30_000)) {
-          try say(notice, true)
-        }
-        return { type: "speechFailed", session: event.session, fault: classified.fault, wait: classified.waitMs, deviceReady, now: untimed }
+        return { type: "speechFailed", session: event.session, fault: classified.fault, wait: classified.waitMs, deviceReady: status.ready && status.liveCapture, now: untimed }
       }
       return match (event) {
         when { kind: "speechStart", let session }: { type: "speechHeard", session };
