@@ -55,13 +55,12 @@ jobs:
         run: |
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
-      - name: Verify zero Bun and notice freshness
-        run: |
-          pnpm no-bun
-          pnpm --filter @repo/app licences --check
-      - name: Prepare pinned Eliza checkout and verify Android inputs
+      - name: Verify zero Bun
+        run: pnpm no-bun
+      - name: Prepare pinned Eliza checkout and verify Android inputs and notices
         run: |
           pnpm eliza
+          pnpm --filter @repo/app licences --check
           pnpm --filter @repo/app android inputs
       - name: Build and verify the launcher APKs (debug, instrumentation, release)
         env:
