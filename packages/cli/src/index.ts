@@ -10,6 +10,7 @@ export {
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
   resolveAndroidAvdHome,
+  resolveInstalledBlockedGuards,
   sortApksCoreFirst,
   type AccessibilityInspection,
   type ControlTelemetryInspection,

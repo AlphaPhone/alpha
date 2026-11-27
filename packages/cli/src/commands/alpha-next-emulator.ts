@@ -25,9 +25,10 @@ const DEFAULT_APK_DIRS = [
   "apps/app/android/suite/out",
 ] as const;
 
-const BLOCKED_PACKAGES = [
-  "com.android.settings",
+const SETTINGS_PACKAGE = "com.android.settings";
+const PERMISSION_CONTROLLER_CANDIDATES = [
   "com.android.permissioncontroller",
+  "com.google.android.permissioncontroller",
 ] as const;
 
 const BROWSER_CANDIDATES = [
@@ -385,6 +386,22 @@ export function inspectControlTelemetry(
   };
 }
 
+/** Resolve installed Settings and PermissionController packages from `pm list packages` output (AOSP or Google APIs). */
+export function resolveInstalledBlockedGuards(packagesOutput: string): {
+  readonly present: boolean;
+  readonly packages: readonly string[];
+} {
+  const hasSettings = packagesOutput.includes(`package:${SETTINGS_PACKAGE}`);
+  const permController = PERMISSION_CONTROLLER_CANDIDATES.find((candidate) => packagesOutput.includes(`package:${candidate}`));
+  const packages: string[] = [];
+  if (hasSettings) packages.push(SETTINGS_PACKAGE);
+  if (permController) packages.push(permController);
+  return {
+    present: hasSettings && permController !== undefined,
+    packages,
+  };
+}
+
 /** Resolve a consistent `ANDROID_AVD_HOME` directory shared by both `avdmanager` and `emulator`. */
 export function resolveAndroidAvdHome(
   env: NodeJS.ProcessEnv = process.env,
@@ -692,7 +709,8 @@ async function verifyDeviceSuite(
   );
   const browserObserved = browserPoll.observed;
 
-  const blockedPresent = BLOCKED_PACKAGES.every((pkg) => packagesOutput.includes(`package:${pkg}`));
+  const blockedGuards = resolveInstalledBlockedGuards(packagesOutput);
+  const blockedPresent = blockedGuards.present;
   let settingsObserved = false;
   let telemetryCheck = browserPoll.telemetry;
   if (blockedPresent) {
@@ -700,7 +718,7 @@ async function verifyDeviceSuite(
     const settingsPoll = await pollUntil(
       () => {
         const windowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
-        const observed = windowDump.includes("com.android.settings");
+        const observed = windowDump.includes(SETTINGS_PACKAGE);
         const telemetry = inspectControlTelemetry(readControlLogcat(), browserPkg);
         return { observed, telemetry };
       },
@@ -715,7 +733,7 @@ async function verifyDeviceSuite(
   results.push({
     stage: "verify-accessibility-and-browser-control",
     status: a11yOk ? "passed" : "failed",
-    detail: `service=${ACCESSIBILITY_COMPONENT} enabled=${String(a11yCheck.enabledInSettings)} bound=${String(a11yCheck.boundInDumpsys)} connected=${String(telemetryCheck.serviceConnected)} browser=${browserPkg ?? "ACTION_VIEW"} observed=${String(browserObserved)} observedNodes=${String(telemetryCheck.observedNodes)} settingsObserved=${String(settingsObserved)} refusedSettings=${String(telemetryCheck.refusedSettings)} blockedGuards=${BLOCKED_PACKAGES.join(",")} telemetryLines=${String(telemetryCheck.telemetryLines)}`,
+    detail: `service=${ACCESSIBILITY_COMPONENT} enabled=${String(a11yCheck.enabledInSettings)} bound=${String(a11yCheck.boundInDumpsys)} connected=${String(telemetryCheck.serviceConnected)} browser=${browserPkg ?? "ACTION_VIEW"} observed=${String(browserObserved)} observedNodes=${String(telemetryCheck.observedNodes)} settingsObserved=${String(settingsObserved)} refusedSettings=${String(telemetryCheck.refusedSettings)} blockedGuards=${blockedGuards.packages.join(",")} telemetryLines=${String(telemetryCheck.telemetryLines)}`,
   });
 
   return results;

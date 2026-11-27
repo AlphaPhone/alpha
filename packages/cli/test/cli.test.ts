@@ -16,6 +16,7 @@ import {
   inspectLauncherActivities,
   oklchToHex,
   resolveAndroidAvdHome,
+  resolveInstalledBlockedGuards,
   runCli,
   scanSecurityInvariants,
   sortApksCoreFirst,
@@ -689,6 +690,16 @@ describe("project CLI", () => {
     expect(telemetryOk.refusedSettings).toBe(true);
     expect(inspectControlTelemetry(controlLogs.replace("nodes=19", "nodes=0"), "com.android.chrome").passed).toBe(false);
     expect(inspectControlTelemetry(controlLogs.replace("event=refuse pkg=com.android.settings", "event=allow"), "com.android.chrome").passed).toBe(false);
+
+    expect(resolveInstalledBlockedGuards("package:com.android.settings\npackage:com.google.android.permissioncontroller\n")).toEqual({
+      present: true,
+      packages: ["com.android.settings", "com.google.android.permissioncontroller"],
+    });
+    expect(resolveInstalledBlockedGuards("package:com.android.settings\npackage:com.android.permissioncontroller\n")).toEqual({
+      present: true,
+      packages: ["com.android.settings", "com.android.permissioncontroller"],
+    });
+    expect(resolveInstalledBlockedGuards("package:com.android.settings\n").present).toBe(false);
   });
 
   test("alpha-next validate --check --aapt2 passes against the live repository artifacts", async () => {
