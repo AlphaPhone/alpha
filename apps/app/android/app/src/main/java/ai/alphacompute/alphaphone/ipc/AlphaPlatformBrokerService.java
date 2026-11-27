@@ -49,7 +49,7 @@ public final class AlphaPlatformBrokerService extends Service {
     private static final int MAX_CLOUD_REPLY_BYTES = 64 * 1024 * 1024;
     private static final Object CONSENT_LOCK = new Object();
 
-    private final AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+    private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
     private final ExecutorService workers = Executors.newFixedThreadPool(4, task -> {
         Thread thread = new Thread(task, "AlphaPlatformBroker");
         thread.setDaemon(true);
@@ -152,6 +152,7 @@ public final class AlphaPlatformBrokerService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        policy = AlphaSuitePolicyLoader.load(this);
         grants = new LargeBodyGrant(getCacheDir());
         CloudRequestPolicy cloudPolicy = new CloudRequestPolicy(loadCloudRoutesJson());
         if (cloudPolicy.loaded()) {

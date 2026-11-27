@@ -1,6 +1,7 @@
 package ai.alphacompute.alphaphone.overlay;
 
 import ai.alphacompute.alphaphone.ipc.AlphaContextRegistryService;
+import ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
 import android.app.ActivityOptions;
@@ -41,7 +42,7 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
     private static final int FALLBACK_BAR_HEIGHT_DP = 88;
 
     private final AlphaVoiceInteractionSessionService.WarmOverlayWebViewPool webViewPool;
-    private final AlphaSuitePolicy suitePolicy = AlphaSuitePolicy.defaults();
+    private final AlphaSuitePolicy suitePolicy;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Object regionsLock = new Object();
     private final List<Rect> touchableRects = new ArrayList<>();
@@ -53,6 +54,7 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
     public AlphaVoiceInteractionSession(Context context, AlphaVoiceInteractionSessionService.WarmOverlayWebViewPool webViewPool) {
         super(context);
         this.webViewPool = webViewPool;
+        this.suitePolicy = AlphaSuitePolicyLoader.load(context);
     }
 
     @Override public View onCreateContentView() {
@@ -144,10 +146,12 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
         super.onHandleAssist(state);
         if (isDeviceLocked()) return;
         JSONObject payload = new JSONObject();
+        Uri webUri = null;
+        String packageName = null;
         try {
             AssistContent content = state.getAssistContent();
             if (content != null) {
-                Uri webUri = content.getWebUri();
+                webUri = content.getWebUri();
                 if (webUri != null) {
                     payload.put("webUri", webUri.toString());
                 }
@@ -160,7 +164,8 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
             if (structure != null) {
                 ComponentName component = structure.getActivityComponent();
                 if (component != null) {
-                    payload.put("packageName", component.getPackageName());
+                    packageName = component.getPackageName();
+                    payload.put("packageName", packageName);
                     payload.put("activityName", component.getClassName());
                 }
                 StringBuilder summary = new StringBuilder();
@@ -172,6 +177,9 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
                 if (summary.length() > 0) {
                     payload.put("text", summary.toString());
                 }
+            }
+            if (packageName != null && webUri != null) {
+                AlphaControlRuntimeBridge.forwardAssistWebUri(packageName, webUri);
             }
             String activeContext = AlphaContextRegistryService.currentActiveContextJson();
             if (activeContext != null) {

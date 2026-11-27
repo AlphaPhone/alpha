@@ -19,6 +19,7 @@ import android.os.Binder;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.util.Log;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -33,9 +34,10 @@ import org.json.JSONObject;
 
 /** Signature-protected Binder broker forwarding suite requests, streams, and feeds into {@link AgentService#channel()}. */
 public final class AlphaAgentBrokerService extends Service {
+    private static final String TAG = "AlphaAgentBroker";
     private static final String ARCHIVE_RECOVERY_PREFIX = "archiveRecovery:";
 
-    private final AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+    private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
     private final Map<String, AutoCloseable> statusObservers = new ConcurrentHashMap<>();
     private final Map<String, String> activeCallOwners = new ConcurrentHashMap<>();
     private final Map<String, String> activeSubOwners = new ConcurrentHashMap<>();
@@ -47,7 +49,8 @@ public final class AlphaAgentBrokerService extends Service {
 
     private final IAlphaAgentBroker.Stub binder = new IAlphaAgentBroker.Stub() {
         @Override public String getStatusJson() {
-            requireAuthorizedPackage();
+            String callingPkg = requireAuthorizedPackage();
+            Log.i(TAG, "getStatusJson caller=" + callingPkg);
             return AgentService.status(AlphaAgentBrokerService.this).toString();
         }
 
@@ -106,6 +109,7 @@ public final class AlphaAgentBrokerService extends Service {
                 notifyRequestError(cb, callId, AlphaIpcContract.FAIL_ROUTE_REFUSED, "Route not permitted for " + callingPkg);
                 return;
             }
+            Log.i(TAG, "request caller=" + callingPkg + " method=" + method + " path=" + path);
             String owner = ownerKey(callingPkg, Binder.getCallingPid());
             ioWorkers.execute(() -> executeRequest(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
         }
@@ -134,6 +138,7 @@ public final class AlphaAgentBrokerService extends Service {
                 notifyStreamEnd(cb, callId, "failed", AlphaIpcContract.FAIL_ROUTE_REFUSED);
                 return;
             }
+            Log.i(TAG, "requestStream caller=" + callingPkg + " method=" + method + " path=" + path);
             String owner = ownerKey(callingPkg, Binder.getCallingPid());
             ioWorkers.execute(() -> executeStream(owner, callId, method, path, inlineBody, bodyFd, headersJson, cb));
         }
@@ -207,7 +212,13 @@ public final class AlphaAgentBrokerService extends Service {
         }
     };
 
+    @Override public void onCreate() {
+        super.onCreate();
+        policy = AlphaSuitePolicyLoader.load(this);
+    }
+
     @Override public IBinder onBind(Intent intent) {
+        Log.i(TAG, "onBind action=" + (intent == null ? "" : intent.getAction()));
         return binder;
     }
 

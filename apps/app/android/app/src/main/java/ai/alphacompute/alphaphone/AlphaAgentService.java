@@ -1,6 +1,7 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/platform/adoption.md, "The earlier store is brought in only for the account that signed in to the earlier Alpha"; spec/app/settings/preferences.md, "The agent is launched allowed to change Gmail and Calendar exactly as the phone last read or saved, allowed neither once it could not read them, and Alpha says nothing of it before the first answer"
 package ai.alphacompute.alphaphone;
 
+import ai.alphacompute.alphaphone.overlay.AlphaControlRuntimeBridge;
 import ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause;
 import ai.eliza.os.agent.AgentConfig;
 import ai.eliza.os.agent.AgentCredentials;
@@ -38,6 +39,11 @@ public final class AlphaAgentService extends AgentService {
     } catch (Exception unavailable) {
       return null;
     }
+  }
+
+  @Override public void onCreate() {
+    super.onCreate();
+    AlphaControlRuntimeBridge.attach(this);
   }
 
   @Override protected void configureLaunch(Map<String, String> variables) {
@@ -81,6 +87,7 @@ public final class AlphaAgentService extends AgentService {
   }
 
   @Override public void onDestroy() {
+    AlphaControlRuntimeBridge.detach();
     SpeechHost stopped;
     synchronized (speechLock) {
       retiring = true;

@@ -57,7 +57,7 @@ public final class AlphaContextRegistryService extends Service {
     private static final Object STATE_LOCK = new Object();
     private static volatile ActiveContext currentContext;
 
-    private final AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+    private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
     private final RemoteCallbackList<IAlphaContextObserver> observers = new RemoteCallbackList<>();
 
     private final IAlphaContextRegistry.Stub binder = new IAlphaContextRegistry.Stub() {
@@ -157,6 +157,11 @@ public final class AlphaContextRegistryService extends Service {
                 currentContext = null;
             }
         }
+    }
+
+    @Override public void onCreate() {
+        super.onCreate();
+        policy = AlphaSuitePolicyLoader.load(this);
     }
 
     @Override public IBinder onBind(Intent intent) {

@@ -13,6 +13,7 @@ import { barHeight, edge, swipe } from "../gen/app__shell__gestures.ts";
 import { useMachine as usePage } from "../gen/app__update__page.react.ts";
 import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
+import { OverlayControlBanner } from "./control/ControlBanner.tsx";
 import { addLayerAt } from "./home/addHome.vibe";
 import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
 import { finishThinAppTask, watchAppSurface, watchOverlaySurface } from "./platform/contextBridge.vibe";
@@ -245,6 +246,7 @@ function OverlaySurface({ alpha }: { readonly alpha: Alpha }) {
           {alpha.slot("assistant")}
         </div>
         <div data-alpha-top-alerts="" className="pointer-events-none fixed inset-x-0 top-[var(--alpha-safe-top)] z-alert mx-auto flex max-w-103 flex-col gap-2 px-3 pt-2 *:pointer-events-auto">
+          <OverlayControlBanner alpha={alpha} />
           {alpha.slot("overlay")}
         </div>
         {alpha.slot("notice")}

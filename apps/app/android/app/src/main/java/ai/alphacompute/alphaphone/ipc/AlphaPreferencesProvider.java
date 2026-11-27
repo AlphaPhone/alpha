@@ -11,18 +11,21 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
+import android.util.Log;
 import java.nio.charset.StandardCharsets;
 
 /** Signature-protected ContentProvider synchronizing allowlisted non-secret preferences across AlphaCore and thin apps. */
 public final class AlphaPreferencesProvider extends ContentProvider {
+    private static final String TAG = "AlphaPreferencesProvider";
     private static final String PREFS_NAME = "alpha-shared-preferences";
     private static final String APPEARANCE_PREFS = "alpha-appearance";
     private static final String TEXT_SCALE_INT_KEY = "text-scale-percent";
     private static final int MAX_PREF_VALUE_BYTES = 16_384;
 
-    private final AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
+    private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
 
     @Override public boolean onCreate() {
+        policy = AlphaSuitePolicyLoader.load(getContext());
         return true;
     }
 
@@ -33,6 +36,7 @@ public final class AlphaPreferencesProvider extends ContentProvider {
         if (callingPkg == null) {
             throw new SecurityException("Unauthorized AlphaPreferences caller UID " + Binder.getCallingUid());
         }
+        Log.i(TAG, "call caller=" + callingPkg + " method=" + (method == null ? "" : method) + " key=" + (arg == null ? "" : arg));
         SharedPreferences store = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         return switch (method == null ? "" : method) {
             case AlphaIpcContract.PREF_METHOD_GET -> handleGet(context, store, arg);

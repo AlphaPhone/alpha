@@ -180,6 +180,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
+  registerPlugin(ai.alphacompute.alphaphone.overlay.AlphaOverlayHostPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
   telephonyAdmitted = image;
   if (image) {

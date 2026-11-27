@@ -51,7 +51,8 @@
   ],
   "modules": [
     { "name": "capacitor-android", "source": { "root": "dependencies", "path": "@capacitor/android/capacitor" } },
-    { "name": "alpha-ipc", "source": { "root": "consumer", "path": "android/alpha-ipc" }, "appDependency": true }
+    { "name": "alpha-ipc", "source": { "root": "consumer", "path": "android/alpha-ipc" }, "appDependency": true },
+    { "name": "alpha-control", "source": { "root": "consumer", "path": "android/alpha-control" }, "appDependency": true }
   ],
   "dependencies": [
     { "configuration": "implementation", "module": "androidx.appcompat:appcompat", "toolchainVersion": "androidxAppCompatVersion" },
