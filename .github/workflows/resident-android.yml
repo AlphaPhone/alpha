@@ -98,16 +98,16 @@ jobs:
         with:
           job: resident-android
           verification: "false"
-      - name: Verify zero Bun, signer record, and notice freshness
+      - name: Verify zero Bun and signer record
         run: |
           pnpm no-bun
           python3 scripts/ci/app_update_producer.py signer-record apps/app/aosp/signing/release-signer.json
-          pnpm --filter @repo/app licences --check
       - name: Prove offline pnpm workspace graph from restored store
         run: pnpm install --frozen-lockfile --offline
-      - name: Prepare pinned Eliza checkout and verify Android inputs
+      - name: Prepare pinned Eliza checkout and verify Android inputs and notices
         run: |
           pnpm eliza
+          pnpm --filter @repo/app licences --check
           pnpm --filter @repo/app android inputs
       - name: Build and verify the resident launcher candidate APKs
         env:
