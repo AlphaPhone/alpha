@@ -6,11 +6,11 @@ import type { Actor, Effect as Out, Event, Result } from "../../gen/app__calenda
 import type * as Notices from "../../gen/app__notices__toasts.effect.vibe"
 import { type Said, say } from "../notices/index.vibe"
 import { Agent, ask, attemptedWith } from "../platform/index.vibe"
-import { type Attempts, type Job, Time, answer, contained, following, hearing, reacting, run, started, together } from "../runtime/index.vibe"
+import { type Attempts, type Job, Time, answer, contained, following, reacting, run, started, together } from "../runtime/index.vibe"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import { type AgentCalendar, readsRequestsAgain, refreshes } from "../../gen/app__calendar__agent.ts"
 import { asked } from "./asked.ts"
-import { calendarInFront, readFeed, versionOf } from "./calendar.vibe"
+import { readFeed, versionOf } from "./calendar.vibe"
 import { Calendars } from "./owner.vibe"
 import { type Request, complete, decodeRequest } from "./requests.ts"
 import type { Row } from "./shown.ts"
@@ -222,7 +222,7 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
   if (oldest === undefined) return
   try nameSource()
   const rows = try rowsFor(oldest, cached)
-  if (!sameCard(try machine.get(), s)) return
+  if (!sameCard(try machine.get(), s) || reqStore.find(oldest.filing)?.id !== oldest.id) return
   try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
   const row = rows.find((candidate) => candidate.key === oldest.eventId) ?? shown.find(id)
@@ -296,8 +296,18 @@ const relisted = started(effect {
 const applied = following(Changes.Machine, (a) => (a.stage === "Idle" && refreshes(a.result) ? a.write.id : 0), View.Machine,
   (write): View.Event | undefined => (write === 0 ? undefined : { type: "changeCommitted" }))
 
-// spec/app/calendar/agent.md, "Back, a hidden page or leaving Calendar retires a card still waiting; the request stays the agent's"
-const retired = hearing(Stream.filter(calendarInFront, (front) => !front), Changes.Machine, (): Event => ({ type: "retire" }), "Owner")
+// spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
+/** Each change of Calendar's owner, which drops the requests Calendar read: a card still waiting for one ends unsent, which reads the list again, and with none waiting the list is read again. */
+const reowned = started(effect {
+  const view = try View.Machine
+  const machine = try Changes.Machine
+  const reqStore = try Requests
+  try Stream.runForEach(Stream.drop(Stream.changes(Stream.map(view.changes, (state) => state.owner)), 1), effect () => {
+    const s = try machine.get()
+    if (s.stage === "Awaiting" && reqStore.find(s.filing) === undefined) try contained(machine.send({ type: "withdraw" }, "Agent"), "ending a card whose request a changed owner dropped")
+    else try listRequests()
+  })
+}, "reading the agent's requests again for a changed owner")
 
 /** The agent's changes to the owner's Google Calendar: kept across restarts, which end what was in flight. */
-export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, relisted, restored, expiring, toldAskAlpha, retired)
+export const changes = together(reacting(Changes, { keep: 1, open: [{ type: "restart" }, world], carry }), applied, listing, relisted, restored, expiring, toldAskAlpha, reowned)

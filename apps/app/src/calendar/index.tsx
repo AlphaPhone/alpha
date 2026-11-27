@@ -1,10 +1,9 @@
-// spec/app/calendar/index.md, "Back closes one layer at a time: the form, the delete review, the event, then the overlay"; spec/app/calendar/agent.md, "Back, a hidden page or leaving Calendar retires a card still waiting; the request stays the agent's"; spec/app/calendar/editor.md, "Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone"; spec/app/calendar/deletions.md, "Delete asks first, over the open event: what goes, from which calendar, when, which occurrences, and that no guest is told"
+// spec/app/calendar/index.md, "Back closes one layer at a time: the form, the delete review, the event, then the overlay"; spec/app/calendar/editor.md, "Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone"; spec/app/calendar/deletions.md, "Delete asks first, over the open event: what goes, from which calendar, when, which occurrences, and that no guest is told"
 import { reviewedReadsMachine } from "@elizaos/plugin-calendar-client";
 import { Effect, Layer } from "effect";
 import * as Actions from "../../gen/app__calendar__actions.effect.vibe";
 import * as View from "../../gen/app__calendar.effect.vibe";
 import { backCloses } from "../../gen/app__calendar.ts";
-import * as Changes from "../../gen/app__calendar__agent.effect.vibe";
 import * as Held from "../../gen/app__calendar__deletions.effect.vibe";
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe";
 import * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe";
@@ -21,7 +20,7 @@ import { reopening } from "./reopen.vibe";
 import { stores } from "./stores.vibe";
 import { selecting } from "./subject.vibe";
 
-/** Back inside Calendar: any reopen review first, then the layer on top as the view orders them; with none, a card still waiting is retired. */
+/** Back inside Calendar: any reopen review first, then the layer on top as the view orders them; a card still waiting stays. */
 const back = Effect.gen(function* () {
   const dismiss = yield* Reopen.Machine;
   const review = yield* dismiss.get();
@@ -31,7 +30,6 @@ const back = Effect.gen(function* () {
   }
   const form = yield* Editor.Machine;
   const view = yield* View.Machine;
-  const agent = yield* Changes.Machine;
   const layer = backCloses(yield* view.get());
   const step: Effect.Effect<unknown, unknown> =
     layer === "BackForm" ? Effect.catch(form.send({ type: "callOff" }), () => form.send({ type: "close" }))
@@ -39,7 +37,7 @@ const back = Effect.gen(function* () {
     : layer === "BackEvent" ? view.send({ type: "closeEvent" })
     : layer === "BackReminder" ? view.send({ type: "closeReminder" })
     : layer === "BackOverlay" ? view.send({ type: "closeOverlay" })
-    : Effect.catch(form.send({ type: "callOff" }), () => agent.send({ type: "retire" }, "Owner"));
+    : form.send({ type: "callOff" });
   return yield* Effect.match(step, { onFailure: () => layer === "BackForm", onSuccess: () => true });
 });
 
