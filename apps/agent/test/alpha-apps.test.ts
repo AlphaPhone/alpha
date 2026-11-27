@@ -871,14 +871,22 @@ describe("Bounded external app control in the Alpha product plugin", () => {
     expect(granted.status).toBe(200);
 
     const openFirefox = await action.handler(runtime, emptyMessage("Open example.org in Firefox"), emptyState, {
-      parameters: { op: { type: "app_open_url", url: "https://example.org", packageName: "org.mozilla.firefox" } },
+      parameters: { op: { type: "app_open_url", url: "https://example.org" } },
     });
     expect(openFirefox?.success).toBe(true);
     const next1 = await callRoute(routes, "GET", "/api/alpha-control/next");
-    const op1 = next1.body.op as { opId: number; boundSnapId: number };
+    const op1 = next1.body.op as { opId: number; boundSnapId: number; expectedPackage: string; op: { type: string; packageName?: string } };
     expect(op1.boundSnapId).toBe(0);
+    expect(op1.expectedPackage).toBe("org.mozilla.firefox");
+    expect(op1.op.packageName).toBe("org.mozilla.firefox");
     const receipt1 = await callRoute(routes, "POST", "/api/alpha-control/receipt", { body: { opId: op1.opId, outcome: "done" } });
     expect(receipt1.status).toBe(200);
+
+    const openUnleasedBrowser = await action.handler(runtime, emptyMessage("Open in Chrome"), emptyState, {
+      parameters: { op: { type: "app_open_url", url: "https://example.org", packageName: "com.android.chrome" } },
+    });
+    expect(openUnleasedBrowser?.success).toBe(false);
+    expect((openUnleasedBrowser?.data as { code: string }).code).toBe("LEASE_REQUIRED");
 
     const firefoxObs = await callRoute(routes, "POST", "/api/alpha-control/observe", {
       body: {

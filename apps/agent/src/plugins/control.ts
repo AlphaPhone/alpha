@@ -495,13 +495,14 @@ function parseObservedNode(input: unknown): ObservedUiNode | undefined {
   };
 }
 
-function opTargetPackage(op: ControlOpPayload, foregroundPackage: string): string {
+function opTargetPackage(op: ControlOpPayload, foregroundPackage: string, activeLeasePackage: string): string {
   switch (op.type) {
     case "app_launch_package":
       return op.packageName;
     case "app_open_url":
+      return op.packageName ?? (activeLeasePackage !== "" ? activeLeasePackage : foregroundPackage);
     case "app_functions_discover":
-      return op.packageName ?? foregroundPackage;
+      return op.packageName ?? (foregroundPackage !== "" ? foregroundPackage : activeLeasePackage);
     case "ui_read_tree":
     case "ui_capture_screen":
       return foregroundPackage;
@@ -709,7 +710,8 @@ export class AlphaControlCoordinator {
     if (this.pending !== null) return { ok: false, code: "OPERATION_IN_FLIGHT", status: 409 };
     if (this.foreground.protection !== "ScreenClear") return { ok: false, code: "PROTECTED_SCREEN", status: 409 };
     if (this.foreground.targetKind === "BlockedApp") return { ok: false, code: "BLOCKED_PACKAGE", status: 403 };
-    const targetPackage = opTargetPackage(op, this.foreground.packageName);
+    const activeLeasePackage = this.lease.status === "LeaseActive" ? this.lease.packageName : "";
+    const targetPackage = opTargetPackage(op, this.foreground.packageName, activeLeasePackage);
     if (!isValidPackageName(targetPackage) || isBlockedTarget(targetPackage)) {
       return { ok: false, code: "BLOCKED_PACKAGE", status: 403 };
     }
@@ -740,6 +742,9 @@ export class AlphaControlCoordinator {
         }
       }
     }
+    const resolvedOp: ControlOpPayload = op.type === "app_open_url" && op.packageName === undefined
+      ? { ...op, packageName: targetPackage }
+      : op;
     this.lastOpId += 1;
     this.lease = { ...this.lease, usedOps: this.lease.usedOps + 1 };
     const pending: PendingControlOp = {
@@ -747,7 +752,7 @@ export class AlphaControlCoordinator {
       leaseId: this.lease.leaseId,
       boundSnapId,
       expectedPackage: targetPackage,
-      op,
+      op: resolvedOp,
       createdAtMs: nowMs,
     };
     this.pending = pending;

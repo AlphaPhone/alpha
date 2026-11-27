@@ -9,6 +9,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import java.io.ByteArrayOutputStream;
@@ -74,6 +75,20 @@ public final class AlphaControlBridgeClient {
             binderRef.set(null);
             capabilitiesRef.set(0);
         }
+
+        @Override
+        public void onBindingDied(ComponentName name) {
+            binderRef.set(null);
+            capabilitiesRef.set(0);
+            connectLatch.countDown();
+        }
+
+        @Override
+        public void onNullBinding(ComponentName name) {
+            binderRef.set(null);
+            capabilitiesRef.set(0);
+            connectLatch.countDown();
+        }
     };
 
     /** Create a bridge client scoped to the application context. */
@@ -96,25 +111,35 @@ public final class AlphaControlBridgeClient {
         }
     }
 
-    /** Attempt to verify and bind the Tier-2 bridge, returning true if connected within {@code timeoutMs}. */
+    /** Attempt to verify and bind the Tier-2 bridge, skipping blocking await if called on the main thread. */
     public synchronized boolean connect(long timeoutMs) {
         if (isConnected()) return true;
         if (!isVerifiedPlatformBridgeInstalled(appContext.getPackageManager())) return false;
-        connectLatch = new CountDownLatch(1);
-        Intent intent = new Intent();
-        intent.setComponent(new ComponentName(BRIDGE_PACKAGE, BRIDGE_CLASS));
-        try {
-            bound = appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+        if (!bound) {
+            connectLatch = new CountDownLatch(1);
+            Intent intent = new Intent();
+            intent.setComponent(new ComponentName(BRIDGE_PACKAGE, BRIDGE_CLASS));
+            try {
+                bound = appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE);
+            } catch (SecurityException refused) {
+                bound = false;
+                return false;
+            }
             if (!bound) return false;
+        }
+        if (isMainThread()) return isConnected();
+        try {
             connectLatch.await(Math.max(50L, timeoutMs), TimeUnit.MILLISECONDS);
             return isConnected();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return false;
-        } catch (SecurityException refused) {
-            bound = false;
-            return false;
         }
+    }
+
+    private static boolean isMainThread() {
+        Looper main = Looper.getMainLooper();
+        return main != null && Looper.myLooper() == main;
     }
 
     /** Disconnect from the bridge if bound. */

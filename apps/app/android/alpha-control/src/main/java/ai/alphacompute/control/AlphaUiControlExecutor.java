@@ -1,8 +1,10 @@
 // spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"; spec/agent/index.md, "Only Android's native control executor can post UI observations, poll queued operations, submit receipts, or fire native interrupts"
 package ai.alphacompute.control;
 
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
@@ -12,9 +14,14 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -59,46 +66,95 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         }
     }
 
+    interface OperationDispatcher {
+        StepOutcome dispatch(JSONObject op, int boundSnapId, String expectedPackage);
+    }
+
     private static final String ROUTE_OBSERVE = "/api/alpha-control/observe";
     private static final String ROUTE_NEXT = "/api/alpha-control/next";
     private static final String ROUTE_RECEIPT = "/api/alpha-control/receipt";
     private static final String ROUTE_INTERRUPT = "/api/alpha-control/interrupt";
+    private static final int MAX_TRACKED_OPS = 64;
 
     private final Context appContext;
     private final NativeAgentTransport transport;
     private final AlphaControlBridgeClient bridgeClient;
-    private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
+    private final OperationDispatcher dispatcher;
+    private final Object workerLock = new Object();
+    private final Object opStateLock = new Object();
+    private final Set<Integer> inFlightOpIds = new HashSet<>();
+    private final Map<Integer, StepOutcome> completedOutcomes = new LinkedHashMap<Integer, StepOutcome>(32, 0.75f, false) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Integer, StepOutcome> eldest) {
+            return size() > MAX_TRACKED_OPS;
+        }
+    };
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger lastAgentSnapshotId = new AtomicInteger(0);
+    private ScheduledExecutorService worker;
     private volatile String lastObservedPackage = "";
     private volatile ScheduledFuture<?> pollTask;
 
     /** Construct a native executor backed by the supplied resident-agent transport. */
     public AlphaUiControlExecutor(Context context, NativeAgentTransport transport) {
+        this(context, transport, null);
+    }
+
+    AlphaUiControlExecutor(Context context, NativeAgentTransport transport, OperationDispatcher customDispatcher) {
         this.appContext = context == null ? null : context.getApplicationContext();
         this.transport = transport;
         this.bridgeClient = this.appContext == null ? null : new AlphaControlBridgeClient(this.appContext);
+        this.dispatcher = customDispatcher != null ? customDispatcher : this::executeOperation;
     }
 
     /** Start polling the resident agent and listening to AlphaAccessibilityService. */
     public void start() {
         if (!running.compareAndSet(false, true)) return;
+        ScheduledExecutorService activeWorker;
+        synchronized (workerLock) {
+            if (worker == null || worker.isShutdown()) {
+                worker = newDaemonWorker();
+            }
+            activeWorker = worker;
+        }
         AlphaAccessibilityService.setControlListener(this);
         if (bridgeClient != null) {
-            bridgeClient.connect(500L);
+            submitOn(activeWorker, () -> bridgeClient.connect(500L));
         }
-        pollTask = worker.scheduleWithFixedDelay(this::pollOnceSafe, 250L, 400L, TimeUnit.MILLISECONDS);
+        try {
+            pollTask = activeWorker.scheduleWithFixedDelay(this::pollOnceSafe, 250L, 400L, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException ignored) {
+            running.set(false);
+        }
     }
 
-    /** Stop polling and disconnect any bound Tier-2 platform bridge. */
+    /** Stop polling, disconnect any bound Tier-2 platform bridge, and shut down the daemon worker cleanly. */
     public void stop() {
         if (!running.compareAndSet(true, false)) return;
         ScheduledFuture<?> task = pollTask;
+        pollTask = null;
         if (task != null) task.cancel(true);
         AlphaAccessibilityService.setControlListener(null);
         if (bridgeClient != null) {
             bridgeClient.disconnect();
         }
+        ScheduledExecutorService toShutdown;
+        synchronized (workerLock) {
+            toShutdown = worker;
+            worker = null;
+        }
+        if (toShutdown != null) {
+            toShutdown.shutdownNow();
+        }
+        synchronized (opStateLock) {
+            inFlightOpIds.clear();
+            completedOutcomes.clear();
+        }
+    }
+
+    /** Permanently tear down the executor and its daemon worker thread. */
+    public void shutdown() {
+        stop();
     }
 
     /** Compute the current Tier-1 / Tier-2 control tier based on connected native services. */
@@ -133,24 +189,26 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
     @Override
     public void onServiceStateChanged(boolean connected) {
         if (!connected) {
-            postInterrupt("service_disabled", lastObservedPackage);
+            String pkg = lastObservedPackage;
+            submitWorker(() -> postInterrupt("service_disabled", pkg));
             return;
         }
-        worker.execute(() -> pushObservation(false, 80, null));
+        submitWorker(() -> pushObservation(false, 80, null));
     }
 
     @Override
     public void onForegroundChanged(String packageName, String activityName) {
+        lastObservedPackage = packageName == null ? "" : packageName;
         if (AlphaControlPolicy.isBlockedTarget(packageName, activityName)) {
-            postInterrupt("blocked_package", packageName);
+            submitWorker(() -> postInterrupt("blocked_package", packageName));
             return;
         }
-        worker.execute(() -> pushObservation(false, 80, null));
+        submitWorker(() -> pushObservation(false, 80, null));
     }
 
     @Override
     public void onPhysicalPreemption(String packageName) {
-        postInterrupt("user_touch", packageName);
+        submitWorker(() -> postInterrupt("user_touch", packageName));
     }
 
     /** Push a fresh observation to the resident agent and return the assigned monotonic snapshotId. */
@@ -208,7 +266,7 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         return 0;
     }
 
-    /** Poll `/api/alpha-control/next` once and execute at most one pending operation, posting its receipt. */
+    /** Poll `/api/alpha-control/next` once, execute each opId at most once, and post or retry its receipt. */
     public void pollOnce() {
         TransportResponse response = sendJson("GET", ROUTE_NEXT, null);
         if (response == null || response.status != 200 || response.body.length == 0) return;
@@ -222,19 +280,35 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             String expectedPackage = pending.optString("expectedPackage", "");
             JSONObject op = pending.optJSONObject("op");
             if (opId <= 0 || op == null) return;
+
+            StepOutcome cachedOutcome;
+            synchronized (opStateLock) {
+                cachedOutcome = completedOutcomes.get(opId);
+                if (cachedOutcome == null && !inFlightOpIds.add(opId)) {
+                    return;
+                }
+            }
+            if (cachedOutcome != null) {
+                postReceipt(opId, cachedOutcome);
+                return;
+            }
+
             AlphaAccessibilityService.setActuationInProgress(true);
-            StepOutcome outcome;
+            StepOutcome outcome = null;
             try {
-                outcome = executeOperation(op, boundSnapId, expectedPackage);
+                outcome = dispatcher.dispatch(op, boundSnapId, expectedPackage);
+            } catch (RuntimeException failed) {
+                outcome = new StepOutcome("refused", refusalCodeForException(failed), null);
             } finally {
                 AlphaAccessibilityService.setActuationInProgress(false);
+                synchronized (opStateLock) {
+                    inFlightOpIds.remove(opId);
+                    if (outcome != null) {
+                        completedOutcomes.put(opId, outcome);
+                    }
+                }
             }
-            JSONObject receipt = new JSONObject();
-            receipt.put("opId", opId);
-            receipt.put("outcome", outcome.outcome);
-            if (outcome.refusalCode != null) receipt.put("refusalCode", outcome.refusalCode);
-            if (outcome.result != null) receipt.put("result", outcome.result);
-            sendJson("POST", ROUTE_RECEIPT, receipt);
+            postReceipt(opId, outcome);
         } catch (JSONException ignored) {
             return;
         }
@@ -254,9 +328,9 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         }
         switch (type) {
             case "app_launch_package":
-                return executeLaunchPackage(op.optString("packageName", ""));
+                return executeLaunchPackage(op.optString("packageName", ""), expectedPackage);
             case "app_open_url":
-                return executeOpenUrl(op.optString("url", ""), op.optString("packageName", ""));
+                return executeOpenUrl(op.optString("url", ""), op.optString("packageName", ""), expectedPackage);
             case "ui_read_tree":
                 return executeReadTree(op.optBoolean("includeNonInteractive", false), op.optInt("maxNodes", 120));
             case "ui_capture_screen":
@@ -294,31 +368,53 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         }
     }
 
-    private StepOutcome executeLaunchPackage(String packageName) {
-        if (!AlphaControlPolicy.isValidPackageName(packageName) || AlphaControlPolicy.isBlockedTarget(packageName, null)) {
+    private StepOutcome executeLaunchPackage(String packageName, String expectedPackage) {
+        String explicitPkg = packageName == null ? "" : packageName.trim();
+        String leasedPkg = expectedPackage == null ? "" : expectedPackage.trim();
+        if (!explicitPkg.isEmpty() && !leasedPkg.isEmpty() && !explicitPkg.equals(leasedPkg)) {
+            return new StepOutcome("refused", "PACKAGE_MISMATCH", null);
+        }
+        String targetPkg = !explicitPkg.isEmpty() ? explicitPkg : leasedPkg;
+        if (!AlphaControlPolicy.isValidPackageName(targetPkg) || AlphaControlPolicy.isBlockedTarget(targetPkg, null)) {
             return new StepOutcome("refused", "BLOCKED_PACKAGE", null);
         }
         if (appContext == null) return new StepOutcome("refused", "CONTEXT_UNAVAILABLE", null);
-        Intent intent = appContext.getPackageManager().getLaunchIntentForPackage(packageName);
+        Intent intent = appContext.getPackageManager().getLaunchIntentForPackage(targetPkg);
         if (intent == null) return new StepOutcome("refused", "APP_NOT_FOUND", null);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        appContext.startActivity(intent);
-        return new StepOutcome("done", null, null);
+        try {
+            appContext.startActivity(intent);
+            return new StepOutcome("done", null, null);
+        } catch (ActivityNotFoundException missing) {
+            return new StepOutcome("refused", "APP_NOT_FOUND", null);
+        } catch (SecurityException denied) {
+            return new StepOutcome("refused", "SECURITY_EXCEPTION", null);
+        }
     }
 
-    private StepOutcome executeOpenUrl(String url, String packageName) {
+    private StepOutcome executeOpenUrl(String url, String packageName, String expectedPackage) {
         if (!AlphaControlPolicy.isValidHttpsUrl(url)) return new StepOutcome("refused", "INVALID_URL", null);
+        String explicitPkg = packageName == null ? "" : packageName.trim();
+        String leasedPkg = expectedPackage == null ? "" : expectedPackage.trim();
+        if (!explicitPkg.isEmpty() && !leasedPkg.isEmpty() && !explicitPkg.equals(leasedPkg)) {
+            return new StepOutcome("refused", "PACKAGE_MISMATCH", null);
+        }
+        String targetPkg = !explicitPkg.isEmpty() ? explicitPkg : leasedPkg;
+        if (targetPkg.isEmpty() || !AlphaControlPolicy.isValidPackageName(targetPkg) || AlphaControlPolicy.isBlockedTarget(targetPkg, null)) {
+            return new StepOutcome("refused", "BLOCKED_PACKAGE", null);
+        }
         if (appContext == null) return new StepOutcome("refused", "CONTEXT_UNAVAILABLE", null);
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (packageName != null && !packageName.isEmpty()) {
-            if (!AlphaControlPolicy.isValidPackageName(packageName) || AlphaControlPolicy.isBlockedTarget(packageName, null)) {
-                return new StepOutcome("refused", "BLOCKED_PACKAGE", null);
-            }
-            intent.setPackage(packageName);
+        intent.setPackage(targetPkg);
+        try {
+            appContext.startActivity(intent);
+            return new StepOutcome("done", null, null);
+        } catch (ActivityNotFoundException missing) {
+            return new StepOutcome("refused", "APP_NOT_FOUND", null);
+        } catch (SecurityException denied) {
+            return new StepOutcome("refused", "SECURITY_EXCEPTION", null);
         }
-        appContext.startActivity(intent);
-        return new StepOutcome("done", null, null);
     }
 
     private StepOutcome executeReadTree(boolean includeNonInteractive, int maxNodes) {
@@ -335,8 +431,9 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         if (bridgeClient != null && bridgeClient.supportsCaptureDisplay()) {
             byte[] jpeg = bridgeClient.captureDisplayBytes(Display.DEFAULT_DISPLAY, maxWidth, quality);
             if (jpeg != null && jpeg.length > 0) {
+                int[] dims = decodeJpegDimensions(jpeg, maxWidth);
                 String b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP);
-                int snapId = pushObservation(false, 120, new AlphaAccessibilityService.ScreenshotCapture(b64, maxWidth, 0, null));
+                int snapId = pushObservation(false, 120, new AlphaAccessibilityService.ScreenshotCapture(b64, dims[0], dims[1], null));
                 return snapId > 0
                     ? new StepOutcome("done", null, null)
                     : new StepOutcome("refused", "OBSERVE_FAILED", null);
@@ -467,6 +564,61 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             return appContext.getSystemService(managerClass) != null;
         } catch (ClassNotFoundException | SecurityException unavailable) {
             return false;
+        }
+    }
+
+    private void postReceipt(int opId, StepOutcome outcome) {
+        if (outcome == null) return;
+        try {
+            JSONObject receipt = new JSONObject();
+            receipt.put("opId", opId);
+            receipt.put("outcome", outcome.outcome);
+            if (outcome.refusalCode != null) receipt.put("refusalCode", outcome.refusalCode);
+            if (outcome.result != null) receipt.put("result", outcome.result);
+            sendJson("POST", ROUTE_RECEIPT, receipt);
+        } catch (JSONException ignored) {
+            return;
+        }
+    }
+
+    private static String refusalCodeForException(RuntimeException failed) {
+        if (failed instanceof ActivityNotFoundException) return "APP_NOT_FOUND";
+        if (failed instanceof SecurityException) return "SECURITY_EXCEPTION";
+        return "EXECUTION_FAILED";
+    }
+
+    private static int[] decodeJpegDimensions(byte[] jpeg, int fallbackWidth) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length, bounds);
+        int width = bounds.outWidth > 0 ? bounds.outWidth : fallbackWidth;
+        int height = Math.max(0, bounds.outHeight);
+        return new int[] { width, height };
+    }
+
+    private static ScheduledExecutorService newDaemonWorker() {
+        return Executors.newSingleThreadScheduledExecutor((runnable) -> {
+            Thread thread = new Thread(runnable, "alpha-control-worker");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private void submitWorker(Runnable task) {
+        ScheduledExecutorService activeWorker;
+        synchronized (workerLock) {
+            activeWorker = worker;
+        }
+        if (activeWorker != null && !activeWorker.isShutdown()) {
+            submitOn(activeWorker, task);
+        }
+    }
+
+    private static void submitOn(ScheduledExecutorService target, Runnable task) {
+        try {
+            target.execute(task);
+        } catch (RejectedExecutionException ignored) {
+            return;
         }
     }
 

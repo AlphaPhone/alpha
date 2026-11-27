@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 import org.junit.Test;
 
@@ -52,9 +53,26 @@ public final class AlphaControlPolicyTest {
             "private tab must classify PrivateTab"
         );
         check(
+            AlphaControlPolicy.classifyScreenProtection(false, false, true, false, false, true)
+                == AlphaControlPolicy.ScreenProtection.SensitiveView,
+            "sensitive focused input must classify SensitiveView"
+        );
+        check(
             AlphaControlPolicy.classifyScreenProtection(false, false, true, false, false, false)
                 == AlphaControlPolicy.ScreenProtection.ScreenClear,
             "clear unlocked screen must classify ScreenClear"
+        );
+        check(
+            "".equals(AlphaAccessibilityService.resolveNextActivity("com.android.vending", "org.mozilla.firefox", "PurchaseActivity", null)),
+            "package transition without class name must clear stale activeActivity"
+        );
+        check(
+            "HomeActivity".equals(AlphaAccessibilityService.resolveNextActivity("org.mozilla.firefox", "org.mozilla.firefox", "HomeActivity", null)),
+            "same-package event without class name preserves activeActivity"
+        );
+        check(
+            "SettingsActivity".equals(AlphaAccessibilityService.resolveNextActivity("org.mozilla.firefox", "com.android.settings", "HomeActivity", "SettingsActivity")),
+            "explicit class name updates activeActivity"
         );
 
         check(!AlphaControlPolicy.isScreenshotAllowed(1_000L, 1_500L, false), "Tier-1 screenshot must throttle under 1100ms");
@@ -96,9 +114,120 @@ public final class AlphaControlPolicyTest {
         );
         check("refused".equals(stale.outcome) && "STALE_SNAPSHOT".equals(stale.refusalCode), "stale snapshot refused");
 
+        AlphaUiControlExecutor.StepOutcome openUrlUnleased = executor.executeOperation(
+            new JSONObject().put("type", "app_open_url").put("url", "https://example.org"),
+            0,
+            ""
+        );
+        check("refused".equals(openUrlUnleased.outcome) && "BLOCKED_PACKAGE".equals(openUrlUnleased.refusalCode), "open_url without leased package refused");
+
+        AlphaUiControlExecutor.StepOutcome openUrlMismatch = executor.executeOperation(
+            new JSONObject().put("type", "app_open_url").put("url", "https://example.org").put("packageName", "com.android.chrome"),
+            0,
+            "org.mozilla.firefox"
+        );
+        check("refused".equals(openUrlMismatch.outcome) && "PACKAGE_MISMATCH".equals(openUrlMismatch.refusalCode), "open_url mismatched package refused");
+
+        AlphaUiControlExecutor.StepOutcome openUrlDefaultedNoContext = executor.executeOperation(
+            new JSONObject().put("type", "app_open_url").put("url", "https://example.org"),
+            0,
+            "org.mozilla.firefox"
+        );
+        check("refused".equals(openUrlDefaultedNoContext.outcome) && "CONTEXT_UNAVAILABLE".equals(openUrlDefaultedNoContext.refusalCode), "open_url defaults targetPkg to expectedPackage");
+
         executor.pollOnce();
         check(postedPaths.contains("GET /api/alpha-control/next"), "executor polled next route");
         check(postedPaths.contains("POST /api/alpha-control/receipt"), "executor posted refusal receipt");
+    }
+
+    /** Verify runtime exceptions always emit a refused receipt, opIds never execute twice, and worker shuts down cleanly. */
+    @Test
+    public void testExecutorExceptionReceiptDeduplicationAndLifecycle() throws Exception {
+        List<JSONObject> receipts = new ArrayList<>();
+        AtomicInteger receiptAttempts = new AtomicInteger(0);
+        AtomicInteger execCount = new AtomicInteger(0);
+
+        AlphaUiControlExecutor.NativeAgentTransport retryTransport = (method, path, body) -> {
+            if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                String json = "{\"op\":{\"opId\":99,\"boundSnapId\":0,\"expectedPackage\":\"org.mozilla.firefox\",\"op\":{\"type\":\"app_open_url\",\"url\":\"https://example.org\"}}}";
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, json.getBytes(StandardCharsets.UTF_8)));
+            }
+            if ("POST".equals(method) && "/api/alpha-control/receipt".equals(path)) {
+                int attempt = receiptAttempts.incrementAndGet();
+                try {
+                    receipts.add(new JSONObject(new String(body, StandardCharsets.UTF_8)));
+                } catch (Exception failed) {
+                    throw new RuntimeException(failed);
+                }
+                int status = attempt == 1 ? 503 : 200;
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(status, "{}".getBytes(StandardCharsets.UTF_8)));
+            }
+            return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+        };
+
+        AlphaUiControlExecutor dedupExecutor = new AlphaUiControlExecutor(null, retryTransport, (op, snapId, expectedPkg) -> {
+            execCount.incrementAndGet();
+            return new AlphaUiControlExecutor.StepOutcome("done", null, null);
+        });
+        dedupExecutor.pollOnce();
+        dedupExecutor.pollOnce();
+        check(execCount.get() == 1, "transient receipt failure must not execute the same opId twice");
+        check(receipts.size() == 2, "second poll must retry posting the cached receipt");
+        check(receipts.get(0).getInt("opId") == 99 && "done".equals(receipts.get(0).getString("outcome")), "first receipt carries opId and outcome");
+        check(receipts.get(1).getInt("opId") == 99 && "done".equals(receipts.get(1).getString("outcome")), "retried receipt matches cached outcome");
+
+        List<JSONObject> errorReceipts = new ArrayList<>();
+        AlphaUiControlExecutor.NativeAgentTransport crashTransport = (method, path, body) -> {
+            if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                String json = "{\"op\":{\"opId\":100,\"boundSnapId\":0,\"expectedPackage\":\"org.mozilla.firefox\",\"op\":{\"type\":\"app_launch_package\",\"packageName\":\"org.mozilla.firefox\"}}}";
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, json.getBytes(StandardCharsets.UTF_8)));
+            }
+            if ("POST".equals(method) && "/api/alpha-control/receipt".equals(path)) {
+                try {
+                    errorReceipts.add(new JSONObject(new String(body, StandardCharsets.UTF_8)));
+                } catch (Exception failed) {
+                    throw new RuntimeException(failed);
+                }
+            }
+            return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+        };
+
+        AlphaUiControlExecutor crashExecutor = new AlphaUiControlExecutor(null, crashTransport, (op, snapId, expectedPkg) -> {
+            throw new SecurityException("denied");
+        });
+        crashExecutor.pollOnce();
+        check(errorReceipts.size() == 1, "uncaught RuntimeException must still emit a refused receipt");
+        check("refused".equals(errorReceipts.get(0).getString("outcome")), "exception receipt outcome must be refused");
+        check("SECURITY_EXCEPTION".equals(errorReceipts.get(0).getString("refusalCode")), "SecurityException maps to SECURITY_EXCEPTION refusalCode");
+
+        List<JSONObject> genericErrorReceipts = new ArrayList<>();
+        AlphaUiControlExecutor.NativeAgentTransport genericCrashTransport = (method, path, body) -> {
+            if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                String json = "{\"op\":{\"opId\":101,\"boundSnapId\":0,\"expectedPackage\":\"org.mozilla.firefox\",\"op\":{\"type\":\"app_launch_package\",\"packageName\":\"org.mozilla.firefox\"}}}";
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, json.getBytes(StandardCharsets.UTF_8)));
+            }
+            if ("POST".equals(method) && "/api/alpha-control/receipt".equals(path)) {
+                try {
+                    genericErrorReceipts.add(new JSONObject(new String(body, StandardCharsets.UTF_8)));
+                } catch (Exception failed) {
+                    throw new RuntimeException(failed);
+                }
+            }
+            return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+        };
+        AlphaUiControlExecutor genericCrashExecutor = new AlphaUiControlExecutor(null, genericCrashTransport, (op, snapId, expectedPkg) -> {
+            throw new IllegalStateException("boom");
+        });
+        genericCrashExecutor.pollOnce();
+        check(genericErrorReceipts.size() == 1, "generic RuntimeException emits refused receipt");
+        check("EXECUTION_FAILED".equals(genericErrorReceipts.get(0).getString("refusalCode")), "generic RuntimeException maps to EXECUTION_FAILED");
+
+        dedupExecutor.start();
+        dedupExecutor.stop();
+        dedupExecutor.pollOnce();
+        check(execCount.get() == 2, "stopping executor clears opId dedup cache for a fresh session");
+        dedupExecutor.start();
+        dedupExecutor.shutdown();
     }
 
     /** Standalone JVM entry point for fast verification without Gradle overhead. */
@@ -106,5 +235,6 @@ public final class AlphaControlPolicyTest {
         AlphaControlPolicyTest suite = new AlphaControlPolicyTest();
         suite.testPolicyRules();
         suite.testExecutorRefusals();
+        suite.testExecutorExceptionReceiptDeduplicationAndLifecycle();
     }
 }
