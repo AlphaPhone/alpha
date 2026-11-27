@@ -71,7 +71,11 @@ and 48). The card reads the agent's calendar list itself where it reads the
 request, when Calendar holds no summary for the calendar the request names,
 so a card filed from Talk or Ask Alpha on Home names it the same way whether
 or not Calendar was ever opened, as v119 read the owner's sources for each
-card it built.
+card it built. A read of the agent's events that comes back unavailable
+takes those events away but keeps the names the agent listed, since eliza
+answers its own calendar's empty days as unavailable while it still lists
+that calendar; only the agent's next list, or another owner signing in,
+replaces them.
 
 ```quint
 pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed

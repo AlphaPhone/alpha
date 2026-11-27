@@ -106,7 +106,7 @@ export interface ShownStore {
   readonly visible: (hidden: ReadonlyArray<number>, phone: boolean, google: boolean) => ReadonlyArray<Row>;
   /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
   readonly partial: (source: Source) => boolean;
-  /** Forget what `source` read, including seen titles, numbers, and revisions: an account changed or a permission went. @throws {never} */
+  /** Forget what `source` read, including seen titles, numbers, and revisions, but not the names the agent listed: an account changed, a permission went, or the feed came back unavailable. @throws {never} */
   readonly drop: (source: Source) => void;
   /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
   readonly present: () => boolean;
@@ -240,10 +240,6 @@ export function createShownStore(): ShownStore {
       for (const key of [...numbers.keys()]) if (key.startsWith(prefix)) numbers.delete(key);
       for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
       if (source === "Phone") calendars.clear();
-      if (source === "Google") {
-        names.clear();
-        primaryName = "";
-      }
       told();
     },
     present: () => present,
