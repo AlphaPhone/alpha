@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Conversation } from "../gen/app__assistant.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
+import { Machine as Toasts } from "../gen/app__notices__toasts.effect.vibe";
 import { Machine as Home } from "../gen/app__home.effect.vibe";
 import { Machine as Phone, type Phone as PhoneState } from "../gen/app__phone.effect.vibe";
 import { Machine as Strip } from "../gen/app__phone__call.effect.vibe";
@@ -724,13 +726,13 @@ describe("The call strip on an Alpha image", () => {
       expect(dock()?.querySelector('[aria-label="Call or ask"]')).toBeInstanceOf(HTMLInputElement);
       expect(dock()?.querySelector('[aria-label="End call"]')).toBeNull();
     });
+    // spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown": Talk asked for from the bar during a call does nothing and shows no words
+    const issued = async () => (await alpha.runtime.runPromise(Effect.flatMap(Toasts, (toasts) => toasts.get()))).issued;
+    const before = await issued();
     await press("Talk");
-    await vi.waitFor(async () => {
-      await drawn(() => undefined);
-      expect(document.body.textContent).toContain("Talk is unavailable right now");
-    }, { timeout: 12_000 });
-    expect(world.voice.startLiveCaptureCalls).toBe(0);
+    await drawn(() => undefined);
     await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
+    expect([await issued() - before, document.body.textContent?.includes("Talk is unavailable"), world.voice.startLiveCaptureCalls]).toEqual([0, false, 0]);
 
     // spec/app/phone/call.md, "Return and End act only on the call the bar shows, and End is asked once"
     await drawn(() => {

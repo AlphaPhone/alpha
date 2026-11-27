@@ -964,8 +964,9 @@ pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 
 As in the existing app, a conversation that could not start or went on
 failing shows no words: voice returns to idle at once, and Talk is offered
-again. Talk asked for while speech is unavailable does nothing, and speech
-that cannot be played ends the turn the same way, with no words.
+again. Talk asked for during a call or while speech is unavailable, from
+Ask Alpha or the communications bar, does nothing and shows no words, and
+speech that cannot be played ends the turn the same way, with no words.
 
 ```quint
 pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
