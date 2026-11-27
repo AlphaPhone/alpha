@@ -1,10 +1,21 @@
 export { commands } from "./commands/index.ts";
 export type { AlphaNextSubcommand } from "./commands/alpha-next.ts";
 export {
+  REQUIRED_CORE_COMPONENTS,
   buildEmulatorPlan,
+  extractPackageUid,
+  inspectAccessibilityDump,
+  inspectCorePackageDump,
+  inspectCrossAppIpcLog,
+  inspectLauncherActivities,
+  sortApksCoreFirst,
+  type AccessibilityInspection,
+  type CorePackageInspection,
+  type CrossAppIpcInspection,
   type EmulatorE2eReport,
   type EmulatorStageResult,
   type EmulatorToolchainPlan,
+  type LauncherActivityInspection,
 } from "./commands/alpha-next-emulator.ts";
 export {
   cssLengthToDp,

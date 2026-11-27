@@ -4,12 +4,19 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  REQUIRED_CORE_COMPONENTS,
   commands,
   cssLengthToDp,
   defineCommand,
+  extractPackageUid,
+  inspectAccessibilityDump,
+  inspectCorePackageDump,
+  inspectCrossAppIpcLog,
+  inspectLauncherActivities,
   oklchToHex,
   runCli,
   scanSecurityInvariants,
+  sortApksCoreFirst,
   validateSuiteManifest,
   type CliIo,
   type EmulatorE2eReport,
@@ -486,9 +493,20 @@ describe("project CLI", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.data.mode).toBe("dry-run");
     expect(parsed.data.plan.avdName).toBe("alpha_next_api35");
+    expect(parsed.data.plan.apkDirs).toEqual(["apps/app/artifacts", "apps/app/android/suite/out"]);
     expect(parsed.data.plan.emulatorArgs).toContain("-no-window");
     expect(parsed.data.plan.emulatorArgs).toContain("swiftshader_indirect");
-    expect(parsed.data.stages.map((stage) => stage.stage)).toContain("verify-accessibility-and-browser-control");
+    expect(parsed.data.stages.map((stage) => stage.stage)).toEqual([
+      "ensure-avd",
+      "boot-emulator",
+      "install-apks",
+      "verify-launcher-activities",
+      "verify-ipc-and-provider",
+      "verify-voice-interaction",
+      "verify-cross-app-ipc",
+      "verify-accessibility-and-browser-control",
+      "teardown",
+    ]);
 
     const missingSub = createRecorder();
     expect(await runCli({
@@ -498,5 +516,97 @@ describe("project CLI", () => {
       cwd: templateRoot,
       io: missingSub.io,
     })).toBe(2);
+  });
+
+  test("verifies emulator dumps, APK install order, cross-APK IPC logs, and accessibility binding strictly", () => {
+    expect(sortApksCoreFirst([
+      "apps/app/android/suite/out/notes-debug.apk",
+      "apps/app/artifacts/alpha-launcher-debug.apk",
+      "apps/app/artifacts/ai.alphacompute.alphaphone-debug.apk",
+      "apps/app/android/suite/out/browser-debug.apk",
+    ])).toEqual([
+      "apps/app/artifacts/ai.alphacompute.alphaphone-debug.apk",
+      "apps/app/artifacts/alpha-launcher-debug.apk",
+      "apps/app/android/suite/out/browser-debug.apk",
+      "apps/app/android/suite/out/notes-debug.apk",
+    ]);
+
+    const launcher = inspectLauncherActivities([
+      "priority=0 preferredOrder=0 match=0x108000",
+      "  ai.alphacompute.alphaphone/.MainActivity",
+      "  ai.alphacompute.notes/.NotesActivity",
+      "  ai.alphacompute.browser/.BrowserActivity",
+      "  org.mozilla.firefox/.App",
+      "  com.android.chrome/com.google.android.apps.chrome.Main",
+    ].join("\n"));
+    expect(launcher.passed).toBe(true);
+    expect(launcher.coreActivities).toEqual(["ai.alphacompute.alphaphone/.MainActivity"]);
+    expect(launcher.thinAlphaActivities).toEqual([
+      "ai.alphacompute.notes/.NotesActivity",
+      "ai.alphacompute.browser/.BrowserActivity",
+    ]);
+    expect(launcher.thirdPartyActivities).toHaveLength(2);
+    expect(inspectLauncherActivities("  ai.alphacompute.alphaphone/.MainActivity\n  com.android.chrome/.Main").passed).toBe(false);
+
+    const fullCoreDump = [
+      "  userId=10201",
+      "  declared permissions:",
+      "    ai.alphacompute.permission.AGENT_IPC: prot=signature, INSTALLED",
+      "  Provider{ai.alphacompute.alphaphone/.ipc.AlphaPreferencesProvider}",
+      "  authority=ai.alphacompute.alphaphone.preferences",
+      ...REQUIRED_CORE_COMPONENTS.map((name) => `  component=${name}`),
+    ].join("\n");
+    const coreOk = inspectCorePackageDump(fullCoreDump);
+    expect(coreOk.passed).toBe(true);
+    expect(coreOk.missingComponents).toEqual([]);
+    expect(extractPackageUid(fullCoreDump)).toBe(10201);
+
+    const weakenedPerm = inspectCorePackageDump(fullCoreDump.replace("prot=signature", "prot=normal"));
+    expect(weakenedPerm.passed).toBe(false);
+    expect(weakenedPerm.ipcPermissionIsSignature).toBe(false);
+
+    const missingAccessibility = inspectCorePackageDump(
+      fullCoreDump.replace("ai.alphacompute.control.AlphaAccessibilityService", ""),
+    );
+    expect(missingAccessibility.passed).toBe(false);
+    expect(missingAccessibility.missingComponents).toEqual(["ai.alphacompute.control.AlphaAccessibilityService"]);
+
+    const ipcOk = inspectCrossAppIpcLog(
+      "11-27 00:40:01.120 4120 4120 I AlphaThinApp: app=notes prefsSnapshot=ok broker=bound",
+      10201,
+      10209,
+    );
+    expect(ipcOk.passed).toBe(true);
+    expect(ipcOk.distinctUids).toBe(true);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: prefsSnapshot=ok broker=bound", 10201, 10201).passed).toBe(false);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: prefsSnapshot=ok", 10201, 10209).passed).toBe(false);
+
+    const enabledSetting = "ai.alphacompute.alphaphone/ai.alphacompute.control.AlphaAccessibilityService";
+    const boundDump = [
+      `Enabled services:{${enabledSetting}}`,
+      `services:{Service[label=Alpha Control, component=${enabledSetting}]}`,
+    ].join("\n");
+    expect(inspectAccessibilityDump(boundDump, enabledSetting).passed).toBe(true);
+    expect(inspectAccessibilityDump(`Enabled services:{${enabledSetting}}\nservices:{}`, enabledSetting).passed).toBe(false);
+  });
+
+  test("alpha-next validate --check --aapt2 passes against the live repository artifacts", async () => {
+    const liveValidate = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "validate", "--check", "--aapt2", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: liveValidate.io,
+    })).toBe(0);
+    const report = parseJson(liveValidate.out()) as { readonly ok: boolean; readonly data: ValidateReport };
+    expect(report.ok).toBe(true);
+    expect(report.data.status).toBe("pass");
+    expect(report.data.presentCount).toBe(report.data.totalCount);
+    expect(report.data.totalCount).toBe(28);
+    expect(report.data.tokensInSync).toBe(true);
+    expect(report.data.manifestValid).toBe(true);
+    expect(report.data.securityPassed).toBe(true);
+    expect(report.data.aapt2?.passed).toBe(true);
   });
 });

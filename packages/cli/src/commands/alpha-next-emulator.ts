@@ -10,8 +10,15 @@ const DEFAULT_SYSTEM_IMAGE = "system-images;android-35;google_apis;x86_64";
 const DEFAULT_DEVICE_PROFILE = "pixel_6";
 const DEFAULT_BOOT_TIMEOUT_SECONDS = 180;
 const CORE_PACKAGE = "ai.alphacompute.alphaphone";
+const PREFERENCES_AUTHORITY = `${CORE_PACKAGE}.preferences`;
 const IPC_PERMISSION = "ai.alphacompute.permission.AGENT_IPC";
-const DEFAULT_APK_DIR = "apps/app/artifacts";
+const ACCESSIBILITY_COMPONENT = `${CORE_PACKAGE}/ai.alphacompute.control.AlphaAccessibilityService`;
+const PREFERRED_THIN_PACKAGE = "ai.alphacompute.notes";
+
+const DEFAULT_APK_DIRS = [
+  "apps/app/artifacts",
+  "apps/app/android/suite/out",
+] as const;
 
 const BLOCKED_PACKAGES = [
   "com.android.settings",
@@ -23,6 +30,18 @@ const BROWSER_CANDIDATES = [
   "org.mozilla.fenix",
   "com.android.chrome",
   "org.chromium.webview_shell",
+] as const;
+
+/** Exact AlphaCore services, providers, widgets, and accessibility components required in `dumpsys package`. */
+export const REQUIRED_CORE_COMPONENTS = [
+  "AlphaAgentBrokerService",
+  "AlphaPlatformBrokerService",
+  "AlphaContextRegistryService",
+  "AlphaPreferencesProvider",
+  "AlphaVoiceInteractionService",
+  "AlphaDayWidgetProvider",
+  "AlphaSearchWidgetProvider",
+  "ai.alphacompute.control.AlphaAccessibilityService",
 ] as const;
 
 /** CLI flags for `pnpm cli alpha-next emulator-e2e`. */
@@ -45,6 +64,7 @@ export interface EmulatorToolchainPlan {
   readonly emulatorPath: string | null;
   readonly avdmanagerPath: string | null;
   readonly apkDir: string;
+  readonly apkDirs: readonly string[];
   readonly discoveredApks: readonly string[];
   readonly emulatorArgs: readonly string[];
   readonly missingTools: readonly string[];
@@ -55,6 +75,42 @@ export interface EmulatorStageResult {
   readonly stage: string;
   readonly status: "planned" | "passed" | "failed" | "skipped";
   readonly detail: string;
+}
+
+/** Parsed result of checking Launcher3 MAIN/LAUNCHER activities. */
+export interface LauncherActivityInspection {
+  readonly passed: boolean;
+  readonly coreActivities: readonly string[];
+  readonly thinAlphaActivities: readonly string[];
+  readonly thirdPartyActivities: readonly string[];
+}
+
+/** Parsed result of verifying AlphaCore components and signature IPC permission in `dumpsys package`. */
+export interface CorePackageInspection {
+  readonly passed: boolean;
+  readonly hasPreferencesAuthority: boolean;
+  readonly hasIpcPermission: boolean;
+  readonly ipcPermissionIsSignature: boolean;
+  readonly presentComponents: readonly string[];
+  readonly missingComponents: readonly string[];
+}
+
+/** Parsed result of verifying cross-APK Binder IPC and shared preferences read across distinct UIDs. */
+export interface CrossAppIpcInspection {
+  readonly passed: boolean;
+  readonly distinctUids: boolean;
+  readonly coreUid: number | null;
+  readonly thinUid: number | null;
+  readonly hasThinAppTag: boolean;
+  readonly hasPreferencesEvidence: boolean;
+  readonly hasBrokerEvidence: boolean;
+}
+
+/** Parsed result of verifying `AlphaAccessibilityService` enabled and bound status in `dumpsys accessibility`. */
+export interface AccessibilityInspection {
+  readonly passed: boolean;
+  readonly enabledInSettings: boolean;
+  readonly boundInDumpsys: boolean;
 }
 
 /** Structured report produced by `pnpm cli alpha-next emulator-e2e`. */
@@ -81,17 +137,17 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
   {
     stage: "install-apks",
     status: "planned",
-    detail: "Install AlphaCore and discovered thin Alpha APKs via adb install -r -g",
+    detail: "Install AlphaCore (ai.alphacompute.alphaphone) first and all discovered thin Alpha APKs via adb install -r -g",
   },
   {
     stage: "verify-launcher-activities",
     status: "planned",
-    detail: "Verify Launcher3 PackageManager lists separate MAIN/LAUNCHER activities for Alpha apps alongside third-party apps",
+    detail: "Verify cmd package query-activities (ACTION_MAIN + CATEGORY_LAUNCHER) lists separate Alpha thin apps alongside third-party apps",
   },
   {
     stage: "verify-ipc-and-provider",
     status: "planned",
-    detail: `Verify AlphaPreferencesProvider and Binder IPC services enforce signature permission ${IPC_PERMISSION}`,
+    detail: `Verify dumpsys package ${CORE_PACKAGE} registers all 8 AlphaCore brokers, providers, widgets, voice & accessibility services under ${IPC_PERMISSION} (signature)`,
   },
   {
     stage: "verify-voice-interaction",
@@ -99,9 +155,14 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
     detail: "Verify AlphaVoiceInteractionService registers for android.service.voice.VoiceInteractionService",
   },
   {
+    stage: "verify-cross-app-ipc",
+    status: "planned",
+    detail: `Launch ${PREFERRED_THIN_PACKAGE} (or installed thin Alpha APK) and verify distinct UID + logcat (AlphaThinApp, AlphaPreferencesProvider, AlphaAgentBroker)`,
+  },
+  {
     stage: "verify-accessibility-and-browser-control",
     status: "planned",
-    detail: "Enable AlphaAccessibilityService, observe real browser (Firefox or Chrome), and verify blocked packages (Settings, PermissionController) refusal",
+    detail: `Enable ${ACCESSIBILITY_COMPONENT}, verify dumpsys accessibility bound state, launch Firefox/Chrome and com.android.settings, and inspect control telemetry`,
   },
   {
     stage: "teardown",
@@ -109,6 +170,26 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
     detail: "Shutdown booted emulator cleanly via adb emu kill",
   },
 ];
+
+function isCoreApkPath(apkPath: string): boolean {
+  const base = path.basename(apkPath).toLowerCase();
+  return base.includes("alphaphone")
+    || base.includes("alphacore")
+    || base.includes("alpha-core")
+    || base.includes("alpha-launcher")
+    || base.includes("alpha-phone")
+    || base.startsWith("app-");
+}
+
+/** Order discovered APK paths so AlphaCore is installed before thin Alpha APKs. */
+export function sortApksCoreFirst(apks: readonly string[]): readonly string[] {
+  return [...new Set(apks)].sort((left, right) => {
+    const leftCore = isCoreApkPath(left);
+    const rightCore = isCoreApkPath(right);
+    if (leftCore !== rightCore) return leftCore ? -1 : 1;
+    return left.localeCompare(right);
+  });
+}
 
 function discoverApks(apkDir: string): readonly string[] {
   if (!fs.existsSync(apkDir)) return [];
@@ -126,7 +207,123 @@ function discoverApks(apkDir: string): readonly string[] {
       }
     }
   }
-  return apks.sort();
+  return apks;
+}
+
+/** Inspect `cmd package query-activities --brief` output for core, thin Alpha, and third-party launcher entries. */
+export function inspectLauncherActivities(launcherDump: string): LauncherActivityInspection {
+  const coreActivities: string[] = [];
+  const thinAlphaActivities: string[] = [];
+  const thirdPartyActivities: string[] = [];
+  const seen = new Set<string>();
+  const componentPattern = /^([a-z][a-z0-9_.]*)\/([^\s]+)$/i;
+
+  for (const rawLine of launcherDump.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    const match = componentPattern.exec(line);
+    if (!match) continue;
+    const pkg = match[1] ?? "";
+    if (seen.has(line)) continue;
+    seen.add(line);
+    if (pkg === CORE_PACKAGE) {
+      coreActivities.push(line);
+    } else if (pkg.startsWith("ai.alphacompute.")) {
+      thinAlphaActivities.push(line);
+    } else {
+      thirdPartyActivities.push(line);
+    }
+  }
+
+  return {
+    passed: thinAlphaActivities.length > 0 && thirdPartyActivities.length > 0,
+    coreActivities,
+    thinAlphaActivities,
+    thirdPartyActivities,
+  };
+}
+
+/** Inspect `dumpsys package ai.alphacompute.alphaphone` for all required AlphaCore components and signature IPC permission. */
+export function inspectCorePackageDump(coreDump: string): CorePackageInspection {
+  const hasPreferencesAuthority = coreDump.includes(PREFERENCES_AUTHORITY);
+  const hasIpcPermission = coreDump.includes(IPC_PERMISSION);
+  const signaturePattern = new RegExp(
+    `${IPC_PERMISSION.replaceAll(".", "\\.")}[^\\n]*(?:prot(?:ectionLevel)?\\s*=\\s*\\[?signature\\b(?!\\|))`,
+    "i",
+  );
+  const ipcPermissionIsSignature = signaturePattern.test(coreDump);
+
+  const presentComponents: string[] = [];
+  const missingComponents: string[] = [];
+  for (const component of REQUIRED_CORE_COMPONENTS) {
+    if (coreDump.includes(component)) {
+      presentComponents.push(component);
+    } else {
+      missingComponents.push(component);
+    }
+  }
+
+  return {
+    passed: hasPreferencesAuthority && hasIpcPermission && ipcPermissionIsSignature && missingComponents.length === 0,
+    hasPreferencesAuthority,
+    hasIpcPermission,
+    ipcPermissionIsSignature,
+    presentComponents,
+    missingComponents,
+  };
+}
+
+/** Extract the numeric Linux `userId` or `appId` from `dumpsys package <pkg>` output. */
+export function extractPackageUid(packageDump: string): number | null {
+  const match = /\b(?:userId|appId)=(\d+)\b/.exec(packageDump);
+  if (!match?.[1]) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Inspect cross-APK logcat output and UID separation between AlphaCore and a launched thin Alpha app. */
+export function inspectCrossAppIpcLog(
+  logcat: string,
+  coreUid: number | null,
+  thinUid: number | null,
+): CrossAppIpcInspection {
+  const distinctUids = coreUid !== null && thinUid !== null && coreUid !== thinUid;
+  const hasThinAppTag = /\bAlphaThinApp\b/.test(logcat);
+  const hasPreferencesEvidence = /\bAlphaPreferencesProvider\b|pref(?:erence)?s|textScale|snapshot/i.test(logcat);
+  const hasBrokerEvidence = /\bAlphaAgentBroker\b|IAlphaAgentBroker|broker|binder/i.test(logcat);
+
+  return {
+    passed: distinctUids && hasPreferencesEvidence && hasBrokerEvidence,
+    distinctUids,
+    coreUid,
+    thinUid,
+    hasThinAppTag,
+    hasPreferencesEvidence,
+    hasBrokerEvidence,
+  };
+}
+
+/** Inspect `settings get secure enabled_accessibility_services` and `dumpsys accessibility` for bound AlphaAccessibilityService. */
+export function inspectAccessibilityDump(dump: string, enabledSetting: string): AccessibilityInspection {
+  const enabledInSettings = enabledSetting.includes(ACCESSIBILITY_COMPONENT)
+    || enabledSetting.includes("AlphaAccessibilityService");
+  let boundInDumpsys = /Service\[[^\]]*(?:AlphaAccessibilityService|Alpha Control)[^\]]*\]/i.test(dump);
+  if (!boundInDumpsys) {
+    const boundBlocks = /(?:^|[\n,[])[ \t]*(?:Bound services|mBoundServices|services)\s*:\s*\{([^}]*)\}/gi;
+    let match: RegExpExecArray | null = boundBlocks.exec(dump);
+    while (match !== null) {
+      const content = match[1] ?? "";
+      if (content.includes("AlphaAccessibilityService") || content.includes("Alpha Control")) {
+        boundInDumpsys = true;
+        break;
+      }
+      match = boundBlocks.exec(dump);
+    }
+  }
+  return {
+    passed: enabledInSettings && boundInDumpsys,
+    enabledInSettings,
+    boundInDumpsys,
+  };
 }
 
 /** Resolve local Android SDK tools, AVD settings, KVM state, and APKs without launching any process. */
@@ -150,8 +347,14 @@ export function buildEmulatorPlan(flags: EmulatorE2eFlags, ctx: CliContext): Emu
   if (!avdmanagerPath) missingTools.push("cmdline-tools/latest/bin/avdmanager");
   if (!systemImagePresent) missingTools.push(DEFAULT_SYSTEM_IMAGE);
 
-  const apkDirAbs = flags.apkDir ? path.resolve(ctx.cwd, flags.apkDir) : path.join(ctx.rootDir, DEFAULT_APK_DIR);
-  const discoveredApks = discoverApks(apkDirAbs).map((file) => path.relative(ctx.rootDir, file).split(path.sep).join("/"));
+  const apkDirAbsList = flags.apkDir
+    ? [path.resolve(ctx.cwd, flags.apkDir)]
+    : DEFAULT_APK_DIRS.map((rel) => path.join(ctx.rootDir, rel));
+  const rawApks = apkDirAbsList.flatMap((dir) => discoverApks(dir));
+  const discoveredApks = sortApksCoreFirst(
+    rawApks.map((file) => path.relative(ctx.rootDir, file).split(path.sep).join("/")),
+  );
+  const apkDirs = apkDirAbsList.map((dir) => path.relative(ctx.rootDir, dir).split(path.sep).join("/"));
   const emulatorArgs = [
     "-avd",
     avdName,
@@ -172,7 +375,8 @@ export function buildEmulatorPlan(flags: EmulatorE2eFlags, ctx: CliContext): Emu
     adbPath,
     emulatorPath,
     avdmanagerPath,
-    apkDir: path.relative(ctx.rootDir, apkDirAbs).split(path.sep).join("/"),
+    apkDir: apkDirs[0] ?? DEFAULT_APK_DIRS[0],
+    apkDirs,
     discoveredApks,
     emulatorArgs,
     missingTools,
@@ -201,6 +405,13 @@ function listConnectedEmulators(adbPath: string): readonly string[] {
     .filter((serial) => serial !== "");
 }
 
+function countLogcatEntries(rawLogcat: string): number {
+  return rawLogcat
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("--------- beginning of")).length;
+}
+
 async function waitForEmulatorBoot(
   adbPath: string,
   priorSerials: ReadonlySet<string>,
@@ -227,12 +438,12 @@ async function waitForEmulatorBoot(
   throw new Error(`Emulator did not finish booting within ${String(timeoutSeconds)}s`);
 }
 
-function verifyDeviceSuite(
+async function verifyDeviceSuite(
   adbPath: string,
   serial: string,
   plan: EmulatorToolchainPlan,
   rootDir: string,
-): readonly EmulatorStageResult[] {
+): Promise<readonly EmulatorStageResult[]> {
   const results: EmulatorStageResult[] = [];
 
   for (const relApk of plan.discoveredApks) {
@@ -241,7 +452,7 @@ function verifyDeviceSuite(
   results.push({
     stage: "install-apks",
     status: "passed",
-    detail: `Installed ${String(plan.discoveredApks.length)} APK(s)`,
+    detail: `Installed ${String(plan.discoveredApks.length)} APK(s): ${plan.discoveredApks.map((item) => path.basename(item)).join(", ")}`,
   });
 
   const launcherDump = adbShell(adbPath, serial, [
@@ -254,25 +465,22 @@ function verifyDeviceSuite(
     "-c",
     "android.intent.category.LAUNCHER",
   ]);
-  const alphaActivities = launcherDump
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("ai.alphacompute."));
-  const thirdPartyPresent = launcherDump.includes("com.android.");
+  const launcherCheck = inspectLauncherActivities(launcherDump);
   results.push({
     stage: "verify-launcher-activities",
-    status: alphaActivities.length > 0 && thirdPartyPresent ? "passed" : "failed",
-    detail: `Found ${String(alphaActivities.length)} Alpha launcher activity(ies); third-party apps present=${String(thirdPartyPresent)}`,
+    status: launcherCheck.passed ? "passed" : "failed",
+    detail: `core=${String(launcherCheck.coreActivities.length)} thin=${String(launcherCheck.thinAlphaActivities.length)} thirdParty=${String(launcherCheck.thirdPartyActivities.length)}`,
   });
 
   const coreDump = adbShell(adbPath, serial, ["dumpsys", "package", CORE_PACKAGE]);
-  const hasProvider = coreDump.includes(`${CORE_PACKAGE}.preferences`);
-  const hasPermission = coreDump.includes(IPC_PERMISSION);
-  const hasBroker = coreDump.includes("AlphaAgentBrokerService");
+  const coreCheck = inspectCorePackageDump(coreDump);
+  const coreUid = extractPackageUid(coreDump);
   results.push({
     stage: "verify-ipc-and-provider",
-    status: hasProvider && hasPermission && hasBroker ? "passed" : "failed",
-    detail: `provider=${String(hasProvider)} permission=${String(hasPermission)} broker=${String(hasBroker)}`,
+    status: coreCheck.passed ? "passed" : "failed",
+    detail: coreCheck.passed
+      ? `components=${String(coreCheck.presentComponents.length)}/${String(REQUIRED_CORE_COMPONENTS.length)} authority=${PREFERENCES_AUTHORITY} permission=${IPC_PERMISSION}(signature)`
+      : `authority=${String(coreCheck.hasPreferencesAuthority)} permission=${String(coreCheck.hasIpcPermission)} signature=${String(coreCheck.ipcPermissionIsSignature)} missing=[${coreCheck.missingComponents.join(",")}]`,
   });
 
   const voiceDump = adbShell(adbPath, serial, [
@@ -292,29 +500,74 @@ function verifyDeviceSuite(
       : "AlphaVoiceInteractionService not found in query-services output",
   });
 
-  const a11yMatch = /(ai\.alphacompute\.alphaphone\/[^\s]*AlphaAccessibilityService)/.exec(coreDump);
-  const a11yComponent = a11yMatch?.[1] ?? `${CORE_PACKAGE}/ai.alphacompute.control.AlphaAccessibilityService`;
-  adbShell(adbPath, serial, ["settings", "put", "secure", "enabled_accessibility_services", a11yComponent]);
+  const targetThinActivity = launcherCheck.thinAlphaActivities.find((entry) => entry.startsWith(`${PREFERRED_THIN_PACKAGE}/`))
+    ?? launcherCheck.thinAlphaActivities[0];
+  if (!targetThinActivity) {
+    results.push({
+      stage: "verify-cross-app-ipc",
+      status: "failed",
+      detail: `No installed thin Alpha app launcher activity found (expected ${PREFERRED_THIN_PACKAGE} or another thin app)`,
+    });
+  } else {
+    const thinPkg = targetThinActivity.split("/")[0] ?? PREFERRED_THIN_PACKAGE;
+    const thinDump = adbShell(adbPath, serial, ["dumpsys", "package", thinPkg]);
+    const thinUid = extractPackageUid(thinDump);
+    adbShell(adbPath, serial, ["logcat", "-c"]);
+    adbShell(adbPath, serial, ["am", "start", "-W", "-n", targetThinActivity]);
+    await timersPromises.scheduler.wait(2000);
+    const ipcLogcat = adbShell(adbPath, serial, ["logcat", "-d", "-s", "AlphaThinApp", "AlphaPreferencesProvider", "AlphaAgentBroker"]);
+    const ipcCheck = inspectCrossAppIpcLog(ipcLogcat, coreUid, thinUid);
+    results.push({
+      stage: "verify-cross-app-ipc",
+      status: ipcCheck.passed ? "passed" : "failed",
+      detail: `app=${thinPkg} coreUid=${String(coreUid)} thinUid=${String(thinUid)} distinctUid=${String(ipcCheck.distinctUids)} thinTag=${String(ipcCheck.hasThinAppTag)} prefs=${String(ipcCheck.hasPreferencesEvidence)} broker=${String(ipcCheck.hasBrokerEvidence)} logLines=${String(countLogcatEntries(ipcLogcat))}`,
+    });
+  }
+
+  adbShell(adbPath, serial, ["logcat", "-c"]);
+  adbShell(adbPath, serial, ["settings", "put", "secure", "enabled_accessibility_services", ACCESSIBILITY_COMPONENT]);
   adbShell(adbPath, serial, ["settings", "put", "secure", "accessibility_enabled", "1"]);
+  await timersPromises.scheduler.wait(1500);
   const enabledA11y = adbShell(adbPath, serial, ["settings", "get", "secure", "enabled_accessibility_services"]);
+  const accessibilityDump = adbShell(adbPath, serial, ["dumpsys", "accessibility"]);
+  const a11yCheck = inspectAccessibilityDump(accessibilityDump, enabledA11y);
 
   const packagesOutput = adbShell(adbPath, serial, ["pm", "list", "packages"]);
   const browserPkg = BROWSER_CANDIDATES.find((candidate) => packagesOutput.includes(`package:${candidate}`));
-  let browserObserved = false;
   if (browserPkg) {
     adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com", browserPkg]);
-    const windowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
-    browserObserved = windowDump.includes(browserPkg);
+  } else {
+    adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com"]);
   }
+  await timersPromises.scheduler.wait(1500);
+  const browserWindowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
+  const browserObserved = browserPkg
+    ? browserWindowDump.includes(browserPkg)
+    : /mCurrentFocus=Window\{[^\n}]+ (?!ai\.alphacompute\.)[a-z][a-z0-9_.]*\//i.test(browserWindowDump);
+
   const blockedPresent = BLOCKED_PACKAGES.every((pkg) => packagesOutput.includes(`package:${pkg}`));
+  let settingsObserved = false;
   if (blockedPresent) {
     adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.settings.SETTINGS"]);
+    await timersPromises.scheduler.wait(1000);
+    const settingsWindowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
+    settingsObserved = settingsWindowDump.includes("com.android.settings");
   }
-  const a11yOk = enabledA11y.includes("AlphaAccessibilityService") && browserObserved && blockedPresent;
+
+  const controlLogcat = adbShell(adbPath, serial, [
+    "logcat",
+    "-d",
+    "-s",
+    "AlphaAccessibilityService",
+    "AlphaControlPolicy",
+    "AlphaControlBridge",
+  ]);
+  const telemetryLines = countLogcatEntries(controlLogcat);
+  const a11yOk = a11yCheck.passed && browserObserved && blockedPresent && settingsObserved;
   results.push({
     stage: "verify-accessibility-and-browser-control",
     status: a11yOk ? "passed" : "failed",
-    detail: `service=${a11yComponent} enabled=${String(enabledA11y.includes("AlphaAccessibilityService"))} browser=${browserPkg ?? "none"} observed=${String(browserObserved)} blockedGuards=${BLOCKED_PACKAGES.join(",")}`,
+    detail: `service=${ACCESSIBILITY_COMPONENT} enabled=${String(a11yCheck.enabledInSettings)} bound=${String(a11yCheck.boundInDumpsys)} browser=${browserPkg ?? "ACTION_VIEW"} observed=${String(browserObserved)} settingsObserved=${String(settingsObserved)} blockedGuards=${BLOCKED_PACKAGES.join(",")} telemetryLines=${String(telemetryLines)}`,
   });
 
   return results;
@@ -341,7 +594,7 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
     const lines = [
       `alpha-next emulator-e2e (dry-run)  ready:${String(ready)}  kvm:${String(plan.kvmAvailable)}  avd:${plan.avdName}`,
       `  sdk: ${plan.sdkRoot}`,
-      `  apkDir: ${plan.apkDir} (${String(plan.discoveredApks.length)} APK(s) found)`,
+      `  apkDirs: ${plan.apkDirs.join(", ")} (${String(plan.discoveredApks.length)} APK(s) found)`,
       ...(plan.missingTools.length > 0 ? [`  missing: ${plan.missingTools.join(", ")}`] : []),
       ...PLANNED_STAGES.map((stage) => `  [planned] ${stage.stage}: ${stage.detail}`),
     ];
@@ -365,7 +618,7 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
   if (plan.discoveredApks.length === 0) {
     return {
       ok: false,
-      message: `No installable APKs found under ${plan.apkDir}. Build APKs first or pass --apk-dir <dir>.`,
+      message: `No installable APKs found under ${plan.apkDirs.join(", ")}. Build APKs first or pass --apk-dir <dir>.`,
       data: {
         subcommand: "emulator-e2e",
         mode: "live",
@@ -402,7 +655,7 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
     activeSerial = await waitForEmulatorBoot(plan.adbPath, priorSerials, timeoutSeconds, activeSerial);
     stages.push({ stage: "boot-emulator", status: "passed", detail: `Booted ${activeSerial}` });
 
-    stages.push(...verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir));
+    stages.push(...await verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir));
   } finally {
     if (bootedProcess && activeSerial) {
       try {
