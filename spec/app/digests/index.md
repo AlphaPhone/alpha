@@ -118,7 +118,7 @@ pure def backgroundAnswered(d: Digests, id: int, applied: bool): Digests =
 pure def switchHonest(s: Switch): bool = s.attempt.outcome != A::Recorded and s.attempt.id >= 0
 
 pure def alwaysSwitchAndOwnerStayValid(d: Digests): bool =
-  d.owner >= 0 and (d.owner == 0 implies (not(d.open) and not(d.background.on))) and switchHonest(d.background)
+  d.owner >= 0 and (d.owner == 0 implies (not(d.open) and not(d.background.on) and not(d.background.wanted) and d.background.attempt.outcome != A::Sent)) and switchHonest(d.background)
 
 pure def stepASwitchMovesOnlyByThePlatformsAnswer(before: Digests, via: str, after: Digests): bool =
   after.background.on != before.background.on implies (via == "backgroundAnswered" or via == "ownerChanged" or via == "nativeChecksRead")
