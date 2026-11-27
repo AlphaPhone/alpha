@@ -2,6 +2,10 @@
   "key": "alpha/app/wallet/transfer@1",
   "spec": "spec/app/wallet/transfer.md",
   "shape": "27ec63205cf72d90",
+  "sealed": {
+    "shape": "27ec63205cf72d90",
+    "state": "637a961151f778c7"
+  },
   "state": {
     "stage": "Closed",
     "said": "Quiet",

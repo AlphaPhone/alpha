@@ -2,6 +2,10 @@
   "key": "alpha/app/notes/linkNote@1",
   "spec": "spec/app/notes/linkNote.md",
   "shape": "c7350ae861a9e2b5",
+  "sealed": {
+    "shape": "c7350ae861a9e2b5",
+    "state": "35faa1779362a22e"
+  },
   "state": {
     "owner": 0,
     "note": 0,

@@ -2,6 +2,10 @@
   "key": "alpha/app/files/index@1",
   "spec": "spec/app/files/index.md",
   "shape": "edf620a9a0fe7da1",
+  "sealed": {
+    "shape": "edf620a9a0fe7da1",
+    "state": "a0efde989bb2ae37"
+  },
   "state": {
     "access": "Granted",
     "supported": true,

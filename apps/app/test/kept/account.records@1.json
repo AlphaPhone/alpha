@@ -2,6 +2,10 @@
   "key": "alpha/app/account/records@1",
   "spec": "spec/app/account/records.md",
   "shape": "1d98cdf8466e1bc5",
+  "sealed": {
+    "shape": "1d98cdf8466e1bc5",
+    "state": "831682916a6419a8"
+  },
   "state": {
     "review": {
       "status": "Idle",

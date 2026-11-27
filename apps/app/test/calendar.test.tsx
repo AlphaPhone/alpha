@@ -1184,11 +1184,8 @@ describe("on a phone", () => {
     expect([Boolean(button("Approve")), world.calendar.writes]).toEqual([true, ["reject approval-resident"]]);
   });
 
-  /**
-   * Card A waits on a read of the agent's list while A changes, the owner declines A, and the read the decline starts shows
-   * card B: that read's list answers first, and A's answers last.
-   */
-  async function lateListRead(changeA: (world: ReturnType<typeof morning>) => void, b: Record<string, unknown>) {
+  /** Calendar on a phone showing card A, an answer to the team lunch, with request B pending behind it, and a way to read the day again. */
+  async function showingA(b: Record<string, unknown>) {
     const world = morning(true);
     const { alpha } = await open(world, only("view:Calendar"));
     const runtime = calendar.runtime(alpha);
@@ -1203,6 +1200,15 @@ describe("on a phone", () => {
     await reread();
     await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.change === "Respond" && a.complete);
     const first = (await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).filing;
+    return { world, alpha, runtime, reread, first };
+  }
+
+  /**
+   * Card A waits on a read of the agent's list while A changes, the owner declines A, and the read the decline starts shows
+   * card B: that read's list answers first, and A's answers last.
+   */
+  async function lateListRead(changeA: (world: ReturnType<typeof morning>) => void, b: Record<string, unknown>) {
+    const { world, alpha, runtime, reread, first } = await showingA(b);
     changeA(world);
     world.calendar.holdCalendars = true;
     await reread();
@@ -1240,6 +1246,31 @@ describe("on a phone", () => {
     }, { action: "respond_invitation", account: "owner", target: standup, scope: "instance", response: "tentative" });
     expect([card.filing !== first, card.complete, card.updated, Boolean(button("Approve")), document.body.textContent?.includes("(updated)"), world.calendar.writes])
       .toEqual([true, true, false, true, false, ["reject approval-a"]]);
+  });
+
+  it("A slow read of the list that began with no card shown never shows again the card a faster read showed and the owner declined (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+    const { world, alpha, runtime, reread, first } = await showingA({ action: "respond_invitation", account: "owner", target: standup, scope: "instance", response: "tentative" });
+    world.calendar.holdCalendars = true;
+    await press("Decline");
+    await vi.waitFor(() => expect(world.calendar.heldCalendars).toHaveLength(1));
+    await reread();
+    await vi.waitFor(() => expect(world.calendar.heldCalendars).toHaveLength(2));
+    world.calendar.holdCalendars = false;
+    await drawn(() => world.calendar.heldCalendars[1]?.());
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.filing !== first);
+    const b = (await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).filing;
+    await press("Decline");
+    await until(alpha, runtime, Changes, (a) => a.stage === "Idle" && a.result === "Declined" && a.filing === b);
+    await vi.waitFor(() => expect(world.calendar.writes).toEqual(["reject approval-a", "reject approval-b"]));
+    const answered = world.calendar.calendarsAnswered ?? 0;
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": the read that began before card B was shown still lists B as pending, and comes back only after the owner declined it.
+    await drawn(() => world.calendar.heldCalendars[0]?.());
+    await vi.waitFor(() => expect(world.calendar.calendarsAnswered).toBe(answered + 1));
+    await later(alpha, 0);
+    await drawn(() => {});
+    const card = await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
+    expect([card.stage, card.result, card.filing, Boolean(button("Approve")), Boolean(button("Decline")), world.calendar.writes])
+      .toEqual(["Idle", "Declined", b, false, false, ["reject approval-a", "reject approval-b"]]);
   });
 
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {

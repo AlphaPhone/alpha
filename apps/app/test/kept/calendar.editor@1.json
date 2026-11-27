@@ -2,6 +2,10 @@
   "key": "alpha/app/calendar/editor@1",
   "spec": "spec/app/calendar/editor.md",
   "shape": "bdd3af9ee5bb0e67",
+  "sealed": {
+    "shape": "bdd3af9ee5bb0e67",
+    "state": "2c2a81f070dc03bc"
+  },
   "state": {
     "owner": 1,
     "form": "NoForm",

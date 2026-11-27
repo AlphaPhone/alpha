@@ -2,6 +2,10 @@
   "key": "alpha/app/files/preview@1",
   "spec": "spec/app/files/preview.md",
   "shape": "9088e9b3cc355cb1",
+  "sealed": {
+    "shape": "9088e9b3cc355cb1",
+    "state": "0aee8c272a44266d"
+  },
   "state": {
     "viewer": 0,
     "viewers": 0,

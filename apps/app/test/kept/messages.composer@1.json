@@ -2,6 +2,10 @@
   "key": "alpha/app/messages/composer@1",
   "spec": "spec/app/messages/composer.md",
   "shape": "215e8fe3df6cd9ea",
+  "sealed": {
+    "shape": "215e8fe3df6cd9ea",
+    "state": "7cb9668df72fe9d8"
+  },
   "state": {
     "thread": 0,
     "recipients": 0,

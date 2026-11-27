@@ -2,6 +2,10 @@
   "key": "alpha/app/telegram/index@1",
   "spec": "spec/app/telegram/index.md",
   "shape": "cb6269b552622481",
+  "sealed": {
+    "shape": "cb6269b552622481",
+    "state": "0eca375d5a3dde37"
+  },
   "state": {
     "authenticated": true,
     "credentialRev": 1,

@@ -6,6 +6,8 @@ import { Machine as Canvas } from "../gen/app__shell__keyboard.effect.vibe";
 import { Machine as Dock } from "../gen/app__assistant__dock.effect.vibe";
 import type { Shell as ShellState } from "../gen/app__shell.ts";
 import { closeAllDocks, mountDock } from "./dock-support.tsx";
+import { untoldStep } from "./fakes/ask.ts";
+import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
 afterEach(closeAllDocks);
@@ -435,6 +437,41 @@ describe("Ask Alpha dock", () => {
     expect((await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).assistant).toBe("Bar");
     expect(pill()?.getAnimations()).toEqual([]);
     expect(getComputedStyle(pill() as HTMLElement).opacity).toBe("1");
+  });
+
+  // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+  it("An unmentioned step's notice draws under its reply, clear of the message bar, live and kept (spec/app/assistant/reply.md, \"Story: Understand why a reply did not finish\")", async () => {
+    await page.viewport(412, 915);
+    const world = scene();
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["Nopa has a table at seven."];
+    world.ask.nextActions = () => [untoldStep("BOOK_TABLE")];
+    world.ask.holdDoneAfterReady = done.promise;
+    await mountDock({ view: "Home", over: world });
+    await page.getByRole("button", { name: "Open conversation" }).click();
+    await page.getByRole("textbox", { name: "Message Alpha" }).fill("Book a table at Nopa");
+    await page.getByRole("button", { name: "Send" }).click();
+    const box = (element: Element | null | undefined) => element?.getBoundingClientRect() ?? new DOMRect();
+    const placed = async () => {
+      await expect.element(page.getByText("Book table did not complete")).toBeVisible();
+      const notice = page.getByText("Book table did not complete").element();
+      const composer = page.getByRole("textbox", { name: "Message Alpha" }).element().parentElement?.parentElement;
+      const middle = box(notice);
+      return {
+        inTranscript: Boolean(notice.closest("section[aria-label='Ask Alpha'] [role=log]")),
+        underReply: box(page.getByText("Nopa has a table at seven.").element()).bottom <= middle.top,
+        aboveComposer: middle.bottom <= box(composer).top,
+        seen: notice.contains(document.elementFromPoint(middle.x + middle.width / 2, middle.y + middle.height / 2)),
+        inComposer: composer?.textContent?.includes("did not complete"),
+      };
+    };
+    const clear = { inTranscript: true, underReply: true, aboveComposer: true, seen: true, inComposer: false };
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": while the reply is still written
+    expect([await placed(), Boolean(document.querySelector("[data-alpha-message-id='reply']"))]).toEqual([clear, true]);
+    done.resolve();
+    await expect.poll(() => document.querySelector("[data-alpha-message-id='reply']")).toBeNull();
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": once the reply is kept in the conversation
+    expect(await placed()).toEqual(clear);
   });
 
   // spec/app/assistant/dock.md, "Inside an app other than the Browser, Ask Alpha at rest is the pill; Type raises it to typing, where the whole bar shows, and a swipe up from it opens the sheet": as v119's pill, a swipe up that starts on Type carries the sheet with the finger and opens it without typing; once it is a drag the sheet holds the pointer, so later moves reach the sheet as a captured touch's do

@@ -2,6 +2,10 @@
   "key": "alpha/app/update/index@1",
   "spec": "spec/app/update/index.md",
   "shape": "ee6185a2c5b41da1",
+  "sealed": {
+    "shape": "ee6185a2c5b41da1",
+    "state": "a805a61beefde01d"
+  },
   "state": {
     "installed": 0,
     "signer": 0,

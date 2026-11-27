@@ -2,6 +2,10 @@
   "key": "alpha/app/reminders/index@1",
   "spec": "spec/app/reminders/index.md",
   "shape": "8e061c7b3c009229",
+  "sealed": {
+    "shape": "8e061c7b3c009229",
+    "state": "7fdd66c3bae33f69"
+  },
   "state": {
     "owner": 1,
     "today": 10,

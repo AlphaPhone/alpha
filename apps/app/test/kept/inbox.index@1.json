@@ -2,6 +2,10 @@
   "key": "alpha/app/inbox/index@1",
   "spec": "spec/app/inbox/index.md",
   "shape": "daaff64c78c48bbd",
+  "sealed": {
+    "shape": "daaff64c78c48bbd",
+    "state": "f10da0645749350f"
+  },
   "state": {
     "signedIn": true,
     "accounts": {

@@ -2,6 +2,10 @@
   "key": "alpha/app/telegram/composer@1",
   "spec": "spec/app/telegram/composer.md",
   "shape": "866bdf984a29ac80",
+  "sealed": {
+    "shape": "866bdf984a29ac80",
+    "state": "b0880b4bd326e61a"
+  },
   "state": {
     "authenticated": true,
     "chat": 5,

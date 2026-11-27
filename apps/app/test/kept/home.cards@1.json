@@ -2,6 +2,10 @@
   "key": "alpha/app/home/cards@1",
   "spec": "spec/app/home/cards.md",
   "shape": "cac25f1d2c9a6024",
+  "sealed": {
+    "shape": "cac25f1d2c9a6024",
+    "state": "5e372ee0e2114c54"
+  },
   "state": {
     "calendar": {
       "read": {

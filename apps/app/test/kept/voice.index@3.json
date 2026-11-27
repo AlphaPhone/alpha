@@ -2,6 +2,10 @@
   "key": "alpha/app/voice/index@3",
   "spec": "spec/app/voice/index.md",
   "shape": "86cfc0602e3e8c88",
+  "sealed": {
+    "shape": "86cfc0602e3e8c88",
+    "state": "62fa03c4db890519"
+  },
   "state": {
     "phase": "Idle",
     "session": 0,

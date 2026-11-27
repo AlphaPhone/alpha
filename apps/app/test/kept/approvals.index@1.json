@@ -2,6 +2,10 @@
   "key": "alpha/app/approvals/index@1",
   "spec": "spec/app/approvals/index.md",
   "shape": "d1850f7a67e3ebeb",
+  "sealed": {
+    "shape": "d1850f7a67e3ebeb",
+    "state": "6a940ec574ea38ab"
+  },
   "state": {
     "proposals": {
       "1": {

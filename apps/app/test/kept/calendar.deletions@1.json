@@ -2,6 +2,10 @@
   "key": "alpha/app/calendar/deletions@1",
   "spec": "spec/app/calendar/deletions.md",
   "shape": "9e9047e6b3a47e8f",
+  "sealed": {
+    "shape": "9e9047e6b3a47e8f",
+    "state": "5fc891dd53b6a0fe"
+  },
   "state": {
     "owner": 1,
     "waiting": 0,
