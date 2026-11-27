@@ -8,9 +8,28 @@
       "status": "Idle",
       "ticket": 0
     },
-    "custody": "NoWallet",
-    "canHold": false,
-    "accounts": [],
+    "custody": "Ready",
+    "canHold": true,
+    "accounts": [
+      {
+        "family": "Evm",
+        "address": "0x000000000000000000000000000000000000dEaD",
+        "network": "base",
+        "symbol": "ETH",
+        "decimals": 18,
+        "connected": true,
+        "canSend": true
+      },
+      {
+        "family": "Solana",
+        "address": "11111111111111111111111111111111",
+        "network": "solana",
+        "symbol": "SOL",
+        "decimals": 9,
+        "connected": true,
+        "canSend": true
+      }
+    ],
     "change": "Making",
     "changing": {
       "id": 0,
@@ -20,18 +39,49 @@
       "status": "Idle",
       "ticket": 0
     },
-    "held": [],
-    "unread": [],
+    "held": [
+      {
+        "family": "Evm",
+        "asset": "native",
+        "symbol": "ETH",
+        "decimals": 18,
+        "units": "12000000000000000"
+      }
+    ],
+    "unread": [
+      "Solana"
+    ],
     "desk": {
       "status": "Idle",
       "ticket": 0
     },
-    "waiting": [],
+    "waiting": [
+      {
+        "id": 3,
+        "family": "Evm",
+        "asset": "native",
+        "symbol": "ETH",
+        "recipient": "0x0000000000000000000000000000000000000001",
+        "amount": "0.001",
+        "asker": "OwnerAsks"
+      }
+    ],
     "activity": {
       "status": "Idle",
       "ticket": 0
     },
-    "past": [],
+    "past": [
+      {
+        "intent": "intent-2",
+        "family": "Evm",
+        "symbol": "ETH",
+        "decimals": 18,
+        "units": "1000000000000000",
+        "recipient": "0x0000000000000000000000000000000000000001",
+        "at": 1794913600000,
+        "fate": "Arrived"
+      }
+    ],
     "receiving": false,
     "copy": {
       "status": "Idle",

@@ -5,8 +5,17 @@
   "state": {
     "open": false,
     "origin": "Document",
-    "pages": [],
-    "images": 0,
+    "pages": [
+      {
+        "image": 1,
+        "camera": true,
+        "text": 1,
+        "blank": false,
+        "edits": 0,
+        "links": 0
+      }
+    ],
+    "images": 1,
     "keeping": {
       "draft": {
         "sync": "Kept",
@@ -15,8 +24,26 @@
         "base": 0
       },
       "saves": 0,
-      "carrying": [],
-      "saved": [],
+      "carrying": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
+      "saved": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
       "current": true,
       "stored": false,
       "broken": false,
@@ -74,21 +101,47 @@
         "id": 0,
         "outcome": "Planned"
       },
-      "noting": [],
-      "noted": []
+      "noting": [
+        {
+          "image": 1,
+          "camera": true,
+          "text": 1,
+          "blank": false,
+          "edits": 0,
+          "links": 0
+        }
+      ],
+      "noted": [
+        [
+          {
+            "image": 1,
+            "camera": true,
+            "text": 1,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          }
+        ]
+      ]
     },
     "pdf": {
       "id": 1,
       "outcome": "Planned"
     },
     "problem": "NoProblem",
-    "written": [],
+    "written": [
+      [
+        1
+      ]
+    ],
     "keep": {
       "id": 0,
       "outcome": "Planned"
     },
     "keptNow": 0,
-    "kept": []
+    "kept": [
+      1
+    ]
   },
   "memoryOnly": [
     "search"
@@ -99,8 +152,17 @@
       "until": "173bd6f26b",
       "state": {
         "open": false,
-        "pages": [],
-        "images": 0,
+        "pages": [
+          {
+            "image": 1,
+            "camera": true,
+            "text": 1,
+            "blank": false,
+            "edits": 0,
+            "links": 0
+          }
+        ],
+        "images": 1,
         "keeping": {
           "draft": {
             "sync": "Kept",
@@ -109,8 +171,26 @@
             "base": 0
           },
           "saves": 0,
-          "carrying": [],
-          "saved": [],
+          "carrying": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
+          "saved": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
           "current": true,
           "stored": false,
           "broken": false,
@@ -168,21 +248,47 @@
             "id": 0,
             "outcome": "Planned"
           },
-          "noting": [],
-          "noted": []
+          "noting": [
+            {
+              "image": 1,
+              "camera": true,
+              "text": 1,
+              "blank": false,
+              "edits": 0,
+              "links": 0
+            }
+          ],
+          "noted": [
+            [
+              {
+                "image": 1,
+                "camera": true,
+                "text": 1,
+                "blank": false,
+                "edits": 0,
+                "links": 0
+              }
+            ]
+          ]
         },
         "pdf": {
           "id": 1,
           "outcome": "Planned"
         },
         "problem": "NoProblem",
-        "written": [],
+        "written": [
+          [
+            1
+          ]
+        ],
         "keep": {
           "id": 0,
           "outcome": "Planned"
         },
         "keptNow": 0,
-        "kept": []
+        "kept": [
+          1
+        ]
       }
     }
   ]

@@ -3,13 +3,20 @@
   "spec": "spec/app/notes/trash.md",
   "shape": "0aedd26153fbfc0b",
   "state": {
-    "owner": 0,
+    "owner": 1,
     "showing": false,
     "read": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 1
     },
-    "entries": [],
+    "entries": [
+      {
+        "id": 61,
+        "at": 1794827200000,
+        "revision": 3,
+        "recording": 0
+      }
+    ],
     "opened": 0,
     "clock": 0,
     "question": "NoQuestion",
@@ -27,7 +34,9 @@
     "subject": 0,
     "revision": 0,
     "asOf": 0,
-    "recordings": [],
+    "recordings": [
+      8
+    ],
     "actor": "Phone",
     "attempt": {
       "id": 0,

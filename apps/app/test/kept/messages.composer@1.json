@@ -14,7 +14,9 @@
         "base": 0
       }
     },
-    "saved": {},
+    "saved": {
+      "9": "OwnerWrote"
+    },
     "suggestion": {
       "status": "Idle",
       "ticket": 0
@@ -79,7 +81,9 @@
             "base": 0
           }
         },
-        "saved": {},
+        "saved": {
+          "9": "OwnerWrote"
+        },
         "suggestion": {
           "status": "Idle",
           "ticket": 0
@@ -126,7 +130,9 @@
             "base": 0
           }
         },
-        "saved": {},
+        "saved": {
+          "9": "OwnerWrote"
+        },
         "suggestion": {
           "status": "Idle",
           "ticket": 0

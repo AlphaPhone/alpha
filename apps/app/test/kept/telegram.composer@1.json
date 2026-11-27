@@ -3,8 +3,8 @@
   "spec": "spec/app/telegram/composer.md",
   "shape": "866bdf984a29ac80",
   "state": {
-    "authenticated": false,
-    "chat": 0,
+    "authenticated": true,
+    "chat": 5,
     "canPost": true,
     "slot": {
       "author": "Nobody",
@@ -15,7 +15,9 @@
         "base": 0
       }
     },
-    "saved": {},
+    "saved": {
+      "5": "OwnerWrote"
+    },
     "alphaUndo": {
       "holding": "Free",
       "until": 0
@@ -32,6 +34,11 @@
     },
     "barTarget": "ChatTarget",
     "sheet": "SheetClosed",
-    "alphaRequests": []
+    "alphaRequests": [
+      {
+        "chat": 5,
+        "text": "Tell Sam I will call after six"
+      }
+    ]
   }
 }

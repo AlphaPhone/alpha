@@ -21,8 +21,23 @@
       }
     ],
     "nextListId": 2,
-    "items": [],
-    "nextItemId": 1,
+    "items": [
+      {
+        "id": 1,
+        "listId": 1,
+        "hasDue": true,
+        "dueDay": 11,
+        "hasDueTime": false,
+        "dueMinute": 0,
+        "repeat": "NoRepeat",
+        "priority": "MediumPriority",
+        "flagged": true,
+        "completed": false,
+        "snoozedUntil": 0,
+        "revision": 1
+      }
+    ],
+    "nextItemId": 2,
     "hiddenId": 0,
     "view": {
       "tag": "Overview"

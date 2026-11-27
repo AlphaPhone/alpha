@@ -3,7 +3,7 @@
   "spec": "spec/app/calendar/editor.md",
   "shape": "bdd3af9ee5bb0e67",
   "state": {
-    "owner": 0,
+    "owner": 1,
     "form": "NoForm",
     "shown": false,
     "target": 0,
@@ -38,6 +38,8 @@
       "status": "Idle",
       "ticket": 0
     },
-    "latched": []
+    "latched": [
+      41
+    ]
   }
 }

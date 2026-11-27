@@ -3,7 +3,9 @@
   "spec": "spec/app/shell/index.md",
   "shape": "7f8453f7a1a50aa6",
   "state": {
-    "trail": [],
+    "trail": [
+      "Clock"
+    ],
     "drawer": false,
     "assistant": "Bar",
     "image": false,

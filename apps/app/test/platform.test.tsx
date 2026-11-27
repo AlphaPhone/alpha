@@ -368,14 +368,13 @@ async function keptOver(stored: ReadonlyMap<string, unknown>) {
 // spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
 it("Keep my phone's state across restarts: every shape a durable record was ever kept in is read again with the owner's data, and a value of a wrong kind is still set aside (spec/app/platform/index.md, \"A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it\")", async () => {
   const problems: string[] = [];
+  const today = await keptOver(new Map(keptRecords.map(({ key, state }) => [key, state])));
   for (const record of keptRecords) {
     const { parseState, initial } = await machineOf(record.key);
     const shape = shapeOf(record.key);
     if (shape !== record.shape) problems.push(`${record.key}: its kept shape changed (now ${shape}, test/kept has ${record.shape}). Move its "state" into "earlier", bring that earlier shape forward in the record's migration, then write today's "state" and "shape"`);
     if (parseState({ ...Object.fromEntries((record.memoryOnly ?? []).map((name) => [name, initial[name]])), ...record.state }) === undefined) problems.push(`${record.key}: the "state" in test/kept is not today's shape`);
   }
-
-  const today = await keptOver(new Map(keptRecords.map(({ key, state }) => [key, state])));
   const recorded = new Set(keptRecords.map(({ key }) => key));
   for (const key of today.durable) if (!recorded.has(key)) problems.push(`${key}: a durable record with no file in test/kept`);
   for (const key of recorded) if (!today.durable.has(key)) problems.push(`${key}: test/kept has a record Alpha no longer keeps`);

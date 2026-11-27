@@ -3,21 +3,106 @@
   "spec": "spec/app/approvals/index.md",
   "shape": "d1850f7a67e3ebeb",
   "state": {
-    "proposals": {},
-    "ids": [],
-    "since": {},
+    "proposals": {
+      "1": {
+        "stage": "Pending",
+        "operation": "Change",
+        "owner": 1,
+        "message": 0,
+        "expires": 1795000600000,
+        "review": {
+          "showing": true,
+          "revision": 0,
+          "shown": 0
+        },
+        "attempt": {
+          "id": 1,
+          "outcome": "Planned"
+        },
+        "refusal": "Unrefused",
+        "told": false,
+        "verdict": "Unverified"
+      },
+      "2": {
+        "stage": "Pending",
+        "operation": "Look",
+        "owner": 1,
+        "message": 0,
+        "expires": 1795000600000,
+        "review": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "attempt": {
+          "id": 2,
+          "outcome": "Planned"
+        },
+        "refusal": "Unrefused",
+        "told": false,
+        "verdict": "Unverified"
+      },
+      "3": {
+        "stage": "Reserving",
+        "operation": "Glance",
+        "owner": 1,
+        "message": 3,
+        "expires": 1795000600000,
+        "review": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "attempt": {
+          "id": 3,
+          "outcome": "Planned"
+        },
+        "refusal": "Unrefused",
+        "told": false,
+        "verdict": "Unverified"
+      }
+    },
+    "ids": [
+      1,
+      2,
+      3
+    ],
+    "since": {
+      "1": 1,
+      "2": 1,
+      "3": 1
+    },
     "running": 0,
     "pass": {
-      "message": 0,
-      "started": 0,
-      "open": false,
+      "message": 3,
+      "started": 1,
+      "open": true,
       "paged": false
     },
-    "interrupted": [],
-    "leases": {},
+    "interrupted": [
+      2,
+      3
+    ],
+    "leases": {
+      "1": {
+        "status": "NoLease",
+        "id": 0,
+        "owner": 0
+      },
+      "2": {
+        "status": "Held",
+        "id": 2,
+        "owner": 1
+      },
+      "3": {
+        "status": "NoLease",
+        "id": 0,
+        "owner": 0
+      }
+    },
     "waiting": {
       "status": "Idle",
-      "ticket": 0
+      "ticket": 1
     }
   }
 }

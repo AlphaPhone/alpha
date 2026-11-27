@@ -3,32 +3,126 @@
   "spec": "spec/app/startup/access.md",
   "shape": "0333796f4d1b3df9",
   "state": {
-    "begun": false,
-    "steps": [],
+    "begun": true,
+    "steps": [
+      "Notifications",
+      "Microphone",
+      "Camera",
+      "Location",
+      "Calendar",
+      "Photos",
+      "Files"
+    ],
     "pregrants": false,
-    "grants": {},
-    "reads": {},
-    "known": [],
-    "promptless": [],
-    "off": [],
-    "stale": [],
-    "choices": {},
-    "kept": {},
+    "grants": {
+      "0": {
+        "grant": "Unasked",
+        "asked": false
+      },
+      "1": {
+        "grant": "Granted",
+        "asked": false
+      },
+      "2": {
+        "grant": "Unasked",
+        "asked": false
+      },
+      "3": {
+        "grant": "Denied",
+        "asked": false
+      },
+      "4": {
+        "grant": "Unasked",
+        "asked": false
+      },
+      "5": {
+        "grant": "Limited",
+        "asked": false
+      },
+      "6": {
+        "grant": "Unasked",
+        "asked": false
+      }
+    },
+    "reads": {
+      "0": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "1": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "2": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "3": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "4": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "5": {
+        "status": "Loaded",
+        "ticket": 1
+      },
+      "6": {
+        "status": "Loaded",
+        "ticket": 1
+      }
+    },
+    "known": [
+      "Notifications",
+      "Microphone",
+      "Camera",
+      "Location",
+      "Calendar",
+      "Photos",
+      "Files"
+    ],
+    "promptless": [
+      "Location"
+    ],
+    "off": [
+      "Files"
+    ],
+    "stale": [
+      "Notifications",
+      "Microphone",
+      "Camera",
+      "Location",
+      "Calendar",
+      "Photos",
+      "Files"
+    ],
+    "choices": {
+      "0": "Skipped",
+      "1": "Skipped"
+    },
+    "kept": {
+      "0": "Skipped",
+      "1": "Skipped"
+    },
     "ahead": 0,
-    "acted": [],
-    "prompting": false,
-    "promptFor": "Notifications",
-    "since": 0,
+    "acted": [
+      "Camera"
+    ],
+    "prompting": true,
+    "promptFor": "Camera",
+    "since": 1795000003000,
     "stalled": false,
     "store": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loading",
+      "ticket": 3
     },
     "notice": "Quiet",
     "covered": false,
     "finish": {
-      "setUp": false,
-      "created": false,
+      "setUp": true,
+      "created": true,
       "allSet": false,
       "silent": false,
       "trouble": "NoTrouble"
