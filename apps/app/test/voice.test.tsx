@@ -413,6 +413,18 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     const bubbles = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.textContent ?? "");
     await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(["Book a table at Nopa", "Book table did not complete"])));
     expect(document.body.textContent?.includes("booked")).toBe(false);
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the notice draws once, in the transcript under its reply, and nothing of it shows on, near or under the message bar.
+    const outsideTranscript = () => {
+      const page = document.body.cloneNode(true) as HTMLElement;
+      for (const log of page.querySelectorAll("[role=log]")) log.remove();
+      return page.textContent ?? "";
+    };
+    expect([
+      document.body.textContent?.split("did not complete").length,
+      document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent?.includes("Book table did not complete"),
+      outsideTranscript().includes("did not complete"),
+      [...document.querySelectorAll("textarea[data-alpha-composer]")].map((field) => Boolean(field.closest("[role=log]"))),
+    ]).toEqual([2, true, false, [false]]);
 
     // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped spoken turn answers the stored reply's text alone, so the chat takes its untold step from its history row.
     world.ask.nextDropsWith = { text: "", untold: ["HOLD_SEAT"] };

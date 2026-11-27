@@ -107,7 +107,10 @@ sent unless the request says so, all day, and this occurrence or every one.
 Its heading names the change as Sunday's v119 did: Add event for a new
 event and Change event for a change.
 A request gone from the list is withdrawn; a new revision of the same
-request is a change of its event. A change the owner declined, the agent
+request is a change of its event. What a read of the list finds counts
+only for the card it was read for: an answer that comes back after that
+card ended, or after another card took its place, neither revises nor
+completes the card shown then. A change the owner declined, the agent
 withdrew or Google refused reads the list again at once, so the next
 pending request's card shows without waiting for Calendar's next read; the
 request just declined is not proposed again while its decline is on its
