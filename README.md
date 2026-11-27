@@ -75,8 +75,8 @@ tree point at Alpha `develop` at
 `pnpm all @repo/site#build` generates the site's spec and the design system's
 theme first and writes the page to `dist/` in `apps/site`, the page already
 drawn in its HTML and every image named by its content's hash, plus
-`alpha-home.webp` (the social card) and `alpha-mark.svg` at the root, the
-URLs the earlier page published; `pnpm --filter @repo/site dev` serves it.
+`og.png`, the 1200 by 630 social card, and `alpha-home.webp` and
+`alpha-mark.svg`, the URLs the earlier page published, at the root; `pnpm --filter @repo/site dev` serves it.
 The page keeps one phone in view while the visitor scrolls: Home, then a
 passage each for the calendar, a text Alpha asks before sending, a map, the
 inbox and a spoken note, and the phone plays the scene of the passage reached
@@ -85,8 +85,11 @@ page after the app's own Home and conversation, sized from a 360 by 780
 screen, so it is sharp at any width. Every conversation is staged in the page
 and asks no service anything. The page reads without its script, the phone
 resting on Home; the script (React and the demo's Effect runtime) only plays
-the scenes, and under reduced motion shows each whole. `alpha-home.webp` in
-`apps/site/src` is the social card, cut from `alpha-screens.png` in
+the scenes, and under reduced motion shows each whole. `og.png` in
+`apps/site/public` is the social card that `og:image` and `twitter:image`
+name: the page's headline beside two of its phones, drawn from the page's own
+scenes. `alpha-home.webp` in `apps/site/src`, the earlier card, is cut from
+`alpha-screens.png` in
 [Alpha `develop`'s docs assets](https://github.com/eliza-research/alpha/tree/bd70db55b2b3cab4c6f0ec2f4faa28edfa83979a/docs/assets)
 at 370 by 813 and saved as WebP.
 
