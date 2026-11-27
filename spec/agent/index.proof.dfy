@@ -8,19 +8,32 @@ lemma NotSpeech(r: Route)
   assert nativeSpeechRoutes[1].path[5] == "a"[0] && nativeSpeechRoutes[1].path[6] == "s"[0];
 }
 
+lemma CoreNotSpeechA(i: int)
+  requires 0 <= i < 15
+  ensures pageRoutesCore[i] !in nativeSpeechRoutes
+{
+  if i == 0 { NotSpeech(pageRoutesCore[0]); } else if i == 1 { NotSpeech(pageRoutesCore[1]); } else if i == 2 { NotSpeech(pageRoutesCore[2]); } else if i == 3 { NotSpeech(pageRoutesCore[3]); } else if i == 4 { NotSpeech(pageRoutesCore[4]); }
+  else if i == 5 { NotSpeech(pageRoutesCore[5]); } else if i == 6 { NotSpeech(pageRoutesCore[6]); } else if i == 7 { NotSpeech(pageRoutesCore[7]); } else if i == 8 { NotSpeech(pageRoutesCore[8]); } else if i == 9 { NotSpeech(pageRoutesCore[9]); }
+  else if i == 10 { NotSpeech(pageRoutesCore[10]); } else if i == 11 { NotSpeech(pageRoutesCore[11]); } else if i == 12 { NotSpeech(pageRoutesCore[12]); } else if i == 13 { NotSpeech(pageRoutesCore[13]); } else { NotSpeech(pageRoutesCore[14]); }
+}
+
+lemma CoreNotSpeechB(i: int)
+  requires 15 <= i < 31
+  ensures pageRoutesCore[i] !in nativeSpeechRoutes
+{
+  if i == 15 { NotSpeech(pageRoutesCore[15]); } else if i == 16 { NotSpeech(pageRoutesCore[16]); } else if i == 17 { NotSpeech(pageRoutesCore[17]); } else if i == 18 { NotSpeech(pageRoutesCore[18]); } else if i == 19 { NotSpeech(pageRoutesCore[19]); }
+  else if i == 20 { NotSpeech(pageRoutesCore[20]); } else if i == 21 { NotSpeech(pageRoutesCore[21]); } else if i == 22 { NotSpeech(pageRoutesCore[22]); } else if i == 23 { NotSpeech(pageRoutesCore[23]); } else if i == 24 { NotSpeech(pageRoutesCore[24]); }
+  else if i == 25 { NotSpeech(pageRoutesCore[25]); } else if i == 26 { NotSpeech(pageRoutesCore[26]); } else if i == 27 { NotSpeech(pageRoutesCore[27]); } else if i == 28 { NotSpeech(pageRoutesCore[28]); } else if i == 29 { NotSpeech(pageRoutesCore[29]); }
+  else { NotSpeech(pageRoutesCore[30]); }
+}
+
 lemma CoreNotSpeech(route: Route)
   requires route in pageRoutesCore
   ensures route !in nativeSpeechRoutes
 {
   assert |pageRoutesCore| == 31;
   var i :| 0 <= i < 31 && pageRoutesCore[i] == route;
-  if i == 0 { NotSpeech(pageRoutesCore[0]); } else if i == 1 { NotSpeech(pageRoutesCore[1]); } else if i == 2 { NotSpeech(pageRoutesCore[2]); } else if i == 3 { NotSpeech(pageRoutesCore[3]); } else if i == 4 { NotSpeech(pageRoutesCore[4]); }
-  else if i == 5 { NotSpeech(pageRoutesCore[5]); } else if i == 6 { NotSpeech(pageRoutesCore[6]); } else if i == 7 { NotSpeech(pageRoutesCore[7]); } else if i == 8 { NotSpeech(pageRoutesCore[8]); } else if i == 9 { NotSpeech(pageRoutesCore[9]); }
-  else if i == 10 { NotSpeech(pageRoutesCore[10]); } else if i == 11 { NotSpeech(pageRoutesCore[11]); } else if i == 12 { NotSpeech(pageRoutesCore[12]); } else if i == 13 { NotSpeech(pageRoutesCore[13]); } else if i == 14 { NotSpeech(pageRoutesCore[14]); }
-  else if i == 15 { NotSpeech(pageRoutesCore[15]); } else if i == 16 { NotSpeech(pageRoutesCore[16]); } else if i == 17 { NotSpeech(pageRoutesCore[17]); } else if i == 18 { NotSpeech(pageRoutesCore[18]); } else if i == 19 { NotSpeech(pageRoutesCore[19]); }
-  else if i == 20 { NotSpeech(pageRoutesCore[20]); } else if i == 21 { NotSpeech(pageRoutesCore[21]); } else if i == 22 { NotSpeech(pageRoutesCore[22]); } else if i == 23 { NotSpeech(pageRoutesCore[23]); } else if i == 24 { NotSpeech(pageRoutesCore[24]); }
-  else if i == 25 { NotSpeech(pageRoutesCore[25]); } else if i == 26 { NotSpeech(pageRoutesCore[26]); } else if i == 27 { NotSpeech(pageRoutesCore[27]); } else if i == 28 { NotSpeech(pageRoutesCore[28]); } else if i == 29 { NotSpeech(pageRoutesCore[29]); }
-  else { NotSpeech(pageRoutesCore[30]); }
+  if i < 15 { CoreNotSpeechA(i); } else { CoreNotSpeechB(i); }
 }
 
 lemma AppsNotSpeech(route: Route)
@@ -100,5 +113,28 @@ lemma lawSpeechRoutesAreAbsentFromThePage_ensures(route: Route)
     else if route in pageRoutesApps { AppsNotSpeech(route); }
     else if route in pageRoutesWorkflows { WorkflowsNotSpeech(route); }
     else { TasksWalletNotSpeech(route); }
+  }
+}
+
+lemma NotOtherCleanup(xs: seq<Route>, m: Method)
+  requires m != Method.Post
+  requires forall i :: 0 <= i < |xs| ==> xs[i] != Route(m, browserNotesCleanup, false)
+  ensures Route(m, browserNotesCleanup, false) !in xs
+{
+}
+
+lemma lawBrowserNotesCleanupIsOnThePage_ensures(method_: Method)
+  ensures (lawBrowserNotesCleanupIsOnThePage(method_) == true)
+{
+  var r := Route(method_, browserNotesCleanup, false);
+  if method_ == Method.Post {
+    assert pageRoutesWorkflows[11] == r;
+    assert r in pageRoutesWorkflows;
+    assert r in pageRoutes;
+  } else {
+    NotOtherCleanup(pageRoutesCore, method_);
+    NotOtherCleanup(pageRoutesApps, method_);
+    NotOtherCleanup(pageRoutesWorkflows, method_);
+    NotOtherCleanup(pageRoutesTasksWallet, method_);
   }
 }

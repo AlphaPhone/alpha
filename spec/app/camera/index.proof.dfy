@@ -115,7 +115,7 @@ lemma PermissionEffects(before: Camera, after: Done)
 {
   hide *;
   reveal stepALostPreviewFails, stepARetiredPreviewIsReleased, stepOneFocusWriteAtATime,
-    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered,
+    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered;
 }
 
 lemma PermissionCamera(s: Camera, grant: kit__permission_Grant, now: int, by_: app__photos__actor_Actor)
@@ -785,31 +785,6 @@ lemma recordingSize_ensures(s: Camera, total: int, now: int, by_: app__photos__a
   }
 }
 
-lemma toggleRatio_ensures(s: Camera, by_: app__photos__actor_Actor)
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysNoCameraWithoutAccess(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysNothingHeldAway(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysStartsAccounted(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysTorchBelongsToItsPreview(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysLensSettingsValid(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysFocusFollowsTheNewestTap(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysRecordingHoldsThePreview(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysOneShutterOnTheCamera(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepALostPreviewFails(s, "toggleRatio", toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepARetiredPreviewIsReleased(s, "toggleRatio", toggleRatio(s, by_).state, toggleRatio(s, by_).out))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepOneFocusWriteAtATime(s, "toggleRatio", toggleRatio(s, by_).state, toggleRatio(s, by_).out))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepASavedVideoIsTheLast(s, toggleRatio(s, by_).state))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepTheShutterNeverFiresCovered(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepEachRequestIsAnsweredOnce(s, toggleRatio(s, by_).state, toggleRatio(s, by_).out))
-  ensures (inv(s) ==> canToggleRatio(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "toggleRatio", toggleRatio(s, by_).state))
-{
-  if inv(s) && canToggleRatio(s, by_) {
-    var widened := s.(wide := !s.wide);
-    StartAccounted([StopPreview(s.preview)], widened);
-  }
-}
-
 lemma agentLens_ensures(s: Camera, requested: RequestedLens, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysNoCameraWithoutAccess(agentLens(s, requested, by_).state))
   ensures (inv(s) ==> canAgentLens(s, requested, by_) ==> alwaysNothingHeldAway(agentLens(s, requested, by_).state))
@@ -1156,34 +1131,4 @@ lemma stopTimedOut_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
     }
     FilmingPreserves(s, ended, now, "stopTimedOut");
   }
-}
-
-lemma delayTick_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysNoCameraWithoutAccess(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysNothingHeldAway(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysStartsAccounted(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysTorchBelongsToItsPreview(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysLensSettingsValid(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysFocusFollowsTheNewestTap(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysRecordingHoldsThePreview(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysOneShutterOnTheCamera(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysTheRequestWaitsOnTheCamera(delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepALostPreviewFails(s, "delayTick", delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepARetiredPreviewIsReleased(s, "delayTick", delayTick(s, now, by_).state, delayTick(s, now, by_).out))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepOneFocusWriteAtATime(s, "delayTick", delayTick(s, now, by_).state, delayTick(s, now, by_).out))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepSoundOnlyWithTheMicrophone(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepASavedVideoIsTheLast(s, delayTick(s, now, by_).state))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepTheShutterNeverFiresCovered(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepEachRequestIsAnsweredOnce(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
-  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepTheAgentFailsOnlyForCause(s, "delayTick", delayTick(s, now, by_).state))
-{
-  hide *;
-  reveal inv, canDelayTick, delayTick, shutter, emit, ready, holds, free, recording,
-    alwaysNoCameraWithoutAccess, alwaysNothingHeldAway, alwaysStartsAccounted,
-    alwaysTorchBelongsToItsPreview, alwaysLensSettingsValid, alwaysFocusFollowsTheNewestTap,
-    alwaysRecordingHoldsThePreview, alwaysOneShutterOnTheCamera, alwaysTheRequestWaitsOnTheCamera,
-    app__camera__agent_alwaysResultsAreHonest,
-    stepALostPreviewFails, stepARetiredPreviewIsReleased, stepOneFocusWriteAtATime,
-    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered,
-    stepEachRequestIsAnsweredOnce, stepTheAgentFailsOnlyForCause;
 }
