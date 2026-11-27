@@ -464,7 +464,7 @@ was found deleted meanwhile. Asking either sends the owner's save at once when t
 not gone yet. Nothing is shared or deleted before the save lands: once the
 editor shows the note saved, with nothing left unsaved, the phone opens the
 share over the saved revision ("More over a new note offers Share, Pin and
-Delete, as v119's did") or hands the note, at the revision saved, to
+Delete") or hands the note, at the revision saved, to
 Recently deleted as the owner's Delete does ("Only the owner deletes the
 open note, only once everything typed is saved and no save is on its way,
 and only when Recently deleted can take it"). The phone hands it over once

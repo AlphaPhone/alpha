@@ -1895,7 +1895,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     return { world, review, alpha, area };
   }
 
-  // spec/app/assistant/cards.md, "What each kind offers"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
+  // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it"; spec/app/settings/preferences.md, "Ask before Alpha acts covers the agent's actions on the web, with the camera, in Photos and Files, its reading of the latest texter's number and its text drafts"
   it("declines a page's card from its last row: nothing opens, nothing is claimed, and the result chip says Declined", async () => {
     const url = "https://www.alphacompute.ai/";
     const { world, review, alpha } = await openAskFirstPageCard(url);

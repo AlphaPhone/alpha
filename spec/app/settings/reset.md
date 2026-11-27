@@ -17,6 +17,11 @@ only ([Settings](./index.md)).
 
 ### A reset holds the phone's review in flight and what Alpha said when nothing was reset
 
+A state an earlier build kept while it also held a recording, tries,
+revocations and a clearing is read with only its review and what was said,
+and a word it said that Alpha no longer says reads as Quiet, as a fresh
+machine starts.
+
 ```quint
 import read as R from "../../kit/read"
 import timed as T from "./timed"

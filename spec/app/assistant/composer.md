@@ -211,7 +211,9 @@ pure def retry(c: Composer): Moved = written(false, { ...c, failing: false })
 
 What was saved is read again when the composer opens; attachments, the
 editor and a send in hand are gone. Tickets carry on, so no answer to
-what was asked before is taken after.
+what was asked before is taken after. A composer an earlier build kept
+while its editor and what it held could carry a question is read without
+the question, and with the rest as it was.
 
 ```quint
 pure def reopen(c: Composer): Composer = rest(c.binding, c)

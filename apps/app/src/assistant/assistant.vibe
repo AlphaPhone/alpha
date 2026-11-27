@@ -43,7 +43,7 @@ import { Attempts, fresh } from "../runtime/index.vibe"
 import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
-import { type Job, answer, applying, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields } from "../runtime/index.vibe"
+import { type Job, answer, applying, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields, withoutFields } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
@@ -1983,12 +1983,18 @@ function storedChats(key: string, start = Chats.initial) {
   return Layer.provide(Chats.stored(key, start), filledStore(key, (kept) => ({ fresh: Chats.initial.fresh, ...kept }), Chats.parseState))
 }
 
+// spec/app/assistant/composer.md, "A restart or an app update keeps only what the slot holds, and the hold numbers"
+/** A composer kept while its editor and what it held could carry a question: read without the question. */
+function storedComposer(key: string, start = Composer.initial) {
+  return Layer.provide(Composer.stored(key, start), filledStore(key, (kept) => ({ ...kept, editor: withoutFields(kept.editor, ["question"]), held: withoutFields(kept.held, ["question"]) }), Composer.parseState))
+}
+
 export const assisting = Layer.provideMerge(
   together(
     mediaReview,
     reacting({ ...Conversation, stored: storedConversation }, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
     reacting({ ...Chats, stored: storedChats }, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
-    reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
+    reacting({ ...Composer, stored: storedComposer }, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
     reacting(Search, { carry: carrySearch }),
     reacting(Reply, {}),
     reacting(Dock, { carry: carryDock }),

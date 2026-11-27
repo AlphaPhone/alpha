@@ -40,6 +40,11 @@ module pure {
     const kept = fieldsOf(value)
     return kept === undefined ? value : { ...fields, ...kept }
   }
+  /** `value` without each of `names`, where it is a JSON object, and as it was otherwise. @throws {never} */
+  export function withoutFields(value: unknown, names: ReadonlyArray<string>): unknown {
+    const kept = fieldsOf(value)
+    return kept === undefined ? value : Object.fromEntries(Object.entries(kept).filter(([name]) => !names.includes(name)))
+  }
   /** Whether a stored-layer failure is `NotAState` rather than a transient store read error. @throws {never} */
   export function isNotAState(cause: unknown): boolean {
     return typeof cause === "object" && cause !== null && "_tag" in cause && (cause as { readonly _tag?: unknown })._tag === "NotAState"
@@ -52,8 +57,8 @@ module pure {
     return correlationKeys.some((key) => key in ev) && !correlationKeys.some((key) => key in lo)
   }
 }
-import { fieldsOf, isNotAState, isUnticketedLost, stamped, untimed, withFields, written } from pure
-export { fieldsOf, stamped, untimed, withFields }
+import { fieldsOf, isNotAState, isUnticketedLost, stamped, untimed, withFields, withoutFields, written } from pure
+export { fieldsOf, stamped, untimed, withFields, withoutFields }
 
 /** What a transition that returns effects gives: the state it led to and what it asks of the world. */
 export interface Moved<S, Fx> {
