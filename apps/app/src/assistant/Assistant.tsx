@@ -54,7 +54,7 @@ import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, remove
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ChatScrim, DragStrip, useSheetFollow } from "./follow.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
-import { ReplyFailure } from "./ReplyFailure.tsx";
+import { ReplyFailure, UntoldSteps } from "./ReplyFailure.tsx";
 import {
   actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
 } from "./recording-summary.vibe";
@@ -658,7 +658,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const replyWords = replyBlocks(seen.reply, true).words;
   const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, onOpenLink } as const] : [];
+  // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+  const writingReply = replyWords !== "" || seen.replyUntold.length > 0 ? [{
+    id: "reply", author: "alpha", text: replyWords, onOpenLink,
+    ...(seen.replyUntold.length === 0 ? {} : { children: <UntoldSteps untold={seen.replyUntold} /> }),
+  } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,

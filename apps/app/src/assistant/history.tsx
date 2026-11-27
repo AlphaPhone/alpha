@@ -10,7 +10,7 @@ import type { useMachine as useSearch } from "../../gen/app__assistant__search.r
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
 import { replyBlocks, wordsOf } from "./words.ts";
-import { ReplyFailure } from "./ReplyFailure.tsx";
+import { ReplyFailure, UntoldSteps } from "./ReplyFailure.tsx";
 import type { Attached, Board, Line } from "./talk.vibe";
 
 export interface MessageActions {
@@ -69,7 +69,9 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
       const rows = pastLater ? messagesAfterLater : messages;
       if (line.id === later) pastLater = true;
       // spec/app/assistant/context.md, "A reviewed email or voice-note transcript flag travels in structured turn context, never inside the owner's request text": a send of only the reviewed email or transcript draws no empty bubble of the owner's.
-      if (text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && !line.attachments?.length && line.quote === undefined) continue;
+      const untold = line.untold ?? [];
+      // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a reply with no text that marks a step is its notices.
+      if (text.trim() === "" && cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 && !line.attachments?.length && line.quote === undefined) continue;
       const message = board.numbered(line.id);
       const live = !line.mine && message > 0 && message === chats.messages && !replying;
       const open = live && onOpenMaps !== undefined && opened?.has(message) !== true ? onOpenMaps : undefined;
@@ -90,13 +92,14 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
         text,
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
-        children: cards.length === 0 && choices.length === 0 && line.failure === undefined ? undefined : <>
+        children: cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 ? undefined : <>
           {cards.map((card) => <MapsCardView key={JSON.stringify(card)} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">
               {choice.options.map((option) => <Button key={option.value} variant="secondary" size="sm" onClick={() => onChoose(choice.id, option.value)}>{option.label}</Button>)}
             </div>
           )) : null}
+          <UntoldSteps untold={untold} />
           {line.failure === undefined ? null : <ReplyFailure kind={line.failure} onSettings={onSettings} />}
         </>,
         onFork: recorded && Chats.enabled(chats, fork) ? () => chat(fork) : undefined,
