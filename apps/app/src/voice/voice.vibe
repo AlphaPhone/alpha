@@ -5,7 +5,7 @@ import { Machine as Conversation, type Context as Screen } from "../../gen/app__
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
 import { sendsOpenDocument } from "../../gen/app__assistant__context.effect.vibe"
 import { cueBoundMs, replyWaitMs, type Cue } from "../../gen/app__assistant__reply.effect.vibe"
-import { Machine as Phone, clear, type Telecom } from "../../gen/app__phone.effect.vibe"
+import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -18,10 +18,8 @@ import { MediaReview, proposedReview, ranDirect, sameFiles } from "../assistant/
 import { Talk, type Attached, type DraftSeat } from "../assistant/talk.vibe"
 import type { MessageSmsRequest } from "../messages/agent-sim.vibe"
 import { SystemSettings, classifyVoiceFault, interruptedByCall, refusedForFunds, type NativePageSpeech, type VoiceEvent, type VoicePreview, VoiceBridge } from "../platform/index.vibe"
-import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
-import { type Said, say } from "../notices/index.vibe"
 import { fresh } from "../runtime/index.vibe"
-import { type Job, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
+import { type Job, Time, answer, applying, contained, due, following, hearing, reacting, run, started, stream, together, untimed } from "../runtime/index.vibe"
 import { createShelf } from "../runtime/index.vibe"
 import { signedIn } from "./account.vibe"
 import { replyBlocks } from "../assistant/words.ts"
@@ -989,7 +987,7 @@ effect function dictationVisible(): boolean!!(Device | Layers.Machine | VoiceBri
   return try (try VoiceBridge).dictationForeground()
 }
 
-function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine | Toasts | Said, []> {
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.Machine | VoiceBridge | VoiceWords | SystemSettings | Shell.Machine | Voice.Machine | Time, []> {
   return match (fx) {
     when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
     when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
@@ -1088,7 +1086,11 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
       const confirmed = try (try VoiceBridge).shut(session)
       return { type: "stopped", confirmed }
     }, { type: "stopped", confirmed: false });
-    when { tag: "SayCallEnded" }: run("call notice", say("Voice paused for a phone call."));
+    when { tag: "Release", let afterMs }: answer("release", effect {
+      const time = try Time
+      if (afterMs > 0) try time.until((try time.now()) + afterMs)
+      return { type: "released", confirmed: try (try VoiceBridge).release() }
+    }, { type: "released", confirmed: false });
     when { tag: "Navigate", let session, let turn, let place, let sourceRoute }: run("spoken navigation", navigateLeased(session, turn, place, sourceRoute));
     when { tag: "CheckDictation", let ticket }: answer("check dictation recognition", effect {
       const voice = try Voice.Machine
@@ -1138,10 +1140,6 @@ const autoPrewarm = started(effect {
   })
 }, "auto-prewarming voice")
 
-function liveCall(telecom: Telecom): boolean {
-  return telecom === "OrdinaryCall" || telecom === "MaybeEmergencyCall"
-}
-
 const visibility = started(effect {
   const device = try Device
   const bridge = try VoiceBridge
@@ -1150,7 +1148,7 @@ const visibility = started(effect {
   try Stream.runForEach(device.visible, effect (shown) => {
     if (shown) {
       try bridge.invalidateCache()
-      if (phone !== undefined && liveCall((try phone.get()).telecom)) {
+      if (phone !== undefined && liveCall(try phone.get())) {
         const { session } = try voice.get()
         try contained(voice.send({ type: "callInterrupted", session, foreground: true }), "identifying the call on return")
       }
@@ -1178,13 +1176,13 @@ const navigation = started(effect {
   })
 }, "voice observing shell navigation")
 
-// spec/app/voice/index.md, "A phone call ends Talk and Alpha tells the owner once"
+// spec/app/voice/index.md, "A phone call ends Talk quietly, and only the owner starts it again"
 export const voiceWithCalls = started(effect {
   const phone = try Phone
   const device = try Device
   const voice = try Voice.Machine
   const { memory } = try VoiceWords
-  const calls = Stream.changes(Stream.map(phone.changes, (state) => liveCall(state.telecom)))
+  const calls = Stream.changes(Stream.map(phone.changes, liveCall))
   try Stream.runForEach(Stream.zipLatest(calls, voice.changes), effect ([live, speech]) => {
     if (!live) return
     if (speech.recorder.field === "MessagesBar" && Voice.canCloseRecorder(speech)) {

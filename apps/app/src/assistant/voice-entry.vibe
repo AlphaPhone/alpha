@@ -1,7 +1,7 @@
 // spec/app/phone/comms.md, "The bar addresses Alpha exactly while the conversation is open, and the left slot holds the other target"; spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown"
 import { Machine as Conversation } from "../../gen/app__assistant.effect.vibe"
 import { Machine as Chats } from "../../gen/app__assistant__chats.effect.vibe"
-import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
+import { Machine as Phone, liveCall } from "../../gen/app__phone.effect.vibe"
 import { Machine as Comms } from "../../gen/app__phone__comms.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
@@ -23,10 +23,10 @@ import { Talk } from "./talk.vibe"
 export effect function beginTalk() {
   const voice = try Voice.Machine
   const shell = try Shell.Machine
-  const call = (try (try Phone).get()).telecom
+  const call = liveCall(try (try Phone).get())
   const speaker = try (try Speaker).get()
   const before = try voice.get()
-  if (call === "OrdinaryCall" || call === "MaybeEmergencyCall" || speaker.stage !== "Silent" || speaker.retiring
+  if (call || speaker.stage !== "Silent" || speaker.retiring
     || !(try (try Device).showing()) || !(try (try VoiceBridge).available()) || !Voice.canStartTalking(before, untimed)) return
   const page = try shell.get()
   if (Voice.talkRaisesTheSheet(page.assistant === "Typing", page.assistant === "Bar", Voice.onNetwork(before.route, untimed)) && Shell.canRaise(page, "Sheet")) {
@@ -47,11 +47,11 @@ export const talkFromComms = started(effect {
   try Stream.runForEach(requests, effect ({ about, view }) => {
     const before = try shell.get()
     if (!Shell.showing(before, view) || !Shell.canRaise(before, "Sheet") || (try comms.get()).key !== about || !(try device.showing())) return
-    if ((try phone.get()).telecom !== "NoCall" || !(try bridge.available())) return
+    if (liveCall(try phone.get()) || !(try bridge.available())) return
     if (!(try contained(shell.send({ type: "raise", detent: "Sheet" }), "opening Talk from the communications bar"))) return
     const current = try shell.get()
     if (Shell.showing(current, view) && current.assistant === "Sheet" && (try comms.get()).key === about
-      && (try phone.get()).telecom === "NoCall") try beginTalk()
+      && !liveCall(try phone.get())) try beginTalk()
   })
 }, "starting Talk from the communications bar")
 

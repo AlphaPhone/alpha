@@ -61,7 +61,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaConnection: alphaConnection(world.platform),
     AlphaNetworkLocation: alphaNetworkLocation(world.platform, () => world.now),
     ...(world.voice.onDevice ? { AlphaVoiceCloud: alphaVoiceCloud(world.voice) } : {}),
-    ElizaCloudSpeech: elizaCloudSpeech(world.voice),
+    ...(world.voice.cloudSpeech ? { ElizaCloudSpeech: elizaCloudSpeech(world.voice) } : {}),
     ElizaSignIn: elizaSignIn(world.voice, () => world.signedIn, world.mailLease),
     AlphaBrowser: alphaBrowser(world.browser),
     AlphaInboxAttachments: alphaInboxAttachments(world.inbox),
