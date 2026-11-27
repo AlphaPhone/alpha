@@ -132,7 +132,7 @@ effect function checkCloudPassword(ticket: number, password: string): Event!!(Te
   return { type: "passwordChecked", ticket, authOutcome: authFailureOutcomeOf(result, "WrongPassword"), session: "", now: untimed }
 }
 
-// spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry, optional two-factor check and secret token"
+// spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry and optional two-factor check"
 effect function pollQrLogin(ticket: number, initialToken?: string): Event!!(Telegram | MessagingSessions | TelegramStore | Auth.Machine) {
   const client = try Telegram
   const store = try TelegramStore

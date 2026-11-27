@@ -144,25 +144,31 @@ pure def lawASlotNoAreaMovesIsNeverCleared(a: Adoption): bool =
   not(earlierClearedFor(LeftUnread, a)) and not(earlierClearedFor(ReadWhereItIs, a))
 ```
 
-### Background work the earlier Alpha queued never runs: at every start the phone cancels each job queued for the work manager the earlier Alpha shipped, and only those
+### Background work the earlier Alpha queued under a worker this Alpha does not ship never runs: at every start the phone cancels that work, and only that
 
 The earlier Alpha queued its background work with Android's work manager:
-Mail and hosted result checks (`alpha-gmail-periodic`,
-`alpha-gmail-catchup`, `alpha-hosted-results-periodic`,
-`alpha-hosted-results-catchup`, `alpha-source-renewal-…`), the Calendar
-deletion window (`alpha-delete-window`) and the Notes Trash backstop
-(`alpha-notes-trash-backstop`). This Alpha ships no work manager, so the
-jobs Android still holds for it name a service the app no longer has.
-Each start of the app cancels every job of the app whose service is the
-work manager's, and no other. The checks they ran are not carried: what
-they did is each area's to say.
+Mail checks (`alpha-gmail-periodic`, `alpha-gmail-catchup`) under its Gmail
+worker, hosted result checks and source renewals
+(`alpha-hosted-results-periodic`, `alpha-hosted-results-catchup`,
+`alpha-source-renewal-…`) under its hosted delivery worker, the Calendar
+deletion window (`alpha-delete-window`) under its deletion worker and the
+Notes Trash backstop (`alpha-notes-trash-backstop`) under its Trash
+worker. This Alpha ships the same work manager, and the two share its
+queue: it queues its own Mail checks under the same Gmail worker and its
+hosted result checks under its own digest worker, under some of the same
+names. Each start of the app cancels the work queued under the hosted
+delivery, deletion and Trash workers, which this Alpha does not ship, and
+no other: this Alpha's own Mail and hosted result checks are kept, and so
+are the earlier Mail checks, which its Gmail worker still runs. The checks
+the cancelled work ran are not carried: what they did is each area's to
+say.
 
 ```quint
-type QueuedJob = EarlierWorkManagerJob | ThisAlphasJob
+type QueuedJob = UnderAnEarlierWorker | UnderThisAlphasWorker
 
-pure def cancelledAtStart(job: QueuedJob): bool = job == EarlierWorkManagerJob
+pure def cancelledAtStart(job: QueuedJob): bool = job == UnderAnEarlierWorker
 
-pure def lawOnlyTheEarlierWorkIsCancelled(job: QueuedJob): bool = cancelledAtStart(job) iff job == EarlierWorkManagerJob
+pure def lawOnlyTheEarlierWorkIsCancelled(job: QueuedJob): bool = cancelledAtStart(job) iff job == UnderAnEarlierWorker
 ```
 
 ## Story: Keep what the earlier on-device agent stored

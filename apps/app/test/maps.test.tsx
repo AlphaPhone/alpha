@@ -12,7 +12,7 @@ import { handToMaps } from "../src/maps/handoff.ts";
 import maps from "../src/maps/index.tsx";
 import { handedOver, tile } from "../src/maps/maps.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { button, closeAll, drawn, fill, hardware, later, only, open, press, pressOnTop, seen, underAct, until } from "./alpha.tsx";
 import { cloudRoute, gallery, harbour, move, speech } from "./fakes/maps.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -374,8 +374,20 @@ describe("Maps in a browser", () => {
     await until(first.alpha, runtime, Screen, (s) => s.place !== 0 && !s.pinning);
     expect(world.maps.asked).toEqual([]);
     expect([document.querySelector("h2")?.textContent, document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value, Boolean(button("Rename place"))]).toEqual(["Dropped pin", "43.73, 7.42", true]);
-    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app": a dropped pin is a selected location, and shares by the sheet, Email or its link
-    expect([document.body.textContent?.includes("Selected location"), Boolean(button("Share")), Boolean(button("Email")), Boolean(button("Copy link"))]).toEqual([true, true, true, true]);
+    // spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app": a dropped pin is a selected location, its row is v119's Directions, Save and Share, and Share opens the panel that offers Email, the sheet and its link
+    const sharePanel = () => [...document.querySelectorAll("[role=dialog]")].find((one) => one.querySelector("h2")?.textContent === "Share");
+    const panelRows = () => [...sharePanel()?.querySelectorAll("button") ?? []].map((one) => one.getAttribute("aria-label") ?? one.textContent);
+    expect([document.body.textContent?.includes("Selected location"), Boolean(button("Share")), Boolean(button("Email")), Boolean(button("Copy link")), sharePanel()]).toEqual([true, true, false, false, undefined]);
+    await press("Share");
+    expect(panelRows()).toEqual(["Close share", "Email", "Share", "Copy link"]);
+    // spec/app/maps/index.md, "Back leaves one mode: navigation to its directions, directions to the place, the place to the search, the search to the map": Back closes the panel first and keeps the place
+    await hardware("back");
+    await drawn(() => expect(sharePanel()).toBeUndefined());
+    expect((await runtime.runPromise(Effect.flatMap(Screen, (screen) => screen.get()))).place).not.toBe(0);
+    await press("Share");
+    await pressOnTop("Copy link");
+    await drawn(() => expect(sharePanel()).toBeUndefined());
+    await expect.poll(() => navigator.clipboard.readText()).toBe("https://www.openstreetmap.org/?mlat=43.73&mlon=7.42#map=17/43.73/7.42");
 
     // spec/app/maps/index.md, "The place on the card is saved under a name, renamed under another, or forgotten"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
     await press("Save");

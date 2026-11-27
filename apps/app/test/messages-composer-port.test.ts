@@ -83,7 +83,7 @@ describe("Manual Messages transport", () => {
     expect(fallback.sendSms).not.toHaveBeenCalled();
   });
 
-  it("admits an approved text through the packaged port with its exact claim (spec/app/phone/comms.md, \"Only the owner's tap approves the open proposal, and never one that acts over an emergency call\")", async () => {
+  it("admits an approved text through the packaged port with its exact claim (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
     const port = new Port();
     packagedPage(port);
     const fallback = native();

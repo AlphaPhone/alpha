@@ -756,8 +756,11 @@ arrival. A place with a dialable number is called through the phone's
 dialer, on the build that has Phone: Phone opens with the number filled in
 and nothing dials until the owner does it there. Its number is copied only
 from a place that is not Google's. A place Google served is never shared.
-Sharing offers the phone's share sheet, with Email and Copy link beside it,
-and, where the phone has none, copies the text.
+The card's row holds Directions, Save, Share and Website, as v119's did
+(prototype/template.html:2459-2466): Share opens Alpha's share panel, which
+offers Email, the phone's share sheet (which, where the phone has none,
+copies the text) and Copy link, as v119's did (maps/share.ts:6), and closes
+once one is chosen.
 
 ```quint
 pure def canHandOn(m: Maps, kind: HandOff): bool =

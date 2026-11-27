@@ -168,7 +168,7 @@ describe("Camera on a phone", () => {
     await expect.poll(() => world.camera.volumeShutter).toBe(false);
   });
 
-  it('The last saved video is ready before its exact thumbnail arrives (spec/app/camera/index.md, "A video saved while Camera is unlocked becomes the last capture")', async () => {
+  it('The last saved video is ready before its exact thumbnail arrives (spec/app/camera/index.md, "A saved video becomes the last capture")', async () => {
     const world = { ...scene(), phone: true };
     let releaseThumbnail = () => {};
     world.photos.readGate = new Promise<void>((resolve) => { releaseThumbnail = resolve; });

@@ -1,12 +1,11 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/chats.md, "Story: Reuse words from a message"; spec/app/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence every line stays code"
-import { AssistantCard, AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
+import { AssistantSearchSheet, Button, type AssistantAttachment, type AssistantMessageProps, type AssistantTranscriptProps } from "@repo/ui";
 import type { MapsCard } from "@elizaos/plugin-maps-client";
 import { Effect, type ManagedRuntime } from "effect";
 import { useMemo, useState } from "react";
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe";
 import type { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe";
-import { textLimit } from "../../gen/app__assistant__composer.ts";
 import type { useMachine as useSearch } from "../../gen/app__assistant__search.react.ts";
 import type { MessageSelection } from "./message-actions.vibe";
 import { MapsCardView, mapsCardsOf } from "./maps-cards.tsx";
@@ -14,21 +13,15 @@ import { replyBlocks, wordsOf } from "./words.ts";
 import { ReplyFailure, UntoldSteps } from "./ReplyFailure.tsx";
 import type { Attached, Board, Line, StoredNotice } from "./talk.vibe";
 
-const storedNotices: Record<StoredNotice, { readonly title: string; readonly detail: string; readonly action?: "signIn" | "retry"; readonly label?: string }> = {
-  "model-unavailable": { title: "No AI model ready", detail: "Connect a provider in Settings, then try again.", action: "signIn", label: "Open Settings" },
-  "runtime-error": { title: "Agent error", detail: "The agent hit an error while replying.", action: "retry", label: "Send again" },
-  "model-and-runtime-error": { title: "Agent error", detail: "No AI model is ready and the agent hit an error. Check Settings.", action: "signIn", label: "Open Settings" },
-};
-
-function NoticeCard({ kind, asked, onSettings, onSendAgain }: { kind: StoredNotice; asked?: string; onSettings?: () => void; onSendAgain?: (text: string) => void }) {
-  const { title, detail, action, label } = storedNotices[kind];
-  const act = action === "retry" ? (asked !== undefined && onSendAgain ? () => onSendAgain(asked) : undefined) : onSettings;
-  return <AssistantCard
-    card={act === undefined || action === undefined
-      ? { kind: "plain", text: `${title}. ${detail}` }
-      : { kind: "action", action, title, detail, ...(label === undefined ? {} : { label }) }}
-    onAct={act}
-  />;
+/** A stored system notice as v119 showed it, in one line of Alpha's words: a runtime error asks to send again only when it answered the owner's message. */
+function noticeText(kind: StoredNotice, answeredOwner: boolean): string {
+  const noProvider = "No AI provider · Open Settings";
+  const degraded = "Agent degraded";
+  switch (kind) {
+    case "model-unavailable": return noProvider;
+    case "runtime-error": return answeredOwner ? "Agent error · Send again" : degraded;
+    case "model-and-runtime-error": return `${noProvider}\n${degraded}`;
+  }
 }
 
 export interface MessageActions {
@@ -99,12 +92,6 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
     if (!chats || !writing || prepared.length === 0) return empty;
     const chat = (event: Chats.Event) => void runtime.runPromiseExit(Effect.flatMap(Chats.Machine, (machine) => machine.send(event)));
     const compose = (event: Composer.Event) => void runtime.runPromiseExit(Effect.flatMap(Composer.Machine, (machine) => machine.send(event)));
-    const sendAgain = (text: string) => {
-      const edit = { type: "edit", blank: text.trim() === "", long: text.length > textLimit } as const;
-      if (!Composer.enabled(writing, edit)) return;
-      board.type(text);
-      compose(edit);
-    };
     const messages: HistoryRow[] = [];
     const messagesAfterLater: HistoryRow[] = [];
     let pastLater = false;
@@ -133,12 +120,10 @@ export function useMessageRows({ runtime, board, lines, later, chats, writing, r
       rows.push({
         id: line.id,
         author: line.mine ? "owner" : "alpha",
-        text: line.notice === undefined ? text : "",
+        text: line.notice === undefined ? text : noticeText(line.notice, previous?.mine === true),
         attachments: line.attachments?.map(chip),
         quote: line.quote === undefined ? undefined : wordsOf({ mine: false, text: line.quote }),
-        children: line.notice !== undefined
-          ? <NoticeCard kind={line.notice} asked={previous?.mine ? previous.text : undefined} onSettings={onSettings} onSendAgain={sendAgain} />
-          : cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 ? undefined : <>
+        children: line.notice !== undefined || cards.length === 0 && choices.length === 0 && line.failure === undefined && untold.length === 0 ? undefined : <>
           {cards.map(({ key, card }) => <MapsCardView key={key} card={card} settled={!live} onOpen={open === undefined ? undefined : () => open(card, message)} />)}
           {live && onChoose !== undefined ? choices.map((choice) => (
             <div key={choice.id} className="flex flex-wrap gap-2">

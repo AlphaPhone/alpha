@@ -312,7 +312,7 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     await until(rt, authChanges, (s) => s.step === "Authenticated");
     await until(rt, listChanges, (s) => s.list.status === "Loaded");
 
-    // spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry, optional two-factor check and secret token"
+    // spec/app/telegram/auth.md, "QR login offers an alternate user-account path with expiry and optional two-factor check"
     await signOut(rt);
     await clickButton("Continue");
     await until(rt, authChanges, (s) => s.step === "PhoneEntry");

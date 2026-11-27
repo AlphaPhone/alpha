@@ -447,10 +447,11 @@ pure def lawAWrittenToolCallIsNeverShown(line: Line): bool = line == ToolCallBlo
 ### At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it
 
 The agent stores a system notice (no model provider, a runtime error) as
-its own text; the conversation recognizes that exact text and shows it in
-Alpha's words instead: "No AI provider", with Open Settings; "Agent error",
-with Send again, when it answered the owner's message, else "Agent
-degraded".
+its own text; the conversation recognizes that exact text and shows it as
+one line in Alpha's words instead, as v119 did: "No AI provider · Open
+Settings" for no provider; "Agent error · Send again" for a runtime error
+that answered the owner's message, else "Agent degraded"; and both, "No AI
+provider · Open Settings" over "Agent degraded", for the two together.
 
 ```quint
 pure val noticeLimit = 5

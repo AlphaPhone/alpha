@@ -367,7 +367,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([(document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "").includes("You’re out of plan allowance and credits, so I couldn’t reply."), Boolean(button("Manage plan"))]).toEqual([true, true]);
     world.ask.refusal = undefined;
 
-    // spec/app/assistant/reply.md, "At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it": a notice the agent stored in its history is shown in Alpha's words, and offers to send the owner's message again.
+    // spec/app/assistant/reply.md, "At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it": a runtime error the agent stored in answer to the owner's message is v119's one line, "Agent error · Send again", with no control of its own.
     world.ask.kept.get("c1")?.messages.push({ id: "n1u", role: "user", text: "Ping" }, { id: "n1a", role: "assistant", text: systemNoticeText("runtime-error") });
     // spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing": with no Earlier, read around the first message directly.
     expect(button("Earlier")).toBeUndefined();
@@ -375,9 +375,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Chats, (s) => s.around > 0 && s.page.status === "Loaded");
     expect(lines().slice(0, 2)).toEqual(["Hello", "You said: Hello"]);
     const log = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent ?? "";
-    expect([log().includes("Agent error"), log().includes(systemNoticeText("runtime-error"))]).toEqual([true, false]);
-    await press("Send again");
-    expect(composerText()).toBe("Ping");
+    expect([log().includes("Agent error · Send again"), log().includes(systemNoticeText("runtime-error")), button("Send again")]).toEqual([true, false, undefined]);
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan": read again from history, the refused reply is the same one line, never "Out of credits".
     const reopened = document.querySelector("[role=log] [data-alpha-message-id='m4a']");
     const fundingLine = "You’re out of plan allowance and credits, so I couldn’t reply.";
@@ -688,6 +686,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       { id: "m5", role: "assistant", text: "", failureKind: "insufficient_credits", cloudCode: "allowance_exhausted" },
       { id: "m6", role: "assistant", text: "<promise> Friday is free." },
       { id: "m7", role: "user", text: "Friday [answer] again?" },
+      { id: "m8", role: "assistant", text: "Yes." },
+      { id: "m9", role: "assistant", text: systemNoticeText("runtime-error") },
     ] });
     const { alpha, runtime } = await openAssistant(world, false);
 
@@ -716,6 +716,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it": spent credits stored without Cloud's code keep their own words, and only the reply stored with it reads as the one out-of-funds line.
     const kept = [...document.querySelectorAll("[role=log] article")].map((line) => line.textContent ?? "");
     expect([kept.filter((text) => text.includes("Out of credits")).length, kept.filter((text) => text.includes("You’re out of plan allowance and credits, so I couldn’t reply.")).length]).toEqual([1, 1]);
+    // spec/app/assistant/reply.md, "At most five reply notices of at most 500 units reach the conversation, and only the latest system notice stays, until a real reply follows it": a runtime error stored after the agent's own reply, with nothing of the owner's waiting, is v119's "Agent degraded".
+    expect([kept.filter((text) => text.includes("Agent degraded")).length, kept.some((text) => text.includes("Agent error"))]).toEqual([1, false]);
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;

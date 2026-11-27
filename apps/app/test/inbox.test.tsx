@@ -952,7 +952,7 @@ it("says Open to retry on Home's mail card only after a failed read, and recover
   await afterDraw(() => expect(status()).toMatch(/^you@gmail\.example( · Updated .+)?$/u));
 });
 
-it("Flags bare-domain phishing link text and waits two seconds before writing draft edits to the phone (spec/app/inbox/message.md, \"Links are checked before opening\"; spec/app/inbox/drafts.md, \"Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket\")", async () => {
+it("Flags bare-domain phishing link text and waits two seconds before writing draft edits to the phone (spec/app/inbox/message.md, \"Only an https link without credentials in it can be reviewed and opened; any other link stays text\"; spec/app/inbox/drafts.md, \"Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket\")", async () => {
   expect(linkOf("https://evil.test/login", "bank.com").mismatch).toBe(true);
   expect(linkOf("https://bank.com/login", "bank.com").mismatch).toBe(false);
 
