@@ -164,6 +164,12 @@ effect function nameSource(): void!!(Agent | Shown) {
   if (listed !== undefined) shown.listed(listed.calendars)
 }
 
+// spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"
+/** Whether the card is still the one a read of the list was read for: no card ended, and none took its place, while the read waited on the agent's calendar list or its event. */
+function sameCard(now: AgentCalendar, read: AgentCalendar): boolean {
+  return now.stage === read.stage && now.filing === read.filing
+}
+
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
 /** Read the agent's approvals list and tell the card what it holds: the oldest pending Calendar request, a new revision of the one shown, or that it is gone. */
 effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore | Requests | Shown | Time) {
@@ -190,8 +196,10 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
     }
     try nameSource()
     const rows = try rowsFor(now, cached)
+    const after = try machine.get()
+    if (!sameCard(after, s)) return
     const revision = revisionOf(now, rows)
-    if (revision > s.revision) try contained(machine.send({ type: "eventChanged", revision }, world), "a change to the request or its event")
+    if (revision > after.revision) try contained(machine.send({ type: "eventChanged", revision }, world), "a change to the request or its event")
     try contained(machine.send({ type: "showUpdated", complete: complete(now, rows) }, world), "showing the card again")
     return
   }
@@ -200,9 +208,10 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
   const declined = s.result === "Declined" ? reqStore.find(s.filing)?.id : undefined
   const oldest = pending.findLast((request) => request.id !== declined)
   if (oldest === undefined) return
-  try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
   try nameSource()
   const rows = try rowsFor(oldest, cached)
+  if (!sameCard(try machine.get(), s)) return
+  try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
   const row = rows.find((candidate) => candidate.key === oldest.eventId) ?? shown.find(id)
   try contained(machine.send({

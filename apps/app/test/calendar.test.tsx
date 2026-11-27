@@ -1144,6 +1144,104 @@ describe("on a phone", () => {
     expect(["Eliza Calendar", "Family", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
   });
 
+  it("Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    const world = morning(true);
+    world.calendar.summary = "Family";
+    const { alpha, agent, file } = await askingCalendar(world, "view:Calendar");
+    const goHome = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" })));
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.connected && s.owner > 0);
+    await goHome();
+    world.signedIn = false;
+    world.calendar.calendarsDown = true;
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.owner === 0);
+    await goHome();
+    const answered = world.calendar.calendarsAnswered ?? 0;
+    await file("approval-signed-out-unlisted", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(world.calendar.calendarsAnswered ?? 0).toBeGreaterThan(answered);
+    expect([...["Eliza Calendar", "Family", "Agent Calendar"].map((text) => askedCard().includes(text)), world.calendar.writes]).toEqual([false, false, true, []]);
+  });
+
+  it("With Google connected, a card for the agent's own calendar names it by its own summary, and one for Google's calendar by Google's (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": eliza lists its resident "primary" calendar first and then each Google calendar, Google's own marked primary too (plugin-calendar providers.vibe:237, plugin-calendar-client feed/broker.vibe:79); v119 45f6bed30 prototype/calendar-approval-fields.ts:12-17 named the card by the source its request matched
+    const world = morning(true);
+    world.calendar.listed = [
+      { provider: "eliza", side: "owner", calendarId: "primary", summary: "Eliza Calendar", primary: true },
+      { provider: "google", side: "owner", calendarId: "owner@alpha.test", summary: "Family", primary: true },
+    ];
+    const { alpha, agent, file } = await askingCalendar(world);
+    await file("approval-resident", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Eliza Calendar", "Family", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
+    await press("Decline");
+    await file("approval-google", "lens check", 11, "owner@alpha.test");
+    await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
+    expect(["Family", "Eliza Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect([Boolean(button("Approve")), world.calendar.writes]).toEqual([true, ["reject approval-resident"]]);
+  });
+
+  /**
+   * Card A waits on a read of the agent's list while A changes, the owner declines A, and the read the decline starts shows
+   * card B: that read's list answers first, and A's answers last.
+   */
+  async function lateListRead(changeA: (world: ReturnType<typeof morning>) => void, b: Record<string, unknown>) {
+    const world = morning(true);
+    const { alpha } = await open(world, only("view:Calendar"));
+    const runtime = calendar.runtime(alpha);
+    await openCalendar(alpha);
+    await until(alpha, runtime, View, (s) => s.googleRows === 2);
+    const reread = () => runtime.runPromise(Effect.flatMap(View, (machine) => machine.send({ type: "refresh" })));
+    const lunch = { source: { calendarId: "eliza-calendar/primary" }, eventId: "ev-team-lunch", expectedVersion: "1" };
+    world.calendar.approvals.push(
+      agentRequest("approval-a", { action: "respond_invitation", account: "owner", target: lunch, scope: "instance", response: "tentative" }),
+      agentRequest("approval-b", b),
+    );
+    await reread();
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.change === "Respond" && a.complete);
+    const first = (await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()))).filing;
+    changeA(world);
+    world.calendar.holdCalendars = true;
+    await reread();
+    await vi.waitFor(() => expect(world.calendar.heldCalendars).toHaveLength(1));
+    await press("Decline");
+    await vi.waitFor(() => expect(world.calendar.heldCalendars).toHaveLength(2));
+    world.calendar.holdCalendars = false;
+    const answered = world.calendar.calendarsAnswered ?? 0;
+    await drawn(() => world.calendar.heldCalendars[1]?.());
+    await until(alpha, runtime, Changes, (a) => a.stage === "Awaiting" && a.filing !== first);
+    await drawn(() => world.calendar.heldCalendars[0]?.());
+    await vi.waitFor(() => expect(world.calendar.calendarsAnswered).toBe(answered + 2));
+    await reread();
+    await vi.waitFor(() => expect(world.calendar.calendarsAnswered).toBe(answered + 3));
+    await drawn(() => {});
+    const card = await runtime.runPromise(Effect.flatMap(Changes, (machine) => machine.get()));
+    return { world, card, first };
+  }
+
+  const standup = { source: { calendarId: "eliza-calendar/primary" }, eventId: "ev-standup", expectedVersion: "1" };
+
+  it("A read of the list that comes back after its card was declined never makes the next card approvable (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/agent.md, \"A card that leaves out a field its change would set can be declined, never approved\")", async () => {
+    const { world, card, first } = await lateListRead((at) => {
+      const a = at.calendar.approvals.find((one) => one.id === "approval-a");
+      if (a) a.revision = "r2";
+    }, { action: "respond_invitation", account: "owner", target: standup, scope: "instance", response: "tentative", colour: "red" });
+    expect([card.filing !== first, card.complete, card.updated, Boolean(button("Approve")), Boolean(button("Decline")), document.body.textContent?.includes("Approval unavailable"), world.calendar.writes])
+      .toEqual([true, false, false, false, true, true, ["reject approval-a"]]);
+  });
+
+  it("A read of the list that comes back after its card was declined never voids the next card, when the first card's event moved in Google (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/agent.md, \"When the event changes in Google, the card waiting for the owner no longer counts\")", async () => {
+    const { world, card, first } = await lateListRead((at) => {
+      const lunch = at.calendar.events.find((one) => one.id === "ev-team-lunch");
+      if (lunch) lunch.metadata = { ...lunch.metadata, etag: "2" };
+    }, { action: "respond_invitation", account: "owner", target: standup, scope: "instance", response: "tentative" });
+    expect([card.filing !== first, card.complete, card.updated, Boolean(button("Approve")), document.body.textContent?.includes("(updated)"), world.calendar.writes])
+      .toEqual([true, true, false, true, false, ["reject approval-a"]]);
+  });
+
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
     const { world, alpha, agent } = await fileTwoCalendarRequests();
     const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];

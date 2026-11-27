@@ -50,6 +50,14 @@ export interface CalendarScene {
   feedReads?: number;
   /** The summary `/api/lifeops/calendar/calendars` lists for the agent's calendar (defaults to eliza's own, "Eliza Calendar"). */
   summary?: string;
+  /** What `/api/lifeops/calendar/calendars` lists in place of that one calendar: eliza's own resident "primary" first, then each Google calendar, as eliza lists them. */
+  listed?: FakeCalendarSummary[];
+  /** `/api/lifeops/calendar/calendars` alone answers 503, and how many times it answered at all. */
+  calendarsDown?: boolean;
+  calendarsAnswered?: number;
+  /** While set, each read of `/api/lifeops/calendar/calendars` waits for its release, kept here in the order the reads came. */
+  holdCalendars?: boolean;
+  readonly heldCalendars: Array<() => void>;
   /** Every write the agent took, as `<method> <id>`, and the idempotency keys it took them under. */
   readonly writes: string[];
   readonly keys: Map<string, FakeEvent>;
@@ -83,8 +91,17 @@ export function calendarScene(): CalendarScene {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
-    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [],
+    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [],
   };
+}
+
+/** One calendar the agent lists, as eliza's `GET /api/lifeops/calendar/calendars` answers it (`plugin-calendar` providers.vibe `sources`, `plugin-calendar-client` feed/broker.vibe). */
+export interface FakeCalendarSummary {
+  provider: "eliza" | "google";
+  side: "owner";
+  calendarId: string;
+  summary: string;
+  primary: boolean;
 }
 
 /** One request of the agent's approvals list, as `GET /api/approvals` answers it. */
@@ -205,8 +222,12 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== `${base}/calendars`) return;
-      if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
-      return Response.json({ calendars: [{ provider: "eliza", side: "owner", calendarId: "eliza-calendar/primary", summary: scene.summary ?? "Eliza Calendar", primary: true }] });
+      const answer = () => {
+        scene.calendarsAnswered = (scene.calendarsAnswered ?? 0) + 1;
+        if (scene.down || scene.calendarsDown) return Response.json({ error: "starting" }, { status: 503 });
+        return Response.json({ calendars: scene.listed ?? [{ provider: "eliza", side: "owner", calendarId: "eliza-calendar/primary", summary: scene.summary ?? "Eliza Calendar", primary: true }] });
+      };
+      return scene.holdCalendars ? new Promise<void>((release) => scene.heldCalendars.push(release)).then(answer) : answer();
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== `${base}/events`) return;

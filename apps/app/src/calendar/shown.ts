@@ -122,15 +122,18 @@ export interface ShownStore {
   readonly lastSeen: (id: number) => Row | undefined;
   /** The event numbered `id`, wherever it was last read. @throws {never} */
   readonly find: (id: number) => Row | undefined;
-  /** Keep the summaries the agent lists for its calendars, the primary one's for a new event. @throws {never} */
+  /** Keep the summaries the agent lists for its calendars, and its own calendar's for a new event: the one it lists as "primary", else the first it marks primary, else the first. @throws {never} */
   readonly listed: (calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }>) => void;
-  /** The summary the agent listed for `calendarId`, or else its primary calendar's, or "" where it listed none. @throws {never} */
+  /** The summary the agent listed for `calendarId`, or else its own calendar's, or "" where it listed none. @throws {never} */
   readonly listedName: (calendarId: string) => string;
   /** The summary the agent listed for `calendarId` itself, or "" where it listed none for it. @throws {never} */
   readonly listedSummary: (calendarId: string) => string;
   /** Clear every cached row, revision, and id mapping when the runtime scope closes. @throws {never} */
   readonly reset: () => void;
 }
+
+/** The calendar eliza lists as its own, its resident calendar, where it writes a new event (plugin-calendar providers.vibe `residentCalendarId`, host.vibe `writeTarget`). */
+const ownCalendarId = "primary";
 
 /** Create a scoped Calendar row store backed by a reactive shelf, with no module-level mutable state. @throws {never} */
 export function createShownStore(): ShownStore {
@@ -141,7 +144,7 @@ export function createShownStore(): ShownStore {
   const last = new Map<number, Row>();
   const cut = new Set<Source>();
   const names = new Map<string, string>();
-  let primaryName = "";
+  let ownName = "";
   const version = createShelf(0);
   let nextNumber = 0;
   let present = false;
@@ -265,20 +268,16 @@ export function createShownStore(): ShownStore {
     // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
     listed(list) {
       names.clear();
-      primaryName = "";
-      for (const one of list) {
-        const summary = one.summary?.trim() ?? "";
-        if (summary === "") continue;
-        names.set(one.calendarId, summary);
-        if (one.primary === true || primaryName === "") primaryName = summary;
-      }
+      const named = list.map((one) => ({ ...one, summary: one.summary?.trim() ?? "" })).filter((one) => one.summary !== "");
+      for (const one of named) names.set(one.calendarId, one.summary);
+      ownName = (named.find((one) => one.calendarId === ownCalendarId) ?? named.find((one) => one.primary === true) ?? named[0])?.summary ?? "";
       told();
     },
-    listedName: (calendarId) => names.get(calendarId) ?? primaryName,
+    listedName: (calendarId) => names.get(calendarId) ?? ownName,
     listedSummary: (calendarId) => names.get(calendarId) ?? "",
     reset() {
       names.clear();
-      primaryName = "";
+      ownName = "";
       numbers.clear();
       calendars.clear();
       seen.clear();
