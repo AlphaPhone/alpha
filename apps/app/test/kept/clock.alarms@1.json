@@ -3,8 +3,37 @@
   "spec": "spec/app/clock/alarms.md",
   "shape": "193719e91c48cdd5",
   "state": {
-    "issued": 0,
-    "items": [],
+    "issued": 2,
+    "items": [
+      {
+        "id": 1,
+        "hour": 7,
+        "minute": 30,
+        "daysMask": 62,
+        "enabled": true,
+        "snoozeMinutes": 10,
+        "vibrate": true,
+        "phase": "Idle",
+        "fireAt": 1795021600000,
+        "snoozeUntil": 0,
+        "missed": false,
+        "revision": 2
+      },
+      {
+        "id": 2,
+        "hour": 9,
+        "minute": 0,
+        "daysMask": 65,
+        "enabled": false,
+        "snoozeMinutes": 5,
+        "vibrate": false,
+        "phase": "Idle",
+        "fireAt": 0,
+        "snoozeUntil": 0,
+        "missed": false,
+        "revision": 1
+      }
+    ],
     "hidden": {
       "id": 0,
       "hour": 0,
@@ -24,5 +53,8 @@
       "holding": "Free",
       "until": 0
     }
-  }
+  },
+  "kept": [
+    "items"
+  ]
 }

@@ -3,8 +3,8 @@
   "spec": "spec/app/telegram/index.md",
   "shape": "cb6269b552622481",
   "state": {
-    "authenticated": false,
-    "credentialRev": 0,
+    "authenticated": true,
+    "credentialRev": 1,
     "selected": {
       "tab": "AllChats",
       "folderId": 0,
@@ -19,7 +19,9 @@
     "pages": 0,
     "total": 0,
     "cursor": 0,
-    "spent": [],
+    "spent": [
+      2
+    ],
     "saved": false,
     "kept": {
       "tab": "AllChats",
@@ -33,7 +35,9 @@
       "id": 0,
       "outcome": "Planned"
     },
-    "mutedChats": [],
+    "mutedChats": [
+      5
+    ],
     "count": {
       "credentialRev": 0,
       "unread": 0,

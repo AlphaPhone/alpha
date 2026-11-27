@@ -5,21 +5,23 @@
   "state": {
     "authority": "",
     "redeem": {
-      "id": 0,
-      "outcome": "Planned"
+      "id": 1,
+      "outcome": "Unknown"
     },
-    "redeemCode": "",
+    "redeemCode": "ALPHA7Q2K",
     "apply": {
       "id": 0,
       "outcome": "Planned"
     },
     "applyCode": "",
-    "unknown": [],
+    "unknown": [
+      "ALPHA7Q2K"
+    ],
     "referral": {
       "status": "Idle",
       "ticket": 0
     },
-    "unsettled": false,
-    "notice": "Quiet"
+    "unsettled": true,
+    "notice": "OutcomeUnknown"
   }
 }

@@ -5,17 +5,36 @@
   "state": {
     "access": "Granted",
     "supported": true,
-    "open": false,
+    "open": true,
     "storage": {
-      "status": "Idle",
-      "ticket": 0
+      "status": "Loaded",
+      "ticket": 2
     },
-    "volumes": [],
+    "volumes": [
+      {
+        "id": 1,
+        "used": 52000000000,
+        "total": 128000000000
+      }
+    ],
     "tally": {
-      "counts": [],
-      "trashed": 0
+      "counts": [
+        {
+          "kind": "Pdf",
+          "items": 38,
+          "bytes": 61000000
+        },
+        {
+          "kind": "Image",
+          "items": 214,
+          "bytes": 1900000000
+        }
+      ],
+      "trashed": 3
     },
-    "trail": [],
+    "trail": [
+      4
+    ],
     "inCategory": false,
     "category": "Other",
     "listing": {
@@ -24,26 +43,28 @@
     },
     "items": [
       {
-        "id": 4,
-        "name": "Receipts",
+        "id": 21,
+        "name": "receipt-2026-11-03.pdf",
         "revision": 1,
-        "kind": "Folder",
+        "kind": "Pdf",
         "volume": 1,
-        "bytes": 0,
+        "bytes": 184320,
         "children": 0
       },
       {
-        "id": 2,
-        "name": "scan.jpg",
+        "id": 22,
+        "name": "IMG_0412.jpg",
         "revision": 1,
         "kind": "Image",
         "volume": 1,
-        "bytes": 0,
+        "bytes": 2411724,
         "children": 0
       }
     ],
     "partial": false,
-    "picked": [],
+    "picked": [
+      21
+    ],
     "missing": false,
     "layout": "Grid",
     "order": "ByName",
@@ -58,23 +79,35 @@
     },
     "search": {
       "filter": {
-        "text": "",
+        "text": "receipt",
         "kind": "Other",
         "anyKind": true,
         "from": 0,
         "to": 8640000000000000
       },
-      "searching": false,
+      "searching": true,
       "within": {
-        "trail": [],
+        "trail": [
+          4
+        ],
         "inCategory": false,
         "category": "Other"
       },
       "query": {
-        "status": "Idle",
-        "ticket": 0
+        "status": "Loaded",
+        "ticket": 1
       },
-      "hits": [],
+      "hits": [
+        {
+          "id": 21,
+          "name": "receipt-2026-11-03.pdf",
+          "revision": 1,
+          "kind": "Pdf",
+          "volume": 1,
+          "bytes": 184320,
+          "children": 0
+        }
+      ],
       "complete": false,
       "asker": 0,
       "peek": {
@@ -94,13 +127,27 @@
         "outcome": "Planned"
       },
       "work": "NewFolder",
-      "items": [],
+      "items": [
+        {
+          "id": 22,
+          "name": "IMG_0412.jpg",
+          "revision": 1,
+          "kind": "Image",
+          "volume": 1,
+          "bytes": 0,
+          "children": 0
+        }
+      ],
       "name": "",
       "folder": 0,
       "dest": {
-        "folder": 0,
-        "path": [],
-        "names": []
+        "folder": 4,
+        "path": [
+          4
+        ],
+        "names": [
+          "Receipts"
+        ]
       },
       "approval": 0,
       "clash": {
@@ -109,11 +156,33 @@
         "shown": 0
       },
       "replace": false,
-      "done": [],
-      "unsure": [],
+      "done": [
+        22
+      ],
+      "unsure": [
+        {
+          "id": 21,
+          "name": "receipt-2026-11-03.pdf",
+          "revision": 1,
+          "kind": "Pdf",
+          "volume": 1,
+          "bytes": 0,
+          "children": 0
+        }
+      ],
       "panel": 0,
       "panels": 0,
-      "sharing": [],
+      "sharing": [
+        {
+          "id": 21,
+          "name": "receipt-2026-11-03.pdf",
+          "revision": 1,
+          "kind": "Pdf",
+          "volume": 1,
+          "bytes": 184320,
+          "children": 0
+        }
+      ],
       "mail": false,
       "asker": 0,
       "stale": false,
@@ -124,14 +193,20 @@
       "sentTo": "Chooser"
     },
     "sheet": {
-      "open": false,
-      "trail": [],
+      "open": true,
+      "trail": [
+        4
+      ],
       "reading": {
-        "status": "Idle",
-        "ticket": 0
+        "status": "Loaded",
+        "ticket": 1
       },
-      "folders": [],
-      "names": []
+      "folders": [
+        23
+      ],
+      "names": [
+        "2025"
+      ]
     }
   },
   "kept": [
@@ -147,13 +222,21 @@
       "state": {
         "access": "Granted",
         "supported": true,
-        "open": false,
+        "open": true,
         "storage": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 2
         },
-        "volumes": [],
-        "trail": [],
+        "volumes": [
+          {
+            "id": 1,
+            "used": 52000000000,
+            "total": 128000000000
+          }
+        ],
+        "trail": [
+          4
+        ],
         "inCategory": false,
         "category": "Other",
         "listing": {
@@ -162,44 +245,54 @@
         },
         "items": [
           {
-            "id": 4,
-            "name": "Receipts",
+            "id": 21,
+            "name": "receipt-2026-11-03.pdf",
             "revision": 1,
-            "kind": "Folder",
+            "kind": "Pdf",
             "volume": 1
           },
           {
-            "id": 2,
-            "name": "scan.jpg",
+            "id": 22,
+            "name": "IMG_0412.jpg",
             "revision": 1,
             "kind": "Image",
             "volume": 1
           }
         ],
-        "picked": [],
+        "picked": [
+          21
+        ],
         "missing": false,
         "layout": "Grid",
         "order": "ByName",
         "reversed": true,
         "search": {
           "filter": {
-            "text": "",
+            "text": "receipt",
             "kind": "Other",
-            "anyKind": true,
-            "from": 0,
-            "to": 8640000000000000
+            "anyKind": true
           },
-          "searching": false,
+          "searching": true,
           "within": {
-            "trail": [],
+            "trail": [
+              4
+            ],
             "inCategory": false,
             "category": "Other"
           },
           "query": {
-            "status": "Idle",
-            "ticket": 0
+            "status": "Loaded",
+            "ticket": 1
           },
-          "hits": [],
+          "hits": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1
+            }
+          ],
           "asker": 0,
           "peek": {
             "status": "Idle",
@@ -218,13 +311,25 @@
             "outcome": "Planned"
           },
           "work": "NewFolder",
-          "items": [],
+          "items": [
+            {
+              "id": 22,
+              "name": "IMG_0412.jpg",
+              "revision": 1,
+              "kind": "Image",
+              "volume": 1
+            }
+          ],
           "name": "",
           "folder": 0,
           "dest": {
-            "folder": 0,
-            "path": [],
-            "names": []
+            "folder": 4,
+            "path": [
+              4
+            ],
+            "names": [
+              "Receipts"
+            ]
           },
           "approval": 0,
           "clash": {
@@ -233,11 +338,29 @@
             "shown": 0
           },
           "replace": false,
-          "done": [],
-          "unsure": [],
+          "done": [
+            22
+          ],
+          "unsure": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1
+            }
+          ],
           "panel": 0,
           "panels": 0,
-          "sharing": [],
+          "sharing": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1
+            }
+          ],
           "mail": false,
           "asker": 0,
           "stale": false,
@@ -248,34 +371,59 @@
           "sentTo": "Chooser"
         },
         "sheet": {
-          "open": false,
-          "trail": [],
+          "open": true,
+          "trail": [
+            4
+          ],
           "reading": {
-            "status": "Idle",
-            "ticket": 0
+            "status": "Loaded",
+            "ticket": 1
           },
-          "folders": [],
-          "names": []
+          "folders": [
+            23
+          ],
+          "names": [
+            "2025"
+          ]
         }
       }
     },
     {
-      "from": "b7b4c1cd94, 173bd6f26b",
-      "until": "4a3a1ff0a1 (#1813)",
+      "from": "b7b4c1cd94",
+      "until": "173bd6f26b",
       "state": {
         "access": "Granted",
         "supported": true,
-        "open": false,
+        "open": true,
         "storage": {
-          "status": "Idle",
-          "ticket": 0
+          "status": "Loaded",
+          "ticket": 2
         },
-        "volumes": [],
+        "volumes": [
+          {
+            "id": 1,
+            "used": 52000000000,
+            "total": 128000000000
+          }
+        ],
         "tally": {
-          "counts": [],
-          "trashed": 0
+          "counts": [
+            {
+              "kind": "Pdf",
+              "items": 38,
+              "bytes": 61000000
+            },
+            {
+              "kind": "Image",
+              "items": 214,
+              "bytes": 1900000000
+            }
+          ],
+          "trashed": 3
         },
-        "trail": [],
+        "trail": [
+          4
+        ],
         "inCategory": false,
         "category": "Other",
         "listing": {
@@ -284,24 +432,26 @@
         },
         "items": [
           {
-            "id": 4,
-            "name": "Receipts",
+            "id": 21,
+            "name": "receipt-2026-11-03.pdf",
             "revision": 1,
-            "kind": "Folder",
+            "kind": "Pdf",
             "volume": 1,
-            "bytes": 0
+            "bytes": 184320
           },
           {
-            "id": 2,
-            "name": "scan.jpg",
+            "id": 22,
+            "name": "IMG_0412.jpg",
             "revision": 1,
             "kind": "Image",
             "volume": 1,
-            "bytes": 0
+            "bytes": 2411724
           }
         ],
         "partial": false,
-        "picked": [],
+        "picked": [
+          21
+        ],
         "missing": false,
         "layout": "Grid",
         "order": "ByName",
@@ -316,23 +466,32 @@
         },
         "search": {
           "filter": {
-            "text": "",
+            "text": "receipt",
             "kind": "Other",
-            "anyKind": true,
-            "from": 0,
-            "to": 8640000000000000
+            "anyKind": true
           },
-          "searching": false,
+          "searching": true,
           "within": {
-            "trail": [],
+            "trail": [
+              4
+            ],
             "inCategory": false,
             "category": "Other"
           },
           "query": {
-            "status": "Idle",
-            "ticket": 0
+            "status": "Loaded",
+            "ticket": 1
           },
-          "hits": [],
+          "hits": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 184320
+            }
+          ],
           "complete": false,
           "asker": 0,
           "peek": {
@@ -352,13 +511,26 @@
             "outcome": "Planned"
           },
           "work": "NewFolder",
-          "items": [],
+          "items": [
+            {
+              "id": 22,
+              "name": "IMG_0412.jpg",
+              "revision": 1,
+              "kind": "Image",
+              "volume": 1,
+              "bytes": 0
+            }
+          ],
           "name": "",
           "folder": 0,
           "dest": {
-            "folder": 0,
-            "path": [],
-            "names": []
+            "folder": 4,
+            "path": [
+              4
+            ],
+            "names": [
+              "Receipts"
+            ]
           },
           "approval": 0,
           "clash": {
@@ -367,11 +539,31 @@
             "shown": 0
           },
           "replace": false,
-          "done": [],
-          "unsure": [],
+          "done": [
+            22
+          ],
+          "unsure": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 0
+            }
+          ],
           "panel": 0,
           "panels": 0,
-          "sharing": [],
+          "sharing": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 184320
+            }
+          ],
           "mail": false,
           "asker": 0,
           "stale": false,
@@ -382,14 +574,225 @@
           "sentTo": "Chooser"
         },
         "sheet": {
-          "open": false,
-          "trail": [],
+          "open": true,
+          "trail": [
+            4
+          ],
           "reading": {
+            "status": "Loaded",
+            "ticket": 1
+          },
+          "folders": [
+            23
+          ],
+          "names": [
+            "2025"
+          ]
+        }
+      }
+    },
+    {
+      "from": "173bd6f26b",
+      "until": "4a3a1ff0a1 (#1813)",
+      "state": {
+        "access": "Granted",
+        "supported": true,
+        "open": true,
+        "storage": {
+          "status": "Loaded",
+          "ticket": 2
+        },
+        "volumes": [
+          {
+            "id": 1,
+            "used": 52000000000,
+            "total": 128000000000
+          }
+        ],
+        "tally": {
+          "counts": [
+            {
+              "kind": "Pdf",
+              "items": 38,
+              "bytes": 61000000
+            },
+            {
+              "kind": "Image",
+              "items": 214,
+              "bytes": 1900000000
+            }
+          ],
+          "trashed": 3
+        },
+        "trail": [
+          4
+        ],
+        "inCategory": false,
+        "category": "Other",
+        "listing": {
+          "status": "Loaded",
+          "ticket": 3
+        },
+        "items": [
+          {
+            "id": 21,
+            "name": "receipt-2026-11-03.pdf",
+            "revision": 1,
+            "kind": "Pdf",
+            "volume": 1,
+            "bytes": 184320
+          },
+          {
+            "id": 22,
+            "name": "IMG_0412.jpg",
+            "revision": 1,
+            "kind": "Image",
+            "volume": 1,
+            "bytes": 2411724
+          }
+        ],
+        "partial": false,
+        "picked": [
+          21
+        ],
+        "missing": false,
+        "layout": "Grid",
+        "order": "ByName",
+        "reversed": true,
+        "trash": false,
+        "details": 0,
+        "handed": false,
+        "begun": {
+          "trail": [],
+          "inCategory": false,
+          "category": "Other"
+        },
+        "search": {
+          "filter": {
+            "text": "receipt",
+            "kind": "Other",
+            "anyKind": true,
+            "from": 0,
+            "to": 8640000000000000
+          },
+          "searching": true,
+          "within": {
+            "trail": [
+              4
+            ],
+            "inCategory": false,
+            "category": "Other"
+          },
+          "query": {
+            "status": "Loaded",
+            "ticket": 1
+          },
+          "hits": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 184320
+            }
+          ],
+          "complete": false,
+          "asker": 0,
+          "peek": {
             "status": "Idle",
             "ticket": 0
           },
-          "folders": [],
-          "names": []
+          "peeker": 0
+        },
+        "deleting": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "change": {
+          "attempt": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "work": "NewFolder",
+          "items": [
+            {
+              "id": 22,
+              "name": "IMG_0412.jpg",
+              "revision": 1,
+              "kind": "Image",
+              "volume": 1,
+              "bytes": 0
+            }
+          ],
+          "name": "",
+          "folder": 0,
+          "dest": {
+            "folder": 4,
+            "path": [
+              4
+            ],
+            "names": [
+              "Receipts"
+            ]
+          },
+          "approval": 0,
+          "clash": {
+            "showing": false,
+            "revision": 0,
+            "shown": 0
+          },
+          "replace": false,
+          "done": [
+            22
+          ],
+          "unsure": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 0
+            }
+          ],
+          "panel": 0,
+          "panels": 0,
+          "sharing": [
+            {
+              "id": 21,
+              "name": "receipt-2026-11-03.pdf",
+              "revision": 1,
+              "kind": "Pdf",
+              "volume": 1,
+              "bytes": 184320
+            }
+          ],
+          "mail": false,
+          "asker": 0,
+          "stale": false,
+          "sending": {
+            "id": 0,
+            "outcome": "Planned"
+          },
+          "sentTo": "Chooser"
+        },
+        "sheet": {
+          "open": true,
+          "trail": [
+            4
+          ],
+          "reading": {
+            "status": "Loaded",
+            "ticket": 1
+          },
+          "folders": [
+            23
+          ],
+          "names": [
+            "2025"
+          ]
         }
       }
     }

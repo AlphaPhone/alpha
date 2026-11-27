@@ -3,14 +3,16 @@
   "spec": "spec/app/inbox/sending.md",
   "shape": "95a060bdf4b18452",
   "state": {
-    "session": 0,
-    "of": 0,
-    "kind": "Send",
-    "account": 0,
+    "session": 1,
+    "of": 1,
+    "kind": "Archive",
+    "account": 1,
     "draft": 0,
-    "messages": [],
+    "messages": [
+      71
+    ],
     "gmail": 0,
-    "history": 0,
+    "history": 5,
     "review": {
       "showing": false,
       "revision": 0,

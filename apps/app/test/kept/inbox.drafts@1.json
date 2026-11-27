@@ -3,7 +3,7 @@
   "spec": "spec/app/inbox/drafts.md",
   "shape": "163af6fb34531340",
   "state": {
-    "session": 0,
+    "session": 3,
     "open": false,
     "letter": {
       "id": 0,
@@ -35,7 +35,7 @@
         "revision": 0
       }
     },
-    "made": 0,
+    "made": 4,
     "kept": {
       "id": 0,
       "session": 0,
@@ -121,14 +121,54 @@
       "ticket": 0
     },
     "checking": 0,
-    "checked": [],
+    "checked": [
+      1
+    ],
     "shelf": {
-      "shelved": [],
-      "letters": {}
+      "shelved": [
+        4
+      ],
+      "letters": {
+        "4": {
+          "id": 4,
+          "session": 3,
+          "kind": "Reply",
+          "account": 1,
+          "toReplyTo": true,
+          "recipients": 1,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 2,
+            "carried": 2,
+            "base": 2
+          },
+          "revision": 2,
+          "gmail": 0,
+          "unsure": false,
+          "copyAttempt": 0,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSave",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        }
+      }
     },
     "shelfSelection": {
-      "account": 0,
-      "picks": [],
+      "account": 1,
+      "picks": [
+        {
+          "draft": 4,
+          "revision": 2
+        }
+      ],
       "reviewing": false
     },
     "discarding": false,
@@ -139,7 +179,7 @@
       "from": "af49288978",
       "until": "cfc39fe906",
       "state": {
-        "session": 0,
+        "session": 3,
         "open": false,
         "letter": {
           "id": 0,
@@ -170,7 +210,7 @@
             "revision": 0
           }
         },
-        "made": 0,
+        "made": 4,
         "kept": {
           "id": 0,
           "session": 0,
@@ -254,10 +294,44 @@
           "ticket": 0
         },
         "checking": 0,
-        "checked": [],
+        "checked": [
+          1
+        ],
         "shelf": {
-          "shelved": [],
-          "letters": {}
+          "shelved": [
+            4
+          ],
+          "letters": {
+            "4": {
+              "id": 4,
+              "session": 3,
+              "kind": "Reply",
+              "account": 1,
+              "toReplyTo": true,
+              "recipients": 1,
+              "invalid": 0,
+              "attachments": 0,
+              "mib": 0,
+              "textOnly": false,
+              "draft": {
+                "sync": "Kept",
+                "edits": 2,
+                "carried": 2,
+                "base": 2
+              },
+              "revision": 2,
+              "gmail": 0,
+              "unsure": false,
+              "verified": 0,
+              "sending": 0,
+              "use": "ToSave",
+              "sent": 0,
+              "doubt": {
+                "attempt": 0,
+                "revision": 0
+              }
+            }
+          }
         },
         "discarding": false,
         "notice": "Clear"
@@ -267,7 +341,7 @@
       "from": "cfc39fe906",
       "until": "dd68f5bd83",
       "state": {
-        "session": 0,
+        "session": 3,
         "open": false,
         "letter": {
           "id": 0,
@@ -299,7 +373,7 @@
             "revision": 0
           }
         },
-        "made": 0,
+        "made": 4,
         "kept": {
           "id": 0,
           "session": 0,
@@ -385,10 +459,45 @@
           "ticket": 0
         },
         "checking": 0,
-        "checked": [],
+        "checked": [
+          1
+        ],
         "shelf": {
-          "shelved": [],
-          "letters": {}
+          "shelved": [
+            4
+          ],
+          "letters": {
+            "4": {
+              "id": 4,
+              "session": 3,
+              "kind": "Reply",
+              "account": 1,
+              "toReplyTo": true,
+              "recipients": 1,
+              "invalid": 0,
+              "attachments": 0,
+              "mib": 0,
+              "textOnly": false,
+              "draft": {
+                "sync": "Kept",
+                "edits": 2,
+                "carried": 2,
+                "base": 2
+              },
+              "revision": 2,
+              "gmail": 0,
+              "unsure": false,
+              "copyAttempt": 0,
+              "verified": 0,
+              "sending": 0,
+              "use": "ToSave",
+              "sent": 0,
+              "doubt": {
+                "attempt": 0,
+                "revision": 0
+              }
+            }
+          }
         },
         "discarding": false,
         "notice": "Clear"

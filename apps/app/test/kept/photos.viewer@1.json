@@ -4,8 +4,11 @@
   "shape": "be0efdcaf2909c83",
   "state": {
     "visible": true,
-    "secure": false,
-    "scope": [],
+    "secure": true,
+    "scope": [
+      81,
+      82
+    ],
     "open": 0,
     "openedBy": "Owner",
     "origin": "LibraryItem",
@@ -70,8 +73,11 @@
       "until": "173bd6f26b",
       "state": {
         "visible": true,
-        "secure": false,
-        "scope": [],
+        "secure": true,
+        "scope": [
+          81,
+          82
+        ],
         "open": 0,
         "openedBy": "Owner",
         "listed": false,

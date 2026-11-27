@@ -3,17 +3,23 @@
   "spec": "spec/app/telegram/notices.md",
   "shape": "a071bd3fa79b1e7b",
   "state": {
-    "authenticated": false,
-    "notifyAllowed": false,
+    "authenticated": true,
+    "notifyAllowed": true,
     "check": {
       "status": "Idle",
       "ticket": 0
     },
     "since": 0,
     "frontChat": 0,
-    "muted": [],
-    "archived": [],
-    "upChats": [],
+    "muted": [
+      5
+    ],
+    "archived": [
+      6
+    ],
+    "upChats": [
+      7
+    ],
     "posts": 0
   }
 }

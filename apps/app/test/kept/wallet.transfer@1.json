@@ -41,7 +41,10 @@
       "outcome": "Planned"
     },
     "approving": false,
-    "spent": [],
-    "settled": 0
+    "spent": [
+      1,
+      2
+    ],
+    "settled": 2
   }
 }
