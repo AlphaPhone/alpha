@@ -45,7 +45,7 @@ it("Allow Photos and browse the library (spec/app/photos/index.md, \"Story: Give
   await until(alpha, runtime, Library, (state) => state.library.status === "Loaded" && state.rows.length === 3);
   // spec/app/photos/index.md, "Story: Browse the library": the Library is headed by day as v121 headed it, counted back from Alpha's time
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section h2")].map((heading) => heading.textContent)).toEqual(["Yesterday"]);
-  // spec/app/photos/index.md, "each heading with the number of items under it beside it": as v119's live camera adapter drew it
+  // spec/app/photos/index.md, "Story: Browse the library": each heading with the number of items under it beside it, as v119's live camera adapter drew it
   expect([...document.querySelectorAll("[data-alpha-app-scroll=photos] section header")].map((header) => [header.querySelector("h2")?.textContent, header.querySelector("span")?.textContent]))
     .toEqual([["Yesterday", "3"]]);
   // spec/app/photos/index.md, "Story: Browse the library": v119's live camera adapter drew images.svg on the Library tab and folder.svg on Albums
@@ -162,7 +162,7 @@ it('Offer the original photo for Inbox to review (spec/app/photos/viewer.md, "St
   expect([world.inbox.changes, world.inbox.attached, world.inbox.drafts.size]).toEqual([[], [], 0]);
 });
 
-it("Resume an already-sent photo edit from an older viewer record (spec/app/photos/viewer.md, \"A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up\")", async () => {
+it('Resume an already-sent photo edit from an older viewer record (spec/app/photos/viewer.md, "A restart forgets the viewer but keeps the save; a save still on its way is no longer trusted, and is looked up")', async () => {
   const kept = "alpha/app/photos/viewer@1";
   const operationId = "alpha-test-photo-edit";
   localStorage.setItem(kept, JSON.stringify({
@@ -188,7 +188,7 @@ it("Resume an already-sent photo edit from an older viewer record (spec/app/phot
   expect(localStorage.getItem(kept + ".unreadable")).toBeNull();
 });
 
-it("Keep Viewer open on Limited-to-Limited library updates and offer both Limited permission actions (spec/app/photos/index.md, \"Story: Give Photos access\"; spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+it('Keep Viewer open on Limited-to-Limited library updates and offer both Limited permission actions (spec/app/photos/index.md, "Story: Give Photos access"; spec/app/photos/viewer.md, "Story: Look at a photo or video")', async () => {
   const world = { ...scene(), phone: true };
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));
   await press("Photos");
@@ -224,7 +224,7 @@ it("Keep Viewer open on Limited-to-Limited library updates and offer both Limite
   expect(runtime.runSync(Viewer.use((viewer) => viewer.get())).open).toBe(opened);
 });
 
-it("Stops playing when a video ends even if currentTime rounds slightly short of duration (spec/app/photos/viewer.md, \"Story: Look at a photo or video\")", async () => {
+it('Stops playing when a video ends even if currentTime rounds slightly short of duration (spec/app/photos/viewer.md, "Story: Look at a photo or video")', async () => {
   const world = { ...scene(), phone: true };
   world.photos.access = { scope: "full", images: "full", videos: "full" };
   world.photos.rows.unshift({
@@ -251,7 +251,7 @@ it("Stops playing when a video ends even if currentTime rounds slightly short of
   await until(alpha, runtime, Viewer, (state) => !state.playing && state.position === 50);
 });
 
-it("Check a saved copy the earlier Alpha left pending instead of forgetting it (spec/app/photos/index.md, \"A saved copy the earlier Alpha left pending is checked once instead of forgotten\")", async () => {
+it('Check a saved copy the earlier Alpha left pending instead of forgetting it (spec/app/photos/index.md, "A saved copy the earlier Alpha left pending is checked once instead of forgotten")', async () => {
   const previous = "alpha.photos.pending-copy.v1";
   localStorage.setItem(previous, "not an operation id!");
   const invalidWorld = { ...scene(), phone: true };

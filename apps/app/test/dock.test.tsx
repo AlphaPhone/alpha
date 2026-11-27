@@ -417,6 +417,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     expect(await runtime.runPromise(Effect.flatMap(Shell, (m) => m.get()))).toMatchObject({ trail: [], assistant: "Sheet" });
   });
 
+  // spec/app/assistant/attachments.md, "Story: Choose files to attach"
   it("shows empty-state copy when no files or photos are present", async () => {
     const host = document.body.appendChild(document.createElement("div"));
     const root = createRoot(host);
@@ -453,6 +454,7 @@ describe("Ask Alpha dock and shell navigation", () => {
     }
   });
 
+  // spec/app/assistant/dock.md, "Story: Drag Ask Alpha where I want it"
   it("tracks live drag state on the sheet grabber and clears it on release", async () => {
     const { runtime } = await mountDock({ view: "Home", flush: underAct });
     const section = document.querySelector<HTMLElement>("section[aria-label='Ask Alpha']");

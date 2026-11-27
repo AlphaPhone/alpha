@@ -75,7 +75,8 @@ it('keeps an unconfigured messaging route on the phone (spec/app/platform/index.
   }
 });
 
-it('Talks in a page only through the relay at exactly "/cloud" (spec/app/voice/index.md, "A page served by Alpha\'s development server talks through that server\'s own Cloud speech relay, and a page that names none offers no Talk")', () => {
+// spec/app/voice/index.md, "A page served by Alpha's development server talks through that server's own Cloud speech relay, and a page that names none offers no Talk"
+it('Talks in a page only through the relay at exactly "/cloud"', () => {
   const devices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: () => Promise.reject(new Error("not asked")) } });
   const named = (content: string | undefined) => {
@@ -392,7 +393,7 @@ it("Platform boundary invariants: singleton Capacitor proxies, honest Garbled/40
   ]).toEqual(["42", "v:99"]);
 });
 
-it("Removes agent stream listeners even when abort fails (spec/app/platform/index.md, \"A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent\")", async () => {
+it('Removes agent stream listeners even when abort fails (spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent")', async () => {
   const world = { ...scene(), phone: true };
   world.platform.abortFails = true;
   const { alpha } = await open(world, only("home"));
@@ -401,7 +402,7 @@ it("Removes agent stream listeners even when abort fails (spec/app/platform/inde
   await vi.waitFor(() => expect([listenerCount("ElizaAgent", "streamData"), listenerCount("ElizaAgent", "streamEnd")]).toEqual([0, 0]));
 });
 
-it("Voice probe recovers after interruption and cloud openMic cancels capture after shut (spec/app/voice/index.md, \"Story: Hold a spoken conversation\"; spec/app/voice/index.md, \"Story: Mute, interrupt and stop\")", async () => {
+it('Voice probe recovers after interruption and cloud openMic cancels capture after shut (spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "Story: Mute, interrupt and stop")', async () => {
   const world = { ...scene(), phone: true };
   let releaseProbe = () => {};
   world.voice.probeGate = () => new Promise<void>((resolve) => { releaseProbe = resolve; });
@@ -426,7 +427,7 @@ it("Voice probe recovers after interruption and cloud openMic cancels capture af
   expect(world.voice.activeMicSession).toBeUndefined();
 });
 
-it("Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, \"Story: Take photos and videos\")", async () => {
+it('Browser camera releases audio track on recorder error and clears film on interrupted finish (spec/app/camera/index.md, "Story: Take photos and videos")', async () => {
   const stoppedTracks: string[] = [];
   const makeTrack = (label: string, extra?: Record<string, unknown>) => ({
     stop: () => { stoppedTracks.push(label); },
@@ -510,7 +511,7 @@ it("Browser camera releases audio track on recorder error and clears film on int
   }
 });
 
-it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/platform/index.md, \"Story: Talk to the resident agent\")", async () => {
+it('Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/platform/index.md, "Story: Talk to the resident agent")', async () => {
   const client = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) =>
     Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({
       ok: false, error_code: 401, error_message: "SESSION_PASSWORD_NEEDED", hint: "pet", pending_auth_id: "pa-1",
@@ -520,7 +521,7 @@ it("Telegram signIn handles 200 SESSION_PASSWORD_NEEDED responses (spec/app/plat
   expect(result).toEqual({ kind: "PasswordRequired", hint: "pet", pendingAuthId: "pa-1" });
 });
 
-it("Cloud fetch preserves Request metadata and parses empty or non-JSON bodies without throwing (spec/kit/read.md, \"Story: Read from outside\")", () => {
+it('Cloud fetch preserves Request metadata and parses empty or non-JSON bodies without throwing (spec/kit/read.md, "Story: Read from outside")', () => {
   const controller = new AbortController();
   const parsed = cloudAsked(new Request("https://cloud.invalid/api/v1/user", {
     method: "POST",

@@ -26,6 +26,21 @@ screen or a spinner.
 > same library. The image is only used in the [scan review](../files/scan.md)
 > unless I explicitly save something from it.
 
+### Scanning a selected image runs on-device review over Photos without saving until the owner chooses
+
+Dismissing the review returns to the same library. The image is only used in the [scan review](../files/scan.md) unless the owner explicitly saves something from it.
+
+```quint
+pure def photoImageScanAdmitted(ownerSelected: bool, onDevice: bool, explicitSave: bool): bool =
+  ownerSelected and onDevice and not(explicitSave)
+
+pure def photoScanSavesAnything(explicitSave: bool): bool = explicitSave
+
+pure def lawPhotoScanWritesNothingWithoutExplicitSave(ownerSelected: bool, onDevice: bool): bool =
+  not(photoScanSavesAnything(false))
+    and (photoImageScanAdmitted(ownerSelected, onDevice, false) iff (ownerSelected and onDevice))
+```
+
 ## Domain
 
 ### What Photos shows

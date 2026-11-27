@@ -478,7 +478,7 @@ describe("Home on a phone", () => {
     await drawn(() => { fromAreas.reminders([]); fromAreas.hidden([]); });
   });
 
-  it("Keeps no place for cards while none is drawn, so the tiles never jump (spec/app/home/cards.md, \"The row holds the agenda, Messages, Phone, Workflows, mail and brief cards in that order, each only when drawn, and is not drawn when none is\")", async () => {
+  it('Keeps no place for cards while none is drawn, so the tiles never jump (spec/app/home/cards.md, "The row holds the agenda, Messages, Phone, Workflows, mail, Telegram, Slack and brief cards in that order, each only when drawn, and is not drawn when none is")', async () => {
     const world = holdingHome({ ...scene(), phone: true });
     world.calendar.silent = true;
     world.workflows.prompts.clear();
@@ -547,7 +547,7 @@ describe("Home on a phone", () => {
     expect(allDay).toEqual([`Open calendar event: Holiday, ${owners}, All day`, `Open calendar event: Holiday, ${owners}, All day`]);
   });
 
-  it("Agenda advances once an event ends and a partial agent feed keeps prior titles (spec/app/home/cards.md, \"An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled\"; spec/app/home/cards.md, \"An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date\")", async () => {
+  it('Agenda advances once an event ends and a partial agent feed keeps prior titles (spec/app/home/cards.md, "An item stays on the card until it ends: a timed item through its last minute, an all-day item until its day is over, an overdue reminder until it is handled"; spec/app/home/cards.md, "An answer replaces what the calendar had; one whose access is off or has no account leaves nothing behind, and one that failed, could not reach it or ran out keeps what was read before, as not up to date")', async () => {
     const { world, hour } = agendaScene(
       [{ id: "1", name: "Work" }],
       [
@@ -595,7 +595,7 @@ describe("Home on a phone", () => {
     expect(agenda()?.getAttribute("aria-label")).toMatch(/^Open calendar event: Design Review,/);
   });
 
-  it("Inline drawer notice clears when the drawer closes or retrying succeeds (spec/app/home/index.md, \"A notice shows as a toast on bare Home and in the edit bar while editing\")", async () => {
+  it('Inline drawer notice clears when the drawer closes or retrying succeeds (spec/app/home/index.md, "A notice shows as a toast on bare Home and in the edit bar while editing")', async () => {
     const world = { ...scene(), phone: true };
     world.launcher.refusing.set("org.fixture.clock", "disabled");
     const { alpha } = await open(world, only("home"));

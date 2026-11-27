@@ -584,7 +584,7 @@ describe("Maps in a browser", () => {
     expect([await tried(2), world.maps.tiles.length]).toEqual([false, tiles]);
   });
 
-  it("Handles antimeridian, empty-line, and coordinate edge cases in geometry (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75\")", () => {
+  it('Handles antimeridian, empty-line, and coordinate edge cases in geometry (spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75")', () => {
     expect(pointIn("+43.73, +7.42")).toEqual({ lat: 43_730_000, lng: 7_420_000 });
     expect(pointIn(".5, -.5")).toEqual({ lat: 500_000, lng: -500_000 });
     expect(pointIn("-0, -0")).toEqual({ lat: 0, lng: 0 });
@@ -609,7 +609,7 @@ describe("Maps in a browser", () => {
     expect(pastTurn.beyond).toBeGreaterThan(50);
   });
 
-  it("Isolates Atlas per runtime, clears details on leave, skips coordinate search debounce, and refuses Google without tiles (spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
+  it(`Isolates Atlas per runtime, clears details on leave, skips coordinate search debounce, and refuses Google without tiles (spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"; spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge")`, async () => {
     const world = scene();
     const first = await openMaps(world);
     const { runtime } = first;
@@ -651,7 +651,7 @@ describe("Maps in a browser", () => {
     expect(document.body.textContent).toContain("The Google map is missing.");
   });
 
-  it("Takes a quiet fix on open that fails silently and clears one-shot GPS watches (spec/app/maps/index.md, \"Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit\"; spec/app/maps/index.md, \"A fix goes to whoever holds the location\")", async () => {
+  it('Takes a quiet fix on open that fails silently and clears one-shot GPS watches (spec/app/maps/index.md, "Opening Maps with location already allowed and nothing chosen takes one fix quietly, once a visit"; spec/app/maps/index.md, "A fix goes to whoever holds the location")', async () => {
     const world = { ...scene(), phone: true };
     world.maps.here = undefined;
     const first = await openMaps(world, false);
@@ -670,7 +670,7 @@ describe("Maps in a browser", () => {
     expect(secondWorld.maps.watches.size).toBe(0);
   });
 
-  it("Never searches typed coordinates on pause, clears search results on empty input, and clears search text on Back (spec/app/maps/index.md, \"Recent searches are the last five, newest first, each once\"; spec/app/maps/index.md, \"Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once\")", async () => {
+  it('Never searches typed coordinates on pause, clears search results on empty input, and clears search text on Back (spec/app/maps/index.md, "Recent searches are the last five, newest first, each once"; spec/app/maps/index.md, "Typing searches once the owner pauses for 350 milliseconds, and Enter searches at once")', async () => {
     const world = scene();
     const { alpha, runtime } = await openMaps(world);
 
@@ -690,7 +690,7 @@ describe("Maps in a browser", () => {
     expect(document.querySelector<HTMLInputElement>("input[aria-label='Search Maps']")?.value).toBe("");
   });
 
-  it("Shows Maps unavailable, distinct Cloud wait notices, and missing Google map notice (spec/app/maps/connection.md, \"Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account\"; spec/app/maps/connection.md, \"A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute\"; spec/app/maps/connection.md, \"Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge\")", async () => {
+  it(`Shows Maps unavailable, distinct Cloud wait notices, and missing Google map notice (spec/app/maps/connection.md, "Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account"; spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"; spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge")`, async () => {
     const unofferedWorld = scene();
     unofferedWorld.maps.coverage = { available: false };
     const first = await openMaps(unofferedWorld, false);
@@ -716,7 +716,7 @@ describe("Maps in a browser", () => {
     expect(document.body.textContent).toContain("You have used your Maps allowance for this period. It resets in 3 days.");
   });
 
-  it("Shows imprecise notice on stale fix, updates remaining guidance distance, and offers Share arrival in Guidance (spec/app/maps/navigation.md, \"A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75\"; spec/app/maps/navigation.md, \"Something remains ahead while going, and nothing once guidance stops or arrives\"; spec/app/maps/index.md, \"The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app\")", async () => {
+  it(`Shows imprecise notice on stale fix, updates remaining guidance distance, and offers Share arrival in Guidance (spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75"; spec/app/maps/navigation.md, "Something remains ahead while going, and nothing once guidance stops or arrives"; spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app")`, async () => {
     const world = { ...scene(), phone: true };
     const start = { latitude: 43.7300, longitude: 7.4200 };
     world.maps.routes = [cloudRoute("fast", start, harbour.coordinate, 600, 3)];
@@ -740,7 +740,7 @@ describe("Maps in a browser", () => {
     expect(document.body.textContent).toContain("Turn guidance needs a precise");
   });
 
-  it("Strips provider details from saved storage, enforces legacy 200-place limit, forgets details on leave, and blocks cross-provider saved origins (spec/app/maps/places.md, \"A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else\"; spec/app/maps/places.md, \"A saved provider place is used only with the open-data provider that served it\"; spec/app/maps/index.md, \"A place's details are read from its provider once it is on the card, and shown only while it still is\")", async () => {
+  it(`Strips provider details from saved storage, enforces legacy 200-place limit, forgets details on leave, and blocks cross-provider saved origins (spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"; spec/app/maps/places.md, "A saved provider place is used only with the open-data provider that served it"; spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is")`, async () => {
     const world = { ...scene(), phone: true };
     const first = await openMaps(world);
     await searchFor(first.alpha, first.runtime, "harbour");
@@ -814,7 +814,7 @@ describe("Maps in a browser", () => {
     world.maps.allowed = "prompt";
     const { alpha, runtime } = await onMaps(world);
     await until(alpha, runtime, Screen, (s) => s.link.provider !== 0);
-    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
+    // spec/app/maps/index.md, "Maps opens without the disclosure, and the owner's tap for their location shows it"; spec/app/maps/index.md, "Continuing past the disclosure asks Android, once, and then locates"
     await press("Recenter");
     await until(alpha, runtime, Screen, (s) => s.explaining);
     expect(Boolean(button("Continue"))).toBe(true);

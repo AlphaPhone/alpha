@@ -18,7 +18,7 @@ afterEach(async () => {
   document.documentElement.style.removeProperty("font-size");
 });
 
-it("Opens timed and all-day events in another column when the selected day is empty (spec/app/calendar/index.md, \"Story: Look at an event\")", async () => {
+it('Opens timed and all-day events in another column when the selected day is empty (spec/app/calendar/index.md, "Story: Look at an event")', async () => {
   const world = { ...scene(), phone: true, signedIn: false, now: new Date(2026, 10, 25, 8).getTime() };
   world.calendar.granted = true;
   const today = civilDay(world.now);
@@ -73,7 +73,7 @@ it("Opens timed and all-day events in another column when the selected day is em
   expect((await current()).anchor).toBe(today);
 });
 
-it("Shows the selected day across a wide canvas and at large text (spec/app/calendar/index.md, \"Story: See my days\"; spec/app/shell/keyboard.md, \"Story: Read everything at the text size I chose\")", async () => {
+it('Shows the selected day across a wide canvas and at large text (spec/app/calendar/index.md, "Story: See my days"; spec/app/shell/keyboard.md, "Story: Read everything at the text size I chose")', async () => {
   const world = { ...scene(), phone: true, signedIn: false, now: new Date(2026, 10, 25, 8).getTime() };
   world.calendar.granted = true;
   const today = civilDay(world.now);

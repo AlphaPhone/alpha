@@ -137,7 +137,7 @@ describe("Contacts on an Alpha image", () => {
     expect(world.telephony.sent).toEqual([]);
   });
 
-  it("Search chat over a contact and return to its dock (spec/app/assistant/search.md, \"Search from a closed Contact remembers the card that opened it\")", async () => {
+  it('Search chat over a contact and return to its dock (spec/app/assistant/search.md, "Search from a closed Contact remembers the card that opened it")', async () => {
     const world = image();
     world.ask.kept.set("c7", { roomId: "r7", title: "Lunch", messages: [{ id: "m1", role: "user", text: "Friday at noon" }] });
     const { alpha } = await open(world);
@@ -288,7 +288,7 @@ describe("Contacts on an Alpha image", () => {
     expect([world.telephony.editors, (await alpha.runtime.runPromise(Contacts.use((machine) => machine.get()))).form, world.telephony.people.map((one) => one.revision)]).toEqual([["new", "7"], "Shut", [1, 1]]);
   });
 
-  it("Append the next page to my contacts (spec/app/contacts/index.md, \"Story: Browse my contacts\")", async () => {
+  it('Append the next page to my contacts (spec/app/contacts/index.md, "Story: Browse my contacts")', async () => {
     const world = image();
     const first = world.telephony.people[0];
     if (!first) throw new Error("the phone has no starting contact");
@@ -459,7 +459,7 @@ describe("Contacts on an Alpha image", () => {
     expect(await read({ type: "contact_read_selected" })).toEqual({ kind: "contact-read", status: "read", contact: { displayName: "Ben Ortiz", phoneNumbers: ["+14155550122"], emailAddresses: [] } });
   });
 
-  it("Clamps >32 phone numbers in sheetOf and renders agent reviews inside a dialog (spec/app/contacts/index.md, \"Opening a contact reads it from the phone afresh\"; spec/app/contacts/agent.md, \"Every action is reviewed before anything is written\")", async () => {
+  it('Clamps >32 phone numbers in sheetOf and renders agent reviews inside a dialog (spec/app/contacts/index.md, "Opening a contact reads it from the phone afresh"; spec/app/contacts/agent.md, "Nothing is done but what the owner approved, as it was shown, once")', async () => {
     const oversized = sheetOf({
       givenName: "Maya",
       familyName: "Chen",
@@ -481,7 +481,7 @@ describe("Contacts on an Alpha image", () => {
     expect(reviewDialog?.textContent).toContain("Ben Ortiz");
   });
 
-  it("Does not disclose full latest-sender address unless includeAddress is strictly true (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\")", async () => {
+  it(`Does not disclose full latest-sender address unless includeAddress is strictly true (spec/app/contacts/agent.md, "The latest text's sender is named by its number alone, and the whole number only where the agent asked for it")`, async () => {
     const world = image();
     const { alpha } = await open(world);
     await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
@@ -489,7 +489,7 @@ describe("Contacts on an Alpha image", () => {
     expect(await alpha.runtime.runPromise(answerReading(masked))).toEqual({ kind: "sms-latest-sender", status: "found", numberEnding: "0100" });
   });
 
-  it("Offers review when a contact update replaces a distinct number with a duplicate (spec/app/contacts/agent.md, \"A change that would leave the contact as it is is never offered\")", async () => {
+  it('Offers review when a contact update replaces a distinct number with a duplicate (spec/app/contacts/agent.md, "A change that would leave the contact as it is is never offered")', async () => {
     const world = image();
     const maya = world.telephony.people.find((one) => one.id === "7");
     if (!maya) throw new Error("missing Maya fixture");
@@ -504,7 +504,7 @@ describe("Contacts on an Alpha image", () => {
     expect([agent.stage, agent.ending]).toEqual(["Shown", "Done"]);
   });
 
-  it("Does not carry a refused edit banner onto a fresh New contact form (spec/app/contacts/index.md, \"A new contact starts from a blank form, and a change from the contact as the phone holds it now\")", async () => {
+  it('Does not carry a refused edit banner onto a fresh New contact form (spec/app/contacts/index.md, "A new contact starts from a blank form, and a change from the contact as the phone holds it now")', async () => {
     const world = image();
     const maya = world.telephony.people.find((one) => one.id === "7");
     if (!maya) throw new Error("missing Maya fixture");

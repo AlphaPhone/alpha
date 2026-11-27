@@ -17,7 +17,7 @@ Alpha is raised; voice asks it to move and hears where it went.
 ### Voice holds the conversation's phase, its session and turn, the microphone, what was heard, the reply being spoken, and the recorder, permission and route it shares
 
 The conversation is idle, starting, listening, transcribing, thinking,
-speaking, paused, stopping, or failed. A session counts conversations and a
+speaking, stopping, or failed. A session counts conversations and a
 turn counts what was said in one; every answer from the voice service names
 them, and an answer to an earlier one is refused. The microphone is off,
 asked for, opening, on or closing. Voice also tracks whether the speech
@@ -164,6 +164,22 @@ the conversation. Stop discards or drains the worker's outstanding audio
 under the same authority, and a stopped or replaced owner gets no late
 transcript. The on-device speech route needs no network. The transcript
 is still sent to the agent as a text turn using its configured backend.
+
+```quint
+pure def nativeCaptureAdmitted(
+  engineReady: bool, residentRouteReady: bool, sameOwner: bool, sameEpoch: bool, captureActive: bool
+): bool =
+  engineReady and residentRouteReady and sameOwner and sameEpoch and captureActive
+
+pure def nativeTranscriptAdmitted(sameOwner: bool, sameEpoch: bool, captureActive: bool): bool =
+  sameOwner and sameEpoch and captureActive
+
+pure def lawNativeTalkRequiresCurrentOwnerEpochAndReadiness(
+  engineReady: bool, residentRouteReady: bool, sameOwner: bool, sameEpoch: bool, captureActive: bool
+): bool =
+  (not(engineReady) or not(residentRouteReady) or not(sameOwner) or not(sameEpoch) or not(captureActive))
+    implies not(nativeCaptureAdmitted(engineReady, residentRouteReady, sameOwner, sameEpoch, captureActive))
+```
 
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
 
@@ -652,6 +668,21 @@ place while either may still reach the agent. The recorded user and reply
 rows appear under the identities the agent confirms, on the latest page
 of that conversation. Opening older history keeps its place.
 
+```quint
+pure def talkCreatesBlankConversation(
+  hasSelectedChat: bool, editorEmpty: bool, sendInFlight: bool
+): bool =
+  not(hasSelectedChat) and editorEmpty and not(sendInFlight)
+
+pure def talkTurnCanPost(sendInFlight: bool): bool = not(sendInFlight)
+
+pure def lawTalkRespectsSelectedChatAndExclusivePostSlot(
+  hasSelectedChat: bool, editorEmpty: bool, sendInFlight: bool
+): bool =
+  (hasSelectedChat implies not(talkCreatesBlankConversation(hasSelectedChat, editorEmpty, sendInFlight)))
+    and (sendInFlight implies not(talkTurnCanPost(sendInFlight)))
+```
+
 ### What was heard but not sent is never counted as sent
 
 The owner sees it as "Heard so far, not sent". A turn still being heard,
@@ -973,6 +1004,21 @@ phone's result only once the agent proposes a Files action. A result
 position only refers to an existing Files listing. It uses the same spoken
 navigation claim. Stop and the owner's navigation can retire the request
 before the file action.
+
+```quint
+pure def spokenFilesNavigationAdmitted(
+  sameVoiceTurn: bool, sameSourceScreen: bool, directActionPermitted: bool,
+  retiredByOwnerOrStop: bool, alreadyFollowed: bool
+): bool =
+  sameVoiceTurn and sameSourceScreen and directActionPermitted
+    and not(retiredByOwnerOrStop) and not(alreadyFollowed)
+
+pure def lawSpokenFilesNavigationRunsAtMostOnceWhileActive(
+  sameVoiceTurn: bool, sameSourceScreen: bool, directActionPermitted: bool
+): bool =
+  not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, true, false))
+    and not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, false, true))
+```
 
 ### A navigation claim is released when the shell does not open its destination
 

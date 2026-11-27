@@ -449,11 +449,11 @@ pure val pageRoutesWorkflows: List[Route] = List(
   { method: Post, path: "/api/workflow/workflows/{id}/lifecycle", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/metadata-mutations/{mutationId}", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/lifecycle-mutations/{mutationId}", stream: false },
+)
+pure val pageRoutesTasksWallet: List[Route] = List(
   { method: Post, path: "/api/workflow/workflows/{id}/run", stream: false },
   { method: Post, path: "/api/workflow/executions/{id}/cancel", stream: false },
   { method: Get, path: "/api/workflow/workflows/{id}/submissions/{submissionId}", stream: false },
-)
-pure val pageRoutesTasksWallet: List[Route] = List(
   { method: Get, path: "/api/workflow/phone/catalog", stream: false },
   { method: Get, path: "/api/workflow/phone/mutations/{mutationId}", stream: false },
   { method: Post, path: "/api/workflow/phone/generate", stream: false },
@@ -495,6 +495,14 @@ A browser on the local machine can send a window of the reviewed recording to
 a local transcription model. The agent does not offer the route when it is
 running Alpha's native speech engine. A response contains only the recognized
 text for that window. Nothing is published as a live voice event.
+
+```quint
+pure val browserTranscriptionPublishesLiveVoice: bool = false
+pure def browserTranscriptionOffered(localBrowser: bool, nativeSpeechEngine: bool, windowBytes: int): bool =
+  localBrowser and not(nativeSpeechEngine) and windowBytes > 0 and windowBytes <= browserNotesTranscriptionLimit
+pure def lawNativeEngineNeverOffersBrowserTranscription(localBrowser: bool, windowBytes: int): bool =
+  not(browserTranscriptionOffered(localBrowser, true, windowBytes))
+```
 
 ### Only Android's native speech transport can call the resident recognizer
 
@@ -543,6 +551,13 @@ A browser recording has a browser audio identity. The local store removes
 the bytes for the exact note and deletion receipt before the page confirms
 that receipt. The agent checks the pending receipt and its browser audio
 identity. Native recordings still require their native channel.
+
+```quint
+pure def browserCleanupConfirmed(browserAudio: bool, bytesRemoved: bool, pendingReceipt: bool, exactNoteAndReceipt: bool): bool =
+  browserAudio and bytesRemoved and pendingReceipt and exactNoteAndReceipt
+pure def lawNativeRecordingCannotConfirmOnBrowserCleanup(bytesRemoved: bool, pendingReceipt: bool, exactNoteAndReceipt: bool): bool =
+  not(browserCleanupConfirmed(false, bytesRemoved, pendingReceipt, exactNoteAndReceipt))
+```
 
 ### Only the phone's native channel can verify that a reviewed recording was erased
 

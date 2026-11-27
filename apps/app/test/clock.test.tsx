@@ -347,7 +347,7 @@ describe("Clock journeys", () => {
     expect(hanoi?.timeZone).toBe("Asia/Ho_Chi_Minh");
   });
 
-  it("Bidirectional agent sync, zero spurious PUTs on pull, deletedTimerIds tombstones, offline preservation, and restart persistence (spec/app/clock/alarms.md, \"Syncing from the resident agent admits only valid, unique, bounded alarm lists\"; spec/app/clock/timers.md, \"Reopening after a restart finishes elapsed running timers and updates live remaining times\")", async () => {
+  it('Bidirectional agent sync, zero spurious PUTs on pull, deletedTimerIds tombstones, offline preservation, and restart persistence (spec/app/clock/alarms.md, "Syncing from the resident agent admits only valid, unique, bounded alarm lists"; spec/app/clock/timers.md, "Reopening after a restart finishes elapsed running timers and updates live remaining times")', async () => {
     const startMs = new Date(2026, 10, 24, 8, 0, 0, 0).getTime();
     const remote = emptyRemote(startMs);
     const first = await mountClock(startMs, remote);
@@ -499,7 +499,7 @@ describe("Clock journeys", () => {
     return { remote, first };
   }
 
-  it("Reopen settles timed-out repeating alarms into the future and missed Idle alarms without re-ringing (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\")", async () => {
+  it('Reopen settles timed-out repeating alarms into the future and missed Idle alarms without re-ringing (spec/app/clock/alarms.md, "Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing")', async () => {
     const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
     const { first } = await mountWithDailyAlarm(startMs, "Daily ring");
 
@@ -536,7 +536,7 @@ describe("Clock journeys", () => {
     expect(document.querySelector("[role=alertdialog][aria-label='Ringing alarm']")).toBeNull();
   });
 
-  it("Backward clock steps do not lock out Stopwatch or Timer pause, DST fire times stay strictly future, and Schema rejects corrupt metadata (spec/app/clock/stopwatch.md, \"Start, pause, resume, lap, reset, and reopen keep elapsed time and laps consistent\"; spec/app/clock/timers.md, \"Starting, pausing, and resuming preserve remaining time accurately\")", () => {
+  it('Backward clock steps do not lock out Stopwatch or Timer pause, DST fire times stay strictly future, and Schema rejects corrupt metadata (spec/app/clock/stopwatch.md, "Start, pause, resume, lap, reset, and reopen keep elapsed time and laps consistent"; spec/app/clock/timers.md, "Starting, pausing, and resuming preserve remaining time accurately")', () => {
     const runningSw = Stopwatch.start(Stopwatch.initial, 5000);
     expect(Stopwatch.canLap(runningSw, 4000)).toBe(true);
     const lapped = Stopwatch.lap(runningSw, 4000);
@@ -572,7 +572,7 @@ describe("Clock journeys", () => {
     expect(store.alarm(1).label).toBe("Valid");
   });
 
-  it("Settles timed-out repeating alarms across restart without double-firing and auto-silences after clock jumps (spec/app/clock/alarms.md, \"Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing\"; spec/app/clock/alarms.md, \"A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed\")", async () => {
+  it('Settles timed-out repeating alarms across restart without double-firing and auto-silences after clock jumps (spec/app/clock/alarms.md, "Reopening after a restart clears pending Undo and settles timed-out rings and missed alarms without double-firing"; spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed")', async () => {
     const startMs = new Date(2026, 10, 24, 6, 59, 0, 0).getTime();
     const { remote, first } = await mountWithDailyAlarm(startMs, "Daily standup");
     await first.advance(60_000);
@@ -598,7 +598,7 @@ describe("Clock journeys", () => {
     expect(afterJump.items[0]?.fireAt).toBeGreaterThan(jumpedTo);
   });
 
-  it("Preserves timer tombstones and never lets a stale empty remote overwrite newer local clock state (spec/app/clock/alarms.md, \"Syncing from the resident agent admits only valid, unique, bounded alarm lists\")", async () => {
+  it('Preserves timer tombstones and never lets a stale empty remote overwrite newer local clock state (spec/app/clock/alarms.md, "Syncing from the resident agent admits only valid, unique, bounded alarm lists")', async () => {
     const startMs = new Date(2026, 10, 24, 9, 0, 0, 0).getTime();
     const remote = emptyRemote(startMs);
     const session = await mountClock(startMs, remote);
@@ -644,7 +644,7 @@ describe("Clock journeys", () => {
     expect((await session.runtime.runPromise(Alarms.Machine.use((m) => m.get()))).items).toHaveLength(1);
   });
 
-  it("Commits the previous pending alarm deletion when deleting a second alarm inside the Undo window (spec/app/clock/alarms.md, \"Deleting an alarm holds it for a five-second Undo window before committing removal\")", async () => {
+  it('Commits the previous pending alarm deletion when deleting a second alarm inside the Undo window (spec/app/clock/alarms.md, "Deleting an alarm holds it for a five-second Undo window before committing removal")', async () => {
     const startMs = new Date(2026, 10, 24, 8, 0, 0, 0).getTime();
     const remote = emptyRemote(startMs);
     const session = await mountClock(startMs, remote);

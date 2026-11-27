@@ -14,7 +14,8 @@ afterEach(closeAll);
 const classes = (element: Element | null | undefined) => new Set(element?.className.split(/\s+/));
 const has = (element: Element | null | undefined, list: string) => list.split(" ").every((name) => classes(element).has(name));
 
-it("On the launcher the photo viewer's header floats below the status bar and the photo fills v119's 3:4 frame, while the editor keeps its own column, with v119's names for its controls (spec/app/photos/viewer.md, \"Story: Look at a photo or video\"; spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+// spec/app/photos/viewer.md, "Story: Look at a photo or video"; spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it"
+it("On the launcher the photo viewer's header floats below the status bar and the photo fills v119's 3:4 frame, while the editor keeps its own column, with v119's names for its controls", async () => {
   const world = { ...scene(), phone: true };
   world.settings.roles = world.settings.roles.map((r) => ({ ...r, held: r.role === "home" ? true : r.held }));
   const { alpha } = await open(world, only("home", "view:Photos", "notice"));

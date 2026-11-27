@@ -5,7 +5,8 @@ import { SystemSettings } from "../src/platform/systemSettings.vibe";
 import { scene } from "./fakes/scene.ts";
 import { fakeWorld } from "./fakes/world.vibe";
 
-it("Reads Android requestability and only asks the selected Access permission (spec/app/startup/access.md, \"Story: Allow, or go to Android's Settings\")", async () => {
+// spec/app/startup/access.md, "Story: Allow, or go to Android's Settings"
+it("Reads Android requestability and only asks the selected Access permission", async () => {
   const world = { ...scene(), phone: true };
   world.settings.permissionStates.camera = "prompt";
   world.settings.permissionStates.notifications = "denied";
@@ -30,7 +31,8 @@ it("Reads Android requestability and only asks the selected Access permission (s
   }
 });
 
-it("Leaves Android permission prompts unavailable on the browser (spec/app/startup/access.md, \"Story: Allow, or go to Android's Settings\")", async () => {
+// spec/app/startup/access.md, "Story: Allow, or go to Android's Settings"
+it("Leaves Android permission prompts unavailable on the browser", async () => {
   const world = scene();
   const runtime = ManagedRuntime.make(fakeWorld(world));
   try {

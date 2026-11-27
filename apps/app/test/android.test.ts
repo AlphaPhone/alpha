@@ -72,7 +72,8 @@ public final class Driver {
 }
 `;
 
-describe("Reach the phone's native capabilities (spec/app/platform/index.md, \"Story: Reach the phone's native capabilities\")", () => {
+// spec/app/platform/index.md, "Story: Reach the phone's native capabilities"
+describe("Reach the phone's native capabilities", () => {
   it("hands ElizaCloud the exact spec-verified cloud route table from @repo/cloud with no refused routes", () => {
     expect(capacitorConfig.plugins?.ElizaCloud?.routes).toEqual(elizaCloudRoutes);
     expect(tableProblems()).toEqual([]);

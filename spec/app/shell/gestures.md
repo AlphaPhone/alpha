@@ -16,7 +16,7 @@ Alpha's own drags are its dock's.
 > bottom bar to go Home on the launcher, and a pull down on empty Home to
 > show Android's notifications, and a scroll of Home never to open anything.
 
-### A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back
+### A swipe travels more than 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back
 
 ```quint
 type Swipe = NoSwipe | SwipeBack | SwipeShade | SwipeHome

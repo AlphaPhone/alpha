@@ -13,7 +13,6 @@ import { alphaImage } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const rule = "spec/app/contacts/index.md, \"Back from the search field clears the query and returns to Contacts\"";
 const searchField = () => document.querySelector<HTMLInputElement>("input[aria-label='Search contacts']");
 const mounts = only("home", "assistant", "notice", "phone/stage", "view:Phone", "view:Contacts", "view:Messages");
 
@@ -54,8 +53,8 @@ async function closesWithAndroidBack(alpha: Alpha, where: string) {
   }
 }
 
-describe("Contacts search", () => {
-  it(`On the launcher the Contacts search draws no Back, Android's Back closes it even empty, and the next Back leaves Contacts (${rule})`, async () => {
+describe('Contacts search (spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts")', () => {
+  it(`On the launcher the Contacts search draws no Back, Android's Back closes it even empty, and the next Back leaves Contacts (spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts")`, async () => {
     const alpha = await launcher();
     await tile("Contacts");
     await until(alpha, alpha.runtime, Contacts, (state) => state.front && state.list.status === "Loaded");
@@ -68,7 +67,7 @@ describe("Contacts search", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 
-  it(`On the launcher the search on Phone's Contacts tab draws no Back, and Android's Back closes it before leaving the tab (${rule})`, async () => {
+  it(`On the launcher the search on Phone's Contacts tab draws no Back, and Android's Back closes it before leaving the tab (spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts")`, async () => {
     const alpha = await launcher();
     await tile("Phone");
     await until(alpha, alpha.runtime, Phone, (state) => state.front);
@@ -84,7 +83,7 @@ describe("Contacts search", () => {
     await closesWithAndroidBack(alpha, "Phone,Contacts");
   });
 
-  it(`Off the launcher the Contacts list's Back is Back to apps, and the search keeps a Back that closes it (${rule})`, async () => {
+  it(`Off the launcher the Contacts list's Back is Back to apps, and the search keeps a Back that closes it (spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts")`, async () => {
     const { alpha } = await open(alphaImage(), mounts);
     await until(alpha, alpha.runtime, Shell, (state) => state.image && state.contacts);
     await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Contacts" }))));

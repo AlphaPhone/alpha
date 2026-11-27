@@ -358,6 +358,21 @@ and event limit. A stale Workflows review or a reply outside that scope
 settles without calendar data. The reply carries only the event identity,
 title, time, all-day flag and the revision of those fields.
 
+```quint
+pure def workflowPhoneReadAdmitted(
+  grantBefore: bool, grantAfter: bool, frontBefore: bool, frontAfter: bool,
+  reviewCurrent: bool, inApprovedScope: bool
+): bool =
+  grantBefore and grantAfter and frontBefore and frontAfter and reviewCurrent and inApprovedScope
+
+pure def lawStaleOrOutOfScopeWorkflowReadReturnsNoData(
+  grantBefore: bool, grantAfter: bool, frontBefore: bool, frontAfter: bool,
+  reviewCurrent: bool, inApprovedScope: bool
+): bool =
+  (not(grantBefore) or not(grantAfter) or not(frontBefore) or not(frontAfter) or not(reviewCurrent) or not(inApprovedScope))
+    implies not(workflowPhoneReadAdmitted(grantBefore, grantAfter, frontBefore, frontAfter, reviewCurrent, inApprovedScope))
+```
+
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
 
 As live v119 did, Calendar shows no notice asking for it: opening New event

@@ -510,6 +510,25 @@ press opens the actions while held and releasing it keeps them open.
 Moving to scroll or cancelling the press opens no actions. Following an
 inline link or selecting text leaves the message menu alone.
 
+```quint
+type MessageGesture = TapMessage | StationaryHold | HoldRelease | ScrollOrCancel | InlineLinkOrSelection
+
+pure def actionsMenuAfter(menuOpen: bool, gesture: MessageGesture): bool =
+  match gesture {
+    | TapMessage => not(menuOpen)
+    | StationaryHold => true
+    | HoldRelease => menuOpen
+    | ScrollOrCancel => menuOpen
+    | InlineLinkOrSelection => menuOpen
+  }
+
+pure def lawScrollCancelOrLinkNeverOpensActions(gesture: MessageGesture): bool =
+  (gesture == ScrollOrCancel or gesture == InlineLinkOrSelection) implies not(actionsMenuAfter(false, gesture))
+
+pure def lawStationaryHoldOpensAndReleaseKeepsActions(menuOpen: bool): bool =
+  actionsMenuAfter(actionsMenuAfter(menuOpen, StationaryHold), HoldRelease)
+```
+
 ### Copy puts a message's text on the clipboard, Call opens Phone with the number, and a message Alpha cannot show opens in the messaging app; none changes anything here
 
 Call hands off the current thread and page ticket. Phone opens the keypad
@@ -539,6 +558,26 @@ The open action menu shows “Copied!” for 1.4 seconds after the phone
 copies the selected message. If the phone rejects the write, the menu
 says “Copy failed” and lets the owner try again. Closing the menu or
 selecting another message clears its feedback.
+
+```quint
+type CopyFeedback = NoCopyFeedback | CopiedFeedback | CopyFailedFeedback
+
+pure val copiedNoticeMs = 1400
+
+pure def copyFeedbackShown(
+  menuOpen: bool, sameMessage: bool, feedback: CopyFeedback, elapsedMs: int
+): CopyFeedback =
+  if (not(menuOpen) or not(sameMessage)) NoCopyFeedback
+  else if (feedback == CopiedFeedback and elapsedMs >= copiedNoticeMs) NoCopyFeedback
+  else feedback
+
+pure def copyFeedbackAllowsRetry(feedback: CopyFeedback): bool = feedback == CopyFailedFeedback
+
+pure def lawClosingOrSwitchingMessageClearsCopyFeedback(
+  menuOpen: bool, sameMessage: bool, feedback: CopyFeedback, elapsedMs: int
+): bool =
+  (not(menuOpen) or not(sameMessage)) implies copyFeedbackShown(menuOpen, sameMessage, feedback, elapsedMs) == NoCopyFeedback
+```
 
 ### "Delete message?" is asked over a message that is shown, and Keep closes it
 
@@ -662,6 +701,20 @@ The stage and its Full strip name the recipients of the open New draft. The
 name is read only for its current validated numbers and while Contacts
 access permits it. The phone shows the numbers themselves when it cannot
 name them. Editing To keeps the same New draft and Ask Alpha history.
+
+```quint
+type NewStageLabel = NoStageRecipients | ContactNames | RawNumbers
+
+pure def newStageLabel(
+  inNew: bool, hasValidatedNumbers: bool, contactsPermitted: bool, namesResolved: bool
+): NewStageLabel =
+  if (not(inNew) or not(hasValidatedNumbers)) NoStageRecipients
+  else if (contactsPermitted and namesResolved) ContactNames
+  else RawNumbers
+
+pure def lawNewStageShowsNumbersWithoutContactsAccess(inNew: bool, namesResolved: bool): bool =
+  inNew implies newStageLabel(inNew, true, false, namesResolved) == RawNumbers
+```
 
 ### A current Android text request opens New only when its saved draft is empty
 

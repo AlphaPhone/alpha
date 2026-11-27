@@ -316,3 +316,29 @@ lemma listed_ensures(s: Photos, ticket: int, ok: bool, rows: seq<int>, owned: se
     }
   }
 }
+
+lemma cameraAlbumsLoaded_ensures(s: Photos, photo: int, ticket: int, choices: seq<int>, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysVideosNeedTheirAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysOnlyOwnWithoutAccess(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheAlbumShowingIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysNothingShownWhileHidden(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysTheLockScreenListsOnlyItsSession(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysSelectionIsListed(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysRunsAreTheOwners(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> alwaysDialogNamesItsSubject(cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepLosingAccessClosesWhatShowsTheLibrary(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepNothingChangesWithoutAccess(s, cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAPageKeepsWhatWasListed(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepChangesAreTheOwners(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAFavouriteToggles(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_)))
+  ensures (inv(s) ==> canCameraAlbumsLoaded(s, photo, ticket, by_) ==> stepAlbumChangesCarryTheSelection(s, "cameraAlbumsLoaded", cameraAlbumsLoaded(s, photo, ticket, choices, by_), []))
+{
+  if inv(s) && canCameraAlbumsLoaded(s, photo, ticket, by_) {
+    var after := cameraAlbumsLoaded(s, photo, ticket, choices, by_);
+    if s.album != 0 {
+      assert after.albums == choices + ProofLib.Filter((set_x: int) => !((set_x in choices)), [s.album]);
+      Joined(choices, [s.album]);
+      assert s.album in after.albums;
+    }
+  }
+}

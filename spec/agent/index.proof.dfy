@@ -12,14 +12,15 @@ lemma CoreNotSpeech(route: Route)
   requires route in pageRoutesCore
   ensures route !in nativeSpeechRoutes
 {
-  assert |pageRoutesCore| == 30;
-  var i :| 0 <= i < 30 && pageRoutesCore[i] == route;
+  assert |pageRoutesCore| == 31;
+  var i :| 0 <= i < 31 && pageRoutesCore[i] == route;
   if i == 0 { NotSpeech(pageRoutesCore[0]); } else if i == 1 { NotSpeech(pageRoutesCore[1]); } else if i == 2 { NotSpeech(pageRoutesCore[2]); } else if i == 3 { NotSpeech(pageRoutesCore[3]); } else if i == 4 { NotSpeech(pageRoutesCore[4]); }
   else if i == 5 { NotSpeech(pageRoutesCore[5]); } else if i == 6 { NotSpeech(pageRoutesCore[6]); } else if i == 7 { NotSpeech(pageRoutesCore[7]); } else if i == 8 { NotSpeech(pageRoutesCore[8]); } else if i == 9 { NotSpeech(pageRoutesCore[9]); }
   else if i == 10 { NotSpeech(pageRoutesCore[10]); } else if i == 11 { NotSpeech(pageRoutesCore[11]); } else if i == 12 { NotSpeech(pageRoutesCore[12]); } else if i == 13 { NotSpeech(pageRoutesCore[13]); } else if i == 14 { NotSpeech(pageRoutesCore[14]); }
   else if i == 15 { NotSpeech(pageRoutesCore[15]); } else if i == 16 { NotSpeech(pageRoutesCore[16]); } else if i == 17 { NotSpeech(pageRoutesCore[17]); } else if i == 18 { NotSpeech(pageRoutesCore[18]); } else if i == 19 { NotSpeech(pageRoutesCore[19]); }
   else if i == 20 { NotSpeech(pageRoutesCore[20]); } else if i == 21 { NotSpeech(pageRoutesCore[21]); } else if i == 22 { NotSpeech(pageRoutesCore[22]); } else if i == 23 { NotSpeech(pageRoutesCore[23]); } else if i == 24 { NotSpeech(pageRoutesCore[24]); }
-  else if i == 25 { NotSpeech(pageRoutesCore[25]); } else if i == 26 { NotSpeech(pageRoutesCore[26]); } else if i == 27 { NotSpeech(pageRoutesCore[27]); } else if i == 28 { NotSpeech(pageRoutesCore[28]); } else { NotSpeech(pageRoutesCore[29]); }
+  else if i == 25 { NotSpeech(pageRoutesCore[25]); } else if i == 26 { NotSpeech(pageRoutesCore[26]); } else if i == 27 { NotSpeech(pageRoutesCore[27]); } else if i == 28 { NotSpeech(pageRoutesCore[28]); } else if i == 29 { NotSpeech(pageRoutesCore[29]); }
+  else { NotSpeech(pageRoutesCore[30]); }
 }
 
 lemma AppsNotSpeech(route: Route)
@@ -64,18 +65,31 @@ lemma WorkflowsNotSpeech(route: Route)
   if i < 15 { WorkflowsNotSpeechA(i); } else { WorkflowsNotSpeechB(i); }
 }
 
+lemma TasksWalletNotSpeechA(i: int)
+  requires 0 <= i < 15
+  ensures pageRoutesTasksWallet[i] !in nativeSpeechRoutes
+{
+  if i == 0 { NotSpeech(pageRoutesTasksWallet[0]); } else if i == 1 { NotSpeech(pageRoutesTasksWallet[1]); } else if i == 2 { NotSpeech(pageRoutesTasksWallet[2]); } else if i == 3 { NotSpeech(pageRoutesTasksWallet[3]); } else if i == 4 { NotSpeech(pageRoutesTasksWallet[4]); }
+  else if i == 5 { NotSpeech(pageRoutesTasksWallet[5]); } else if i == 6 { NotSpeech(pageRoutesTasksWallet[6]); } else if i == 7 { NotSpeech(pageRoutesTasksWallet[7]); } else if i == 8 { NotSpeech(pageRoutesTasksWallet[8]); } else if i == 9 { NotSpeech(pageRoutesTasksWallet[9]); }
+  else if i == 10 { NotSpeech(pageRoutesTasksWallet[10]); } else if i == 11 { NotSpeech(pageRoutesTasksWallet[11]); } else if i == 12 { NotSpeech(pageRoutesTasksWallet[12]); } else if i == 13 { NotSpeech(pageRoutesTasksWallet[13]); } else { NotSpeech(pageRoutesTasksWallet[14]); }
+}
+
+lemma TasksWalletNotSpeechB(i: int)
+  requires 15 <= i < 30
+  ensures pageRoutesTasksWallet[i] !in nativeSpeechRoutes
+{
+  if i == 15 { NotSpeech(pageRoutesTasksWallet[15]); } else if i == 16 { NotSpeech(pageRoutesTasksWallet[16]); } else if i == 17 { NotSpeech(pageRoutesTasksWallet[17]); } else if i == 18 { NotSpeech(pageRoutesTasksWallet[18]); } else if i == 19 { NotSpeech(pageRoutesTasksWallet[19]); }
+  else if i == 20 { NotSpeech(pageRoutesTasksWallet[20]); } else if i == 21 { NotSpeech(pageRoutesTasksWallet[21]); } else if i == 22 { NotSpeech(pageRoutesTasksWallet[22]); } else if i == 23 { NotSpeech(pageRoutesTasksWallet[23]); } else if i == 24 { NotSpeech(pageRoutesTasksWallet[24]); }
+  else if i == 25 { NotSpeech(pageRoutesTasksWallet[25]); } else if i == 26 { NotSpeech(pageRoutesTasksWallet[26]); } else if i == 27 { NotSpeech(pageRoutesTasksWallet[27]); } else if i == 28 { NotSpeech(pageRoutesTasksWallet[28]); } else { NotSpeech(pageRoutesTasksWallet[29]); }
+}
+
 lemma TasksWalletNotSpeech(route: Route)
   requires route in pageRoutesTasksWallet
   ensures route !in nativeSpeechRoutes
 {
-  assert |pageRoutesTasksWallet| == 27;
-  var i :| 0 <= i < 27 && pageRoutesTasksWallet[i] == route;
-  if i == 0 { NotSpeech(pageRoutesTasksWallet[0]); } else if i == 1 { NotSpeech(pageRoutesTasksWallet[1]); } else if i == 2 { NotSpeech(pageRoutesTasksWallet[2]); } else if i == 3 { NotSpeech(pageRoutesTasksWallet[3]); } else if i == 4 { NotSpeech(pageRoutesTasksWallet[4]); }
-  else if i == 5 { NotSpeech(pageRoutesTasksWallet[5]); } else if i == 6 { NotSpeech(pageRoutesTasksWallet[6]); } else if i == 7 { NotSpeech(pageRoutesTasksWallet[7]); } else if i == 8 { NotSpeech(pageRoutesTasksWallet[8]); } else if i == 9 { NotSpeech(pageRoutesTasksWallet[9]); }
-  else if i == 10 { NotSpeech(pageRoutesTasksWallet[10]); } else if i == 11 { NotSpeech(pageRoutesTasksWallet[11]); } else if i == 12 { NotSpeech(pageRoutesTasksWallet[12]); } else if i == 13 { NotSpeech(pageRoutesTasksWallet[13]); } else if i == 14 { NotSpeech(pageRoutesTasksWallet[14]); }
-  else if i == 15 { NotSpeech(pageRoutesTasksWallet[15]); } else if i == 16 { NotSpeech(pageRoutesTasksWallet[16]); } else if i == 17 { NotSpeech(pageRoutesTasksWallet[17]); } else if i == 18 { NotSpeech(pageRoutesTasksWallet[18]); } else if i == 19 { NotSpeech(pageRoutesTasksWallet[19]); }
-  else if i == 20 { NotSpeech(pageRoutesTasksWallet[20]); } else if i == 21 { NotSpeech(pageRoutesTasksWallet[21]); } else if i == 22 { NotSpeech(pageRoutesTasksWallet[22]); } else if i == 23 { NotSpeech(pageRoutesTasksWallet[23]); } else if i == 24 { NotSpeech(pageRoutesTasksWallet[24]); }
-  else if i == 25 { NotSpeech(pageRoutesTasksWallet[25]); } else { NotSpeech(pageRoutesTasksWallet[26]); }
+  assert |pageRoutesTasksWallet| == 30;
+  var i :| 0 <= i < 30 && pageRoutesTasksWallet[i] == route;
+  if i < 15 { TasksWalletNotSpeechA(i); } else { TasksWalletNotSpeechB(i); }
 }
 
 lemma lawSpeechRoutesAreAbsentFromThePage_ensures(route: Route)

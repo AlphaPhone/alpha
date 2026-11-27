@@ -40,7 +40,7 @@ async function runSearch(alpha: Awaited<ReturnType<typeof openInbox>>["alpha"], 
   await until(alpha, inbox.runtime(alpha), List, (state) => state.selected.query === query);
 }
 
-it("On the launcher the open search draws no Back and no folders, and the phone's Back closes it, empty or typed, before leaving Inbox (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
+it(`On the launcher the open search draws no Back and no folders, and the phone's Back closes it, empty or typed, before leaving Inbox (spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox")`, async () => {
   const world = { ...scene(), phone: true };
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
   const { alpha } = await openInbox(world);
@@ -62,7 +62,7 @@ it("On the launcher the open search draws no Back and no folders, and the phone'
   expect([searchField(), Boolean(button("Search email"))]).toEqual([null, true]);
 });
 
-it("Off the launcher the open search keeps its Back to the folder, and emptying it keeps it open (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\")", async () => {
+it('Off the launcher the open search keeps its Back to the folder, and emptying it keeps it open (spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox")', async () => {
   const { alpha } = await openInbox({ ...scene(), phone: false });
   await press("Search email");
   expect([Boolean(searchField()), Boolean(button("Back to inbox")), folders()]).toEqual([true, true, false]);
@@ -74,7 +74,7 @@ it("Off the launcher the open search keeps its Back to the folder, and emptying 
   expect(Boolean(searchField())).toBe(true);
 });
 
-it("A search kept through a restart, from a list kept before the field was part of it, stays open when Clear empties it (spec/app/inbox/index.md, \"Back from a search shows its folder without the search, before Back leaves Inbox\"; spec/app/inbox/index.md, \"A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest\")", async () => {
+it('A search kept through a restart, from a list kept before the field was part of it, stays open when Clear empties it (spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"; spec/app/inbox/index.md, "A restart keeps the selection, the list kept for it and its credential, whether Spam and Trash can be searched, and the count as no longer fresh, and forgets the rest")', async () => {
   const world = { ...scene(), phone: false };
   const first = await openInbox(world);
   await press("Search email");

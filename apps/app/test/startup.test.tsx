@@ -58,7 +58,7 @@ describe("Startup recovery", () => {
     }
   });
 
-  it("Runs the resident startup recovery machine through failure and Switch Home (spec/app/startup/recovery.md, \"Story: See that something went wrong, and get out of it\")", async () => {
+  it('Runs the resident startup recovery machine through failure and Switch Home (spec/app/startup/recovery.md, "Story: See that something went wrong, and get out of it")', async () => {
     const world = { ...scene(), phone: true };
     world.launcher.launcher = true;
     const { alpha } = await open(world, only("home", "overlay"));
@@ -71,7 +71,7 @@ describe("Startup recovery", () => {
   });
 });
 
-it("Holds native Home until the phone confirms the signed-in account (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
+it('Holds native Home until the phone confirms the signed-in account (spec/app/account/signIn.md, "Story: Sign in when Alpha needs it")', async () => {
   const world = { ...scene(), phone: true, signedIn: false, now: 1_700_000_000_000 };
   const startEmail = vi.fn(() => Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }));
   const verify = vi.fn((input: { attempt: number; code: string }) => {
@@ -114,7 +114,8 @@ it("Holds native Home until the phone confirms the signed-in account (spec/app/a
   }
 });
 
-it("Shows native Access after sign-in and keeps the owner's place through restart (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+// spec/app/startup/access.md, "Story: Walk through each access in order"
+it("Shows native Access after sign-in and keeps the owner's place through restart", async () => {
   const world = { ...scene(), phone: true, signedIn: true };
   world.settings.permissionStates.notifications = "prompt";
   world.settings.permissionReplies.notifications = "denied";
@@ -166,7 +167,7 @@ it("Shows native Access after sign-in and keeps the owner's place through restar
   }
 });
 
-it("Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, \"Story: Walk through each access in order\")", async () => {
+it('Stops the Alpha image Access walkthrough at its first ungranted permission (spec/app/startup/access.md, "Story: Walk through each access in order")', async () => {
   const world = { ...scene(), phone: true, image: true, signedIn: true };
   world.settings.hostFacts.startupPermissionDefaults = true;
   world.settings.permissionStates.notifications = "granted";
@@ -189,7 +190,7 @@ it("Stops the Alpha image Access walkthrough at its first ungranted permission (
   }
 });
 
-it("Shows All set only for the account result that calls for it (spec/app/startup/access.md, \"Story: Hear that all is set\")", async () => {
+it('Shows All set only for the account result that calls for it (spec/app/startup/access.md, "Story: Hear that all is set")', async () => {
   const world = { ...scene(), phone: true, signedIn: true };
   underAct();
   try {
@@ -255,7 +256,7 @@ it("Shows chat at once on the assistant-only surface, and elsewhere a white cove
   }
 });
 
-it("Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account/signIn.md, \"Story: Sign in when Alpha needs it\")", async () => {
+it('Returns from Android Wi-Fi settings to the sign-in chooser (spec/app/account/signIn.md, "Story: Sign in when Alpha needs it")', async () => {
   const world = { ...scene(), phone: true, signedIn: false };
   world.settings.connectivity = { online: false, validated: false, captivePortal: false, ssid: null };
   underAct();

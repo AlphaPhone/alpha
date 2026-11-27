@@ -128,7 +128,7 @@ function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStor
   }
 }
 
-// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
 const machine = reacting(Updates, { keep: 1, open: [{ type: "restart" }], carry })
 
 // spec/app/update/index.md, "The installed version never goes down, the signing root never changes, and a phone past its first 30 seconds is never starting again"

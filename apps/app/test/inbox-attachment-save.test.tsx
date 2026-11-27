@@ -98,7 +98,6 @@ it("Migrates a pre-cancelled persisted reader record across restart without losi
   if (!storedRaw) throw new Error("Missing persisted reader record");
   const preCancel = JSON.parse(storedRaw) as Record<string, unknown>;
   delete preCancel.cancelled;
-  // A record kept before an unsupported attachment's tap was remembered has no `unsupported` either.
   delete preCancel.unsupported;
   expect("pdf" in preCancel && "keep" in preCancel && !("cancelled" in preCancel) && !("unsupported" in preCancel)).toBe(true);
   localStorage.setItem(kept, JSON.stringify({ ...preCancel, unsure: [held] }));
@@ -141,11 +140,9 @@ it("An attachment Alpha can neither show nor save reads Unsupported type or size
   await drawn(() => tile()?.click());
   await until(alpha, runtime, Shown, (s) => s.unsupported === 1);
   await drawn(() => expect(notes()).toContain("Open in Gmail"));
-  // Nothing is fetched or put under review, and no review opens.
   const shown = await runtime.runPromise(Shown.use((machine) => machine.get()));
   expect([shown.attachment, shown.file.outcome, world.inbox.savedAttachments.size, document.querySelector("[role=dialog]")]).toEqual([0, "Planned", 0, null]);
 
-  // Leaving the message lets the notice go.
   await press("Back to the list");
   await until(alpha, runtime, Shown, (s) => s.message === 0 && s.unsupported === 0);
 });

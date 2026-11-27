@@ -1581,7 +1581,7 @@ Android is asked for the tap that showed the disclosure, so the answer
 that allows location locates, as "Use my location" does.
 
 ```quint
-pure def canContinueDisclosure(m: Maps): bool = m.explaining and C::canDisclose(m.link)
+pure def canContinueDisclosure(m: Maps): bool = m.explaining and m.trip.guidance == N::Stopped and C::canDisclose(m.link)
 
 pure def continueDisclosure(m: Maps): Stepped =
   val shown = C::disclose(m.link)

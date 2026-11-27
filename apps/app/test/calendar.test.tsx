@@ -177,6 +177,7 @@ async function openReminder({ alpha, runtime }: Awaited<ReturnType<typeof onCale
 /** What the open event or reminder's detail reads. */
 const detail = () => document.querySelector('[data-alpha-subview="calendar-detail"]')?.textContent;
 
+// spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/index.md, "What Android answers replaces what Calendar believed; granted, the day is read, withdrawn, the phone's rows go"
 it("Rechecks Calendar access on return from Android Settings", async () => {
   const world = morning(true);
   const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "view:Settings"), (state) => state.front && state.google.status === "Loaded" && state.googleRows === 2);
@@ -251,7 +252,7 @@ async function declineLunch(alpha: Alpha, runtime: ReturnType<typeof calendar.ru
 }
 
 describe("Calendar without a connected account", () => {
-  it("Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, \"Story: Know what to do when Calendar cannot read\")", async () => {
+  it('Shows Calendar settings on the empty standalone timeline (spec/app/calendar/presentation.md, "Story: Know what to do when Calendar cannot read")', async () => {
     const world = { ...morning(false), signedIn: false };
     world.inbox.google = undefined;
     const { alpha } = await open(world, only("view:Calendar", "view:Settings"));
@@ -277,7 +278,7 @@ describe("Calendar without a connected account", () => {
     expect(calendarSettings()?.textContent).not.toContain("Permissions");
   });
 
-  it("Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, \"Story: Let Calendar read my phone's calendar\")", async () => {
+  it(`Shows the granted local calendar while the account is signed out (spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar")`, async () => {
     const world = { ...morning(true), signedIn: false };
     world.calendar.granted = true;
     await mountCalendar(world, only("view:Calendar"), (state) => state.owner === 0 && !state.connected && state.phoneRows === 1);
@@ -352,7 +353,7 @@ describe("Calendar without a connected account", () => {
     expect(world.calendar.phoneEvents.some(({ title }) => title === "Piano")).toBe(false);
   });
 
-  it("Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, \"Schedule shows upcoming events and reminders through the end of next month\")", async () => {
+  it('Shows the upcoming window and disconnection in standalone Schedule (spec/app/calendar/presentation.md, "Schedule shows upcoming events and reminders through the end of next month")', async () => {
     const { alpha, runtime } = await onDisconnected();
     await widen(alpha, runtime);
     await fromMonth("Schedule");
@@ -363,7 +364,7 @@ describe("Calendar without a connected account", () => {
     expect(schedule?.textContent).not.toContain("No upcoming events");
   });
 
-  it("Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, \"Search and the Calendars sheet open over the days, never over an open event\")", async () => {
+  it('Shows the covered window and disconnection while searching standalone Calendar (spec/app/calendar/index.md, "Search and the Calendars sheet open over the days, never over an open event")', async () => {
     const { alpha, runtime } = await onDisconnected();
     await widen(alpha, runtime);
     await press("Search events");
@@ -376,7 +377,7 @@ describe("Calendar without a connected account", () => {
     expect(results?.textContent).not.toContain("No matching events");
   });
 
-  it("Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, \"Story: See reminders among my events\")", async () => {
+  it('Shows and completes the exact dated reminder in Calendar (spec/app/calendar/index.md, "Story: See reminders among my events")', async () => {
     const running = await onReminders({ ...morning(false), signedIn: false });
     const { alpha, runtime } = running;
 
@@ -398,7 +399,7 @@ describe("Calendar without a connected account", () => {
     expect(button(/^Bring the blue notebook,/)).toBeDefined();
   });
 
-  it("Snoozes only the selected alerted revision and keeps its date in Calendar (spec/app/reminders/alerts.md, \"Story: Alert on due reminders and act from the banner\")", async () => {
+  it('Snoozes only the selected alerted revision and keeps its date in Calendar (spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner")', async () => {
     const world = morning(true);
     world.reminders.mirrorDatedItems = true;
     const running = await onReminders(world);
@@ -429,7 +430,7 @@ describe("Calendar without a connected account", () => {
     expect(remindersStore.findItem(first.id)).toMatchObject({ revision: revision + 1, snoozedUntilMs: untilMs });
   });
 
-  it("Saves the Calendar Reminders form once without adding a calendar event (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+  it('Saves the Calendar Reminders form once without adding a calendar event (spec/app/calendar/editor.md, "Story: Write an event")', async () => {
     const world = { ...morning(false), signedIn: false };
     const eventCount = world.calendar.events.length;
     const { alpha, runtime } = await onReminders(world);
@@ -458,7 +459,7 @@ describe("Calendar without a connected account", () => {
     expect(detail()).toContain("Due 10:15 AM");
   });
 
-  it("Reviews discarding a retained Calendar reminder draft (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+  it('Reviews discarding a retained Calendar reminder draft (spec/app/calendar/editor.md, "Story: Keep my draft through a restart")', async () => {
     const world = { ...morning(false), signedIn: false };
     const { alpha, runtime } = await onCalendar(world);
     await until(alpha, runtime, View, (state) => state.front && state.anchor === world.today);
@@ -481,7 +482,7 @@ describe("Calendar without a connected account", () => {
     expect(document.querySelector<HTMLInputElement>('input[aria-label="Title"]')?.value).toBe("");
   });
 
-  it("Edits a dated reminder in Calendar without changing another reminder with the same title (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+  it('Edits a dated reminder in Calendar without changing another reminder with the same title (spec/app/calendar/editor.md, "Story: Write an event")', async () => {
     const world = morning(false);
     const running = await onReminders(world);
     const { alpha, runtime } = running;
@@ -547,7 +548,7 @@ describe("Calendar without a connected account", () => {
     expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, alertMinutes: 0, revision: other.revision });
   });
 
-  it("Reviews a completed reminder's new time before rescheduling it (spec/app/calendar/editor.md, \"Moving a completed reminder keeps its edited draft on screen until the owner approves rescheduling\")", async () => {
+  it(`Reviews a completed reminder's new time before rescheduling it (spec/app/calendar/editor.md, "Moving a completed reminder keeps its edited draft on screen until the owner approves rescheduling")`, async () => {
     const world = morning(false);
     const { alpha, runtime } = await onReminders(world);
     const request = { listId: DEFAULT_LIST_ID, title: "Bring the same notebook", dueMinute: 570, alertMinutes: 0 };
@@ -575,7 +576,7 @@ describe("Calendar without a connected account", () => {
     expect(world.reminders.items.find((item) => item.id === other.id)).toMatchObject({ completed: false, dueMinute: 570, revision: other.revision });
   });
 
-  it("Shows the completed occurrence below the next daily reminder (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
+  it('Shows the completed occurrence below the next daily reminder (spec/app/reminders/index.md, "Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day")', async () => {
     const world = morning(false);
     const { alpha, runtime } = await onReminders(world);
     const saved = await saveReminder(alpha, {
@@ -594,7 +595,7 @@ describe("Calendar without a connected account", () => {
     ] });
   });
 
-  it("Shows the elapsed repeat date skipped by a late completion (spec/app/reminders/index.md, \"Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day\")", async () => {
+  it('Shows the elapsed repeat date skipped by a late completion (spec/app/reminders/index.md, "Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day")', async () => {
     const world = morning(false);
     const { alpha, runtime } = await onReminders(world);
     const saved = await saveReminder(alpha, {
@@ -613,7 +614,7 @@ describe("Calendar without a connected account", () => {
   });
 });
 
-it("Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, \"Each page links to what another area owns there\")", async () => {
+it('Shows the newly verified Google grant when Calendar Settings reopens (spec/app/settings/index.md, "Each page links to what another area owns there")', async () => {
   const world = morning(false);
   world.inbox.google = { email: "owner@alpha.test", connection: "google-owner", capabilities: ["google.calendar.read"] };
   const { alpha } = await open(world, only("view:Settings"));
@@ -654,7 +655,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.anchor === world.today && s.google.status === "Loaded");
     expect(titles()).toEqual(phone ? ["Standup", "Team lunch", "Gym"] : ["Standup", "Team lunch"]);
 
-    // spec/app/calendar/index.md, "A day is empty only when every source it may read answered with nothing, no calendar is hidden, and there are no reminders": a browser, which may not read the phone, still calls tomorrow empty.
+    // spec/app/calendar/index.md, "A day is empty only when every source it may read answered whole with nothing, no calendar is hidden, and there are no reminders": a browser, which may not read the phone, still calls tomorrow empty.
     await press(dayButton(world.today + 1));
     await until(alpha, runtime, View, (s) => s.anchor === world.today + 1 && s.google.status === "Loaded" && (!phone || s.phone.status === "Loaded"));
     expect([titles(), Boolean(document.body.textContent?.includes("Free all day"))]).toEqual([[], true]);
@@ -669,7 +670,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, View, (s) => s.layout === "Agenda" && s.overlay === "NoOverlay");
     expect(titles()).toEqual(phone ? ["Standup", "Team lunch", "Gym", "Dentist"] : ["Standup", "Team lunch", "Dentist"]);
 
-    // spec/app/calendar/index.md, "An event opens from the rows shown, with what it offers"; spec/app/calendar/index.md, "Back closes the event"; spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"
+    // spec/app/calendar/index.md, "An event opens from the rows shown, with what it offers"; spec/app/calendar/index.md, "Back closes one layer at a time: the form, the delete review, the event, then the overlay"; spec/app/calendar/index.md, "The video call is joined, and the event opened in Android Calendar, only from the event shown"; spec/app/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"
     await tap("Team lunch");
     await until(alpha, runtime, View, (s) => s.open !== 0 && s.place && !s.video && s.web && !s.local);
     expect([Boolean(button("Open Cafe in Maps")), Boolean(button("Join video call")), Boolean(button("Open in Google Calendar")), Boolean(button("Open in Android Calendar"))]).toEqual([true, false, true, false]);
@@ -686,7 +687,7 @@ describe("on a phone", () => {
     world.calendar.granted = true;
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar"), (s) => s.googleRows === 2 && s.phoneRows === 1);
 
-    // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back reads the event again"; spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes"
+    // spec/app/calendar/index.md, "The event's place opens in Maps, and coming back from Maps or Android Calendar reads the event again"; spec/app/calendar/index.md, "An event comes back only if an exact read finds it as it was left; otherwise it closes"
     await tap("Team lunch");
     await press("Open Cafe in Maps");
     await until(alpha, runtime, View, (s) => s.detail === "InMaps");
@@ -695,7 +696,7 @@ describe("on a phone", () => {
     await hardware("back");
     await until(alpha, runtime, View, (s) => s.detail === "Showing" && s.open !== 0 && s.event.status === "Loaded");
 
-    // spec/app/calendar/index.md, "An event comes back only if the read finds it; otherwise it closes": the lunch was cancelled while the owner was in Maps.
+    // spec/app/calendar/index.md, "An event comes back only if an exact read finds it as it was left; otherwise it closes": the lunch was cancelled while the owner was in Maps.
     await press("Open Cafe in Maps");
     await until(alpha, runtime, View, (s) => s.detail === "InMaps");
     world.calendar.events = world.calendar.events.filter((event) => event.title !== "Team lunch");
@@ -708,7 +709,7 @@ describe("on a phone", () => {
     world.calendar.granted = true;
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 1);
 
-    // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order"
+    // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/writing.md, "Save is off while loading, while saving, for another account, for an event that changed, without a title, with no calendar to take a new event, and for the phone's calendar once Android said no, in that order"
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent" && e.receipts.status === "Loaded");
     await fill("Location", "Corner");
@@ -906,7 +907,7 @@ describe("on a phone", () => {
     await until(alpha, runtime, Changes, (a) => a.result === "Declined");
     expect(world.calendar.writes).toEqual(["reject approval-1"]);
 
-    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "The read back says whether the change is there, and the agent is told"
+    // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "What is sent is exactly the change approved, for the revision the agent selected"; spec/app/calendar/agent.md, "The read back says whether the change is there as approved, and the agent is told"
     const start = new Date(world.at(1, 15)).toISOString();
     const end = new Date(world.at(1, 16)).toISOString();
     world.calendar.approvals.push(agentRequest("approval-2", {
@@ -952,7 +953,7 @@ describe("on a phone", () => {
     expect(world.calendar.writes.slice(5)).toEqual(["approve approval-4", "create ev-walk"]);
   });
 
-  it("Clears hidden deletions after a dual-source phone and Google refresh (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+  it('Clears hidden deletions after a dual-source phone and Google refresh (spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")', async () => {
     const world = morning(true);
     world.calendar.granted = true;
     const mounted = await open(world, only("view:Calendar"));
@@ -968,7 +969,7 @@ describe("on a phone", () => {
     expect((await runtime.runPromise(Held.use((d) => d.get()))).hiding).toBe(0);
   });
 
-  it("Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+  it('Approve in Ask Alpha what a reply asked for (spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"; spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number")', async () => {
     const world = morning(true);
     const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
     const ask = assistant.runtime(alpha);
@@ -995,6 +996,7 @@ describe("on a phone", () => {
     };
     queueApproval("approval-1", "camera setup", new Date(world.at(1, 9)).toISOString(), new Date(world.at(1, 9.5)).toISOString(), "I've proposed camera setup for 9:00 tomorrow. It's waiting for your approval.");
     await send("Put a 30 minute event called camera setup at 9 tomorrow.");
+    await until(alpha, calendar.runtime(alpha), Changes, (a) => a.stage === "Awaiting");
     await vi.waitFor(() => expect(button("Approve")).toBeDefined());
     expect(["camera setup", "Waiting for you"].map((text) => card().includes(text))).toEqual([true, true]);
     expect(world.calendar.writes).toEqual([]);
@@ -1046,7 +1048,7 @@ describe("on a phone", () => {
 
   const askedCard = () => document.querySelector("section[aria-label='Calendar change']")?.textContent ?? "";
 
-  it("Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\")", async () => {
+  it('Two replies of one conversation file requests: the card shows the one Calendar holds, then the next once it ends (spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"; spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it")', async () => {
     const world = morning(true);
     const { alpha, agent, file } = await askingCalendar(world);
     await file("approval-earlier-reply", "camera setup", 9);
@@ -1066,7 +1068,7 @@ describe("on a phone", () => {
     expect(world.calendar.writes).toEqual(["reject approval-earlier-reply", "approve approval-newer-reply", "create ev-lens-check"]);
   });
 
-  it("A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\"; spec/app/calendar/agent.md, \"Only the owner approves, and approving sends the change once, under a new number\")", async () => {
+  it(`A request filed before a reply is never approved from that reply's card (spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"; spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number")`, async () => {
     const world = morning(true);
     const { alpha, agent, file, request, declineInCalendar } = await askingCalendar(world);
     world.calendar.approvals.push(request("approval-filed-before", "old booking", 14));
@@ -1150,7 +1152,7 @@ describe("in a browser", () => {
     await until(alpha, runtime, Editor, (e) => e.shown && e.form === "EditEvent");
   }
 
-  it("Opens a search match on the currently anchored day (spec/app/calendar/index.md, \"Story: Search my events and choose which calendars I see\")", async () => {
+  it('Opens a search match on the currently anchored day (spec/app/calendar/index.md, "Story: Search my events and choose which calendars I see")', async () => {
     const { alpha, runtime } = await openBrowserCalendar();
     await widen(alpha, runtime);
     await press("Search events");
@@ -1165,7 +1167,7 @@ describe("in a browser", () => {
     expect(titles()).toContain("Standup");
   });
 
-  it("Creates an all-day event spanning at least one whole day (spec/app/calendar/editor.md, \"An event ends after it starts\")", async () => {
+  it('Creates an all-day event spanning at least one whole day (spec/app/calendar/editor.md, "An event ends after it starts")', async () => {
     const { world, alpha, runtime } = await openBrowserCalendar();
     await press("New event");
     await until(alpha, runtime, Editor, (e) => e.shown && e.form === "NewEvent" && e.receipts.status === "Loaded");
@@ -1182,7 +1184,7 @@ describe("in a browser", () => {
     expect(Date.parse(created.endAt)).toBeGreaterThan(Date.parse(created.startAt));
   });
 
-  it("Clears hidden declined events after reread and keeps series reach while sending (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+  it('Clears hidden declined events after reread and keeps series reach while sending (spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")', async () => {
     const seed = morning(false);
     const { world, alpha, runtime } = await openBrowserCalendar([
       agentEvent("Weekly sync", seed.at(0, 14), seed.at(0, 15), { id: "ev-weekly-1", externalId: "ev-weekly-1", recurringEventId: "series-weekly" }),
@@ -1216,7 +1218,7 @@ describe("in a browser", () => {
     expect(remainingWeekly).toHaveLength(0);
   });
 
-  it("Reloads saved fields when choosing Use the saved event on an edit conflict (spec/app/calendar/editor.md, \"Story: Write an event\")", async () => {
+  it('Reloads saved fields when choosing Use the saved event on an edit conflict (spec/app/calendar/editor.md, "Story: Write an event")', async () => {
     const { world, alpha, runtime } = await openBrowserCalendar();
     await openStandupEditor(alpha, runtime);
     await fill("Title", "Standup draft");
@@ -1234,7 +1236,7 @@ describe("in a browser", () => {
     expect(titleInput?.value).toBe("Standup renamed");
   });
 
-  it("Reads back an edited agent event at its new date when moved outside the old read window (spec/app/calendar/writing.md, \"An applied create, change or answer is read back; only a read back that finds it as asked says saved\")", async () => {
+  it('Reads back an edited agent event at its new date when moved outside the old read window (spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved")', async () => {
     const { world, alpha, runtime } = await openBrowserCalendar();
     await openStandupEditor(alpha, runtime);
     const futureDate = dateOf(world.today + 90);
@@ -1247,7 +1249,7 @@ describe("in a browser", () => {
     expect([after.form, after.write.outcome, after.latched]).toEqual(["NoForm", "Confirmed", []]);
   });
 
-  it("Disables series-wide edit scopes on a managed Google repeating event (spec/app/calendar/writing.md, \"A managed Google event is never deleted here, and its other repeating changes reach one occurrence\")", async () => {
+  it('Disables series-wide edit scopes on a managed Google repeating event (spec/app/calendar/writing.md, "A managed Google event is never deleted here, and its other repeating changes reach one occurrence")', async () => {
     const seed = morning(false);
     const { alpha, runtime } = await openBrowserCalendar([
       agentEvent("Google recurring", seed.at(0, 16), seed.at(0, 17), {
@@ -1293,7 +1295,7 @@ describe("in a browser", () => {
 });
 
 describe("Calendar Wave 1 regressions", () => {
-  it("Serializes description on agent payloads and exclusive next-day endAt for all-day events (spec/app/calendar/writing.md, \"An agent update to an all-day event names whole UTC dates\")", () => {
+  it('Serializes description on agent payloads and exclusive next-day endAt for all-day events (spec/app/calendar/writing.md, "An agent update to an all-day event names whole UTC dates")', () => {
     const baseDay = civilDay(new Date(2026, 10, 24, 10, 0).getTime());
     const begin = wallDateTime(baseDay, 10, 0);
     const end = wallDateTime(baseDay, 11, 0);
@@ -1307,7 +1309,7 @@ describe("Calendar Wave 1 regressions", () => {
     expect(sameDayAllDay.description).toBe("Out of office");
   });
 
-  it("Preserves local wall-clock time across civil day shifts and classifies valid wall times (spec/app/calendar/writing.md, \"A missing or repeated wall time is refused, and nothing is saved\")", () => {
+  it('Preserves local wall-clock time across civil day shifts and classifies valid wall times (spec/app/calendar/writing.md, "A missing or repeated wall time is refused, and nothing is saved")', () => {
     const startDay = civilDay(new Date(2026, 2, 7, 10, 30).getTime());
     const original = wallDateTime(startDay, 10, 30);
     const shifted = shiftDays(original, 2);
@@ -1317,7 +1319,7 @@ describe("Calendar Wave 1 regressions", () => {
     expect(localWallTime(startDay, 14, 15).kind).toBe("WallExists");
   });
 
-  it("Scopes ShownStore per instance, clears metadata on drop, and merges single-event reads without clearing partial (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", () => {
+  it(`Scopes ShownStore per instance, clears metadata on drop, and merges single-event reads without clearing partial (spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars")`, () => {
     const store = createShownStore();
     const day = civilDay(new Date(2026, 10, 24, 9, 0).getTime());
     const sample = {
@@ -1337,7 +1339,7 @@ describe("Calendar Wave 1 regressions", () => {
     expect([store.all("Google").length, store.lastSeen(id), store.partial("Google"), store.revisions().length]).toEqual([0, undefined, false, 0]);
   });
 
-  it("Verifies target startMatches and decodes persisted requests via Schema (spec/app/calendar/agent.md, \"A card is complete only with known fields, a valid time and, for a change, a verified target\")", () => {
+  it('Verifies target startMatches and decodes persisted requests via Schema (spec/app/calendar/agent.md, "A card is complete only with known fields, a valid time and, for a change, a verified target")', () => {
     const store = createRequestsStore();
     const day = civilDay(new Date(2026, 10, 24, 9, 0).getTime());
     const begin = wallDateTime(day, 12, 0);
@@ -1369,7 +1371,7 @@ describe("Calendar Wave 1 regressions", () => {
     world.calendar.granted = true;
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 1 && s.googleRows === 2);
 
-    // spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event"
+    // spec/app/calendar/index.md, "The layout menu and the month dialog open over the days, never over an open event, a form or a delete review"
     await chooseDate();
     await until(alpha, runtime, View, (s) => s.overlay === "MonthDialog");
     expect(document.querySelector("[data-alpha-subview=calendar-list]")?.hasAttribute("inert")).toBe(true);
@@ -1394,7 +1396,7 @@ describe("Calendar Wave 1 regressions", () => {
     await press("Discard it");
     await until(alpha, runtime, Editor, (e) => e.form === "NoForm");
 
-    // spec/app/calendar/deletions.md, "Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest"
+    // spec/app/calendar/deletions.md, "Confirming the review holds the deletion; a deletion still waiting is sent first, so the only Undo shown is the newest"
     await tap("Gym");
     await until(alpha, runtime, View, (s) => s.open !== 0);
     await chooseEventAction("Edit event");
@@ -1448,7 +1450,7 @@ describe("Calendar Wave 1 regressions", () => {
     await until(alpha, runtime, Link, (l) => !l.ready);
   });
 
-  it("Unhides declined invitations via readShows once the calendar read shows the decline (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+  it('Unhides declined invitations via readShows once the calendar read shows the decline (spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")', async () => {
     const world = morning(false);
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.googleRows === 2);
     await tap("Team lunch");

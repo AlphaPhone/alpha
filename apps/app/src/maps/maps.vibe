@@ -305,12 +305,12 @@ effect function arrivedAway(place: number): void!!(Navigation | Atlas) {
   try (try Navigation).arrived("Arrived", `Arrived at ${store.spot(place)?.name ?? "your destination"}.`)
 }
 
-// spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
+// spec/app/maps/index.md, "Continuing past the disclosure asks Android, once, and then locates"
 effect function permitted(): Ev!!Location {
   return { type: "observeLocation", grant: allowedOf(try (try Location).request()) }
 }
 
-// spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
+// spec/app/maps/index.md, "Settings opens only once Android has said no"
 effect function settingsOpened(): void!!Location {
   try ignore((try Location).openSettings())
 }

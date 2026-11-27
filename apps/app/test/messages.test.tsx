@@ -137,7 +137,7 @@ async function composeAction(name: string) {
 }
 
 describe("Messages on an Alpha image", () => {
-  it("Requires a new choice when a SIM is replaced and keeps that choice when rows reorder (spec/app/messages/composer.md, \"Story: Send a message\")", async () => {
+  it('Requires a new choice when a SIM is replaced and keeps that choice when rows reorder (spec/app/messages/composer.md, "Story: Send a message")', async () => {
     const world = image();
     const first = world.telephony.subscriptions[0];
     const second = { id: 2, slot: 1, displayName: "Travel", carrierName: "Travel", defaultSms: false, defaultVoice: false };
@@ -464,7 +464,7 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
-  it.each(["unused", "owner-touched"] as const)("Keeps the right New message when Android replaces a request and the opening is %s (spec/app/messages/index.md, \"A current Android text request opens New only when its saved draft is empty\")", async (opening) => {
+  it.each(["unused", "owner-touched"] as const)('Keeps the right New message when Android replaces a request and the opening is %s (spec/app/messages/index.md, "A current Android text request opens New only when its saved draft is empty")', async (opening) => {
     const world = image();
     const { alpha } = await openImage(world);
     await openMessages(alpha);
@@ -517,7 +517,7 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
-  it("Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, \"The owner's New message uses the same send and never takes another draft's place\")", async () => {
+  it(`Sends New without replacing a saved draft for the same recipient (spec/app/messages/composer.md, "The owner's New message uses the same send and never takes another draft's place")`, async () => {
     const world = image();
     const { alpha } = await openImage(world);
     await openMessages(alpha);
@@ -541,6 +541,7 @@ describe("Messages on an Alpha image", () => {
     expect(document.querySelector<HTMLTextAreaElement>("[data-alpha-messages-composer] textarea")?.value).toBe("Keep this reply draft");
   });
 
+  // spec/app/messages/index.md, "The phone's answer ends the removal it names, and the conversation is read again unless it was refused"
   it.each([
     { reply: "lost", outcome: "Unknown", staged: true },
     { reply: "refused", outcome: "Refused", staged: false },
@@ -564,7 +565,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.deletionAttempts).toEqual(["sms:1"]);
   });
 
-  it("Checks the original picture message after a restart (spec/app/messages/composer.md, \"The owner attaches up to five pictures, and removes them one by one\"; spec/app/messages/composer.md, \"A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has\"; spec/app/messages/sending.md, \"The journal read back settles an unknown outcome: sent, or never sent\")", async () => {
+  it('Checks the original picture message after a restart (spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"; spec/app/messages/composer.md, "A restart closes the conversation and keeps the saved drafts, the send and its pending clear, access and the SIMs the phone has"; spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent")', async () => {
     const world = image();
     world.telephony.holdMmsSubmission = true;
     const first = await openImage(world);
@@ -611,7 +612,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.sent.map((send) => send.body)).toEqual(["", "The next message"]);
   });
 
-  it("Shares only the reviewed open conversation (spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async () => {
+  it('Shares only the reviewed open conversation (spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it")', async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "A different conversation", read: false });
     const { alpha } = await openImage(world);
@@ -637,7 +638,7 @@ describe("Messages on an Alpha image", () => {
     expect([await read(), world.telephony.sent]).toEqual([refusal, []]);
   });
 
-  it("Drafts in the exact Android thread from a reviewed sender, even when another thread has the same number (spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+  it(`Drafts in the exact Android thread from a reviewed sender, even when another thread has the same number (spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends")`, async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550100", box: "inbox", date: 1_700_000_060_000, body: "The reviewed thread", read: true });
     const { alpha } = await openImage(world);
@@ -658,7 +659,7 @@ describe("Messages on an Alpha image", () => {
     expect(world.telephony.sent).toEqual([]);
   });
 
-  it("Confirms reviewed agent SMS with the exact native operation (spec/app/contacts/agent.md, \"Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call\")", async () => {
+  it('Confirms reviewed agent SMS with the exact native operation (spec/app/contacts/agent.md, "Only the owner approves, only what is shown as it is now, and only when the phone has ruled out an emergency call")', async () => {
     const world = image();
     const alpha = await readyImageWithIdlePhone(world);
     const sms = { type: "sms_send", recipients: ["+14155550100"], body: "Meet at the front door", subscriptionId: 1 } as const;
@@ -679,7 +680,7 @@ describe("Messages on an Alpha image", () => {
     ]);
   });
 
-  it("Watches Android’s submitted text for the carrier’s exact receipt (spec/app/contacts/agent.md, \"Only the phone answers the action, and the request ends as that answer says\")", async () => {
+  it('Watches Android’s submitted text for the carrier’s exact receipt (spec/app/contacts/agent.md, "Only the phone answers the action, and the request ends as that answer says")', async () => {
     const world = image();
     world.telephony.holdSmsSubmission = true;
     const alpha = await readyImageWithIdlePhone(world);
@@ -752,7 +753,7 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
-  it("Uses the sole Android SIM when Ask Alpha opens over the Messages list (spec/app/messages/composer.md, \"The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access\")", async () => {
+  it('Uses the sole Android SIM when Ask Alpha opens over the Messages list (spec/app/messages/composer.md, "The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access")', async () => {
     const world = image();
     const first = world.telephony.subscriptions[0];
     world.telephony.subscriptions = [first, { ...first, id: 14, slot: 1, defaultSms: false }];
@@ -797,7 +798,7 @@ describe("Messages on an Alpha image", () => {
     }
   });
 
-  it("Reviews a Messages text only with the exact SIM the owner had selected (spec/app/messages/composer.md, \"The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access\")", async () => {
+  it('Reviews a Messages text only with the exact SIM the owner had selected (spec/app/messages/composer.md, "The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access")', async () => {
     const world = image();
     const first = world.telephony.subscriptions[0];
     const second = { ...first, id: 8, slot: 1, defaultSms: false, displayName: "Personal line", carrierName: "Personal carrier" };
@@ -861,7 +862,7 @@ describe("Messages on an Alpha image", () => {
     expect([review.confirmations, world.telephony.sent]).toEqual([[], []]);
   });
 
-  it.each(["draft", "send", "send with a lost answer"] as const)("Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, \"The owner picks the exact number or the one contact, and that one is shown\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\"; spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\")", async (mode) => {
+  it.each(["draft", "send", "send with a lost answer"] as const)(`Reviews the exact number for a named text and handles its %s (spec/app/contacts/agent.md, "The owner picks the exact number or the one contact, and that one is shown"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"; spec/app/messages/composer.md, "An addressed send names the exact number, text and SIM before it can send")`, async (mode) => {
     const world = image();
     const body = "Meet at the front door";
     const compose = mode === "draft" ? { type: "sms_compose", target: { kind: "contact", query: "Maya" }, draft: true, body } as const
@@ -939,7 +940,7 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(document.querySelector('[aria-label^="Message draft to Maya Chen"]')?.textContent).toContain(compose.body));
   });
 
-  it.each([["a draft the model declared", true], ["a text to send", false]] as const)("Shows %s to a written number on its own card and sends nothing (spec/app/messages/composer.md, \"An addressed send names the exact number, text and SIM before it can send\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async (_label, draft) => {
+  it.each([["a draft the model declared", true], ["a text to send", false]] as const)(`Shows %s to a written number on its own card and sends nothing (spec/app/messages/composer.md, "An addressed send names the exact number, text and SIM before it can send"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends")`, async (_label, draft) => {
     const world = image();
     const body = "Can you bring ice tomorrow?";
     const compose = draft ? { type: "sms_compose", target: { kind: "number", number: "+12025550142" }, body, draft: true } as const
@@ -953,7 +954,7 @@ describe("Messages on an Alpha image", () => {
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
-  it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)("Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, \"Only the phone answers the newest search, and the request goes on by what it found\")", async (_label, query, known) => {
+  it.each([["a contact's first name", "Maya", true], ["a name no contact has", "Bob", false]] as const)('Reviews a text to %s on its card and sends nothing (spec/app/contacts/agent.md, "Only the phone answers the newest search, and the request goes on by what it found")', async (_label, query, known) => {
     const world = image();
     const review = textReview(world.notes.owner, `text-${query}`, { type: "sms_compose", query, body: "I'm running late" });
     await proposeText(world, review, `text ${query} I'm running late`, "The named proposal is read");
@@ -968,7 +969,7 @@ describe("Messages on an Alpha image", () => {
     expect([review.decisions, review.claims, review.confirmations, world.telephony.sent]).toEqual([[], [], [], []]);
   });
 
-  it.each(["suffix", "whole number", "open thread"] as const)("Completes the exact approved %s read in its original chat (spec/app/contacts/agent.md, \"The latest text's sender is named by its number alone, and the whole number only where the agent asked for it\"; spec/app/contacts/agent.md, \"The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it\")", async (scope) => {
+  it.each(["suffix", "whole number", "open thread"] as const)(`Completes the exact approved %s read in its original chat (spec/app/contacts/agent.md, "The latest text's sender is named by its number alone, and the whole number only where the agent asked for it"; spec/app/contacts/agent.md, "The agent reads only the conversation, voicemail or contact open on screen, as the phone last read it")`, async (scope) => {
     const world = image();
     const selected = scope === "open thread";
     const operation = selected ? { type: "messages_read_selected" } as const : scope === "whole number"
@@ -1033,7 +1034,7 @@ describe("Messages on an Alpha image", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("The reviewed read answered the original request."));
   });
 
-  it("Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, \"A message notification opens its exact conversation once access is available\"; spec/app/messages/index.md, \"Story: Read a conversation\")", async () => {
+  it(`Opens the exact notified conversation and follows an owner's safe link tap (spec/app/messages/index.md, "A message notification opens its exact conversation once access is available"; spec/app/messages/index.md, "Story: Read a conversation")`, async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 23, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch? http://news.example/lunch or https://example-user@private.example/lunch", read: false });
     world.telephony.smsNotice = { threadId: "thread:23", token: "1" };
@@ -1076,7 +1077,7 @@ describe("Messages on an Alpha image", () => {
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
   });
 
-  it("Removes a cleared draft from storage so reopening and agent drafts see an empty composer (spec/app/messages/composer.md, \"Typing changes the draft and makes it the owner's; emptying it leaves no draft\")", async () => {
+  it(`Removes a cleared draft from storage so reopening and agent drafts see an empty composer (spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft")`, async () => {
     const world = image();
     const { alpha } = await openImage(world);
     await openMessages(alpha);
@@ -1101,7 +1102,7 @@ describe("Messages on an Alpha image", () => {
     expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe("Fresh reply");
   });
 
-  it("Clears stale Messages search filter when opening Unread from Home (spec/app/messages/index.md, \"One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are\")", async () => {
+  it(`Clears stale Messages search filter when opening Unread from Home (spec/app/messages/index.md, "One tap on Home's unread card opens the conversation when exactly one is unread, and the list filtered to the unread ones when several are")`, async () => {
     const world = image();
     world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
     const { alpha } = await openImage(world);
@@ -1118,7 +1119,7 @@ describe("Messages on an Alpha image", () => {
     expect([unreadState.sought, unreadState.threads, searchField?.value ?? ""]).toEqual([false, 2, ""]);
   });
 
-  it("Drops stored draft text after sending so subsequent agent drafts succeed (spec/app/messages/composer.md, \"Typing changes the draft and makes it the owner's; emptying it leaves no draft\"; spec/app/messages/composer.md, \"The agent's draft goes into the open conversation's draft only while it is empty, and never sends\")", async () => {
+  it(`Drops stored draft text after sending so subsequent agent drafts succeed (spec/app/messages/composer.md, "Typing changes the draft and makes it the owner's; emptying it leaves no draft"; spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends")`, async () => {
     const world = image();
     const { alpha } = await openImage(world);
     await openMessages(alpha);
@@ -1142,7 +1143,7 @@ describe("Messages on an Alpha image", () => {
     expect([leftover, reply]).toEqual(["", { kind: "applied", result: { kind: "sms-reply", status: "drafted" } }]);
   });
 
-  it("Does not carry a delete-refused banner into another conversation (spec/app/messages/index.md, \"The phone's answer ends the removal it names, and the conversation is read again unless it was refused\")", async () => {
+  it(`Does not carry a delete-refused banner into another conversation (spec/app/messages/index.md, "The phone's answer ends the removal it names, and the conversation is read again unless it was refused")`, async () => {
     const world = { ...image(), now: 1_799_999_999_000 };
     world.telephony.texts.push({ id: 2, thread: 2, address: "+14155550122", box: "inbox", date: 1_700_000_060_000, body: "Lunch?", read: false });
     const { alpha } = await openImage(world);

@@ -283,7 +283,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
   });
 
-  it("Editing a contact opened from Phone's Contacts tab keeps the card and the list under the form (spec/app/contacts/index.md, \"Story: Add or change a contact\")", async () => {
+  it(`Editing a contact opened from Phone's Contacts tab keeps the card and the list under the form (spec/app/contacts/index.md, "Story: Add or change a contact")`, async () => {
     const { alpha } = await openPhoneWorld();
     await until(alpha, alpha.runtime, Shell, (state) => state.image && state.contacts);
     await openPhone(alpha);
@@ -361,7 +361,7 @@ describe("Phone on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([["+14155550122"], []]);
   });
 
-  it("Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, \"Story: Know when a call is live\")", async () => {
+  it(`Gates ordinary calls on Android's carrier and emergency readings (spec/app/phone/index.md, "Story: Know when a call is live")`, async () => {
     const world = image();
     const alpha = await mountedImage(world);
     await openReadyRecents(alpha);
@@ -381,7 +381,7 @@ describe("Phone on an Alpha image", () => {
     expect([world.telephony.placed, world.telephony.dialed]).toEqual([[], []]);
   });
 
-  it("Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
+  it('Hands off to the system dialer when cell service or call state is unknown (spec/app/phone/index.md, "Story: Call a number")', async () => {
     const world = image();
     world.telephony.mobileService = undefined;
     const { alpha } = await enterPhone(world);
@@ -406,7 +406,7 @@ describe("Phone on an Alpha image", () => {
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["+14155550100", "+14155550100"], []]);
   });
 
-  it("Lets Android determine which emergency numbers can open the dialer without service (spec/app/phone/index.md, \"Story: Call a number\")", async () => {
+  it('Lets Android determine which emergency numbers can open the dialer without service (spec/app/phone/index.md, "Story: Call a number")', async () => {
     const world = image();
     world.telephony.mobileService = false;
     world.telephony.emergencyNumbers.add("09");
@@ -635,7 +635,7 @@ describe("Phone on an Alpha image", () => {
     expect(document.querySelector("[data-alpha-phone-transcript]")?.textContent).toBe("The current transcript");
   });
 
-  it("Waits for Android to retire the old voicemail observer before watching again (spec/app/phone/voicemail.md, \"A carrier notice refreshes the visible list from the phone's latest read\")", async () => {
+  it(`Waits for Android to retire the old voicemail observer before watching again (spec/app/phone/voicemail.md, "A carrier notice refreshes the visible list from the phone's latest read")`, async () => {
     const world = image();
     const { alpha } = await openPhoneWorld(world);
     await until(alpha, alpha.runtime, Shell, (state) => state.image);
@@ -760,7 +760,7 @@ describe("The call strip on an Alpha image", () => {
     expect([inReview("Call"), world.telephony.dialed]).toEqual([undefined, []]);
   });
 
-  it("Off an Alpha image there is no call strip and no Phone, Messages or Contacts (spec/app/shell/index.md, \"Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it\")", async () => {
+  it('Off an Alpha image there is no call strip and no Phone, Messages or Contacts (spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it")', async () => {
     const world = { ...scene(), phone: true };
     const { alpha } = await openPhoneWorld(world);
     await until(alpha, alpha.runtime, Strip, (s) => s.eligible);
@@ -769,7 +769,7 @@ describe("The call strip on an Alpha image", () => {
     expect(button("End call")).toBeUndefined();
   });
 
-  it("Refuses emergency numbers in phone_dial and remembers seen missed calls across Home returns (spec/app/phone/index.md, \"Alpha never places an emergency call\"; spec/app/phone/index.md, \"Home shows the missed-calls card while there are missed calls not yet seen\")", async () => {
+  it('Refuses emergency numbers in phone_dial and remembers seen missed calls across Home returns (spec/app/contacts/agent.md, "The agent never calls an emergency number, and is told why"; spec/app/phone/index.md, "Home shows the missed-calls card while there are missed calls not yet seen")', async () => {
     const { world, alpha } = await bootPhone();
     await until(alpha, alpha.runtime, Phone, (s) => s.missed === 1);
 
@@ -793,7 +793,7 @@ describe("The call strip on an Alpha image", () => {
     return running;
   };
 
-  it("Resyncs Comms subject when returning to the same Phone tab from Contacts (spec/app/phone/comms.md, \"A view change while the conversation is open keeps the sheet's height and remembers the view it left\")", async () => {
+  it(`Resyncs Comms subject when returning to the same Phone tab from Contacts (spec/app/phone/comms.md, "A view change while the conversation is open keeps the sheet's height and remembers the view it left")`, async () => {
     const { alpha } = await openRecents();
     await until(alpha, alpha.runtime, Comms, (s) => s.app === "PhoneApp" && s.key === "phone:recents:");
     await tab("Contacts");
@@ -811,7 +811,7 @@ describe("The call strip on an Alpha image", () => {
     }, { timeout: 3_000 });
   });
 
-  it("Clears stale Recents search filter when opening Missed (spec/app/phone/index.md, \"Story: See my recent calls\")", async () => {
+  it('Clears stale Recents search filter when opening Missed (spec/app/phone/index.md, "Story: See my recent calls")', async () => {
     const { alpha } = await openRecents();
     await fill("Call or ask", "0111");
     await until(alpha, alpha.runtime, Phone, (s) => s.sought && s.recents.status === "Loaded" && s.rows === 1);

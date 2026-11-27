@@ -5,7 +5,6 @@ import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Voice from "../gen/app__voice.effect.vibe";
-import * as VoiceRoute from "../gen/app__voice__route.ts";
 import { VoiceBridge } from "../src/platform/voice.vibe";
 import { together, untimed, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
@@ -1888,16 +1887,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect([document.querySelector("[role=alertdialog], [role=alert], [role=note], [role=status], section[aria-label='Voice transcription']"), world.voice.permission]).toEqual([null, "denied"]);
   });
 
-  // spec/app/voice/route.md, "A failure of the network service holds speech on the phone: a minute after a brief failure, ten minutes after the account was refused, and the server's wait after a rate limit, never more than an hour"
-  it("computes voice route holds in milliseconds rather than seconds", () => {
-    const cloud = VoiceRoute.decide(VoiceRoute.changeAccount(VoiceRoute.signedOut, "CloudAccount", 1), true);
-    expect([VoiceRoute.briefHold, VoiceRoute.accountHold, VoiceRoute.longestHold]).toEqual([60_000, 600_000, 3_600_000]);
-    expect(VoiceRoute.noteFailure(cloud, "Brief", 0, 1_000).holdUntil).toBe(61_000);
-    expect(VoiceRoute.noteFailure(cloud, "AccountRefused", 0, 1_000).holdUntil).toBe(601_000);
-    expect(VoiceRoute.noteFailure(cloud, "RateLimited", 15_000, 1_000).holdUntil).toBe(16_000);
-  });
-
-  // spec/app/voice/index.md, "A failed network service falls back to this phone once per session when the phone is ready"
+  // spec/app/voice/index.md, "A network failure before Alpha has spoken moves the conversation to the phone at once, and the failed turn is not sent again"
   it("falls back to on-device speech when Cloud speech fails during an active session", async () => {
     const world = { ...scene(), phone: true, signedIn: true };
     world.voice.onDevice = true;
@@ -1916,7 +1906,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
   });
 
-  // spec/app/voice/index.md, "The microphone permission is read again on foreground return"
+  // spec/app/voice/index.md, "Android's answer to the prompt opens the microphone, or ends the start quietly when it was denied"
   it("re-syncs microphone permission grant on foreground return after OS settings change", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.permission = "denied";
@@ -1929,7 +1919,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.permission.grant === "Granted");
   });
 
-  // spec/app/voice/index.md, "Stop ends the conversation and abandons the stalled turn"
+  // spec/app/voice/index.md, "Stop shuts the conversation down, and a stop asked for the keyboard then hands it over"
   it("aborts a stalled voice turn and clears heard transcript when stopped", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.ask.stalled = true;

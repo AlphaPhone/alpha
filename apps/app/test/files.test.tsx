@@ -628,7 +628,7 @@ describe("Files on a phone", () => {
 
   });
 
-  it("Offer the file I am looking at to Inbox (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\")", async () => {
+  it('Offer the file I am looking at to Inbox (spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/inbox/adding.md, "Story: Add files and people to my draft")', async () => {
     const { alpha, runtime, world } = await onFiles(undefined, "view:Inbox");
     const content = "A reviewed attachment";
     world.files.stored.push({ volume: "primary", path: "Download/attach.txt", directory: false, mimeType: "text/plain", size: content.length, modified: 12 });
@@ -1204,7 +1204,7 @@ describe("Files on a phone", () => {
     await hardware("home");
   });
 
-  it("Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, \"Story: Act on the file I am looking at\"; spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/trash.md, \"Story: Delete into the Trash\")", async () => {
+  it('Hide Preview behind Move-to Sheet, avoid invisible checkbox hit-stealing, and trash multi-folder selections (spec/app/files/preview.md, "Story: Act on the file I am looking at"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/trash.md, "Story: Delete into the Trash")', async () => {
     const { alpha, runtime, world } = await onDownloads();
 
     const hiddenCheck = document.querySelector<HTMLElement>("[aria-label='Select lease.pdf']");
@@ -1235,7 +1235,7 @@ describe("Files on a phone", () => {
     expect(world.files.trash.map((one) => one.was.path).toSorted()).toEqual(["Documents/notes.txt", "Download/lease.pdf"]);
   });
 
-  it("Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, \"A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown\")", async () => {
+  it('Preserves confirmed volume erasures when a later volume throws during Empty Trash (spec/app/files/trash.md, "A job ends as its answer says for each item: only what the phone confirmed is done, and the rest was refused or is unknown")', async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     world.files.trash.push(

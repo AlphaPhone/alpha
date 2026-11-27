@@ -196,13 +196,42 @@ pure def lawADroppedReadingTakesNoAnswer(ticket: int, asked: int): bool =
 > As the owner, I want the saved note I have open to fill in a Calendar
 > event or reminder that I can edit and save after I review its time.
 
+### Opening a Calendar draft from an open saved note fills the draft for the same owner without writing anything
+
 The retained scheduling action prepares the draft from the exact saved record and passes it to
 the requested Calendar visit for the same resident owner. An open or
 retained Calendar draft keeps its place. Opening this draft writes no
 event or reminder. Calendar supplies tomorrow at nine as a starting
 time, which the owner can change before saving.
 
+```quint
+pure val calendarDraftDefaultHour: int = 9
+
+pure def calendarDraftFromNoteAllowed(
+  savedNoteOpen: bool, sameResidentOwner: bool, existingCalendarDraft: bool
+): bool =
+  savedNoteOpen and sameResidentOwner and not(existingCalendarDraft)
+
+pure def lawExistingCalendarDraftKeepsItsPlace(savedNoteOpen: bool, sameResidentOwner: bool): bool =
+  not(calendarDraftFromNoteAllowed(savedNoteOpen, sameResidentOwner, true))
+```
+
+### A saved Calendar item links back to its note for the current owner and reports edits or deletion
+
 A saved Calendar item can open the note it came from. Alpha keeps the
 link under the current owner and the saved item's exact identity. The
 owner can still open a note that changed after the draft was made, and
 Alpha says when it was edited or deleted.
+
+```quint
+type CalendarNoteLinkState = CalendarNoteUnchanged | CalendarNoteEdited | CalendarNoteDeleted
+
+pure def calendarItemOpensLinkedNote(sameOwner: bool, exactItemIdentity: bool): bool =
+  sameOwner and exactItemIdentity
+
+pure def calendarNoteNoticeRequired(noteLinkState: CalendarNoteLinkState): bool =
+  noteLinkState != CalendarNoteUnchanged
+
+pure def lawLinkedNoteStaysOpenableWhenChanged(sameOwner: bool, exactItemIdentity: bool): bool =
+  calendarItemOpensLinkedNote(sameOwner, exactItemIdentity) iff (sameOwner and exactItemIdentity)
+```

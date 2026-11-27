@@ -69,7 +69,7 @@ describe("the toasts", () => {
     dialog.remove();
   });
 
-  it("Concurrent raises keep every toast message and focus holds a toast after pointer leave (spec/app/notices/toasts.md, \"Every toast raised is shown at once, or waits\"; spec/app/notices/toasts.md, \"A plain toast the owner is reading is held, and its whole time starts again when they let go\")", async () => {
+  it('Concurrent raises keep every toast message and focus holds a toast after pointer leave (spec/app/notices/toasts.md, "Every toast raised is shown at once, or waits"; spec/app/notices/toasts.md, "A plain toast the owner is reading is held, and its whole time starts again when they let go")', async () => {
     const { alpha } = await open(scene(), only("home", "notice"));
     const toastRegion = () => document.querySelector("[role=status][aria-live]")?.textContent;
     await alpha.runtime.runPromise(Effect.all([

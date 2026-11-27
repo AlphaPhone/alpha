@@ -13,9 +13,6 @@ import { type Scene, scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-const steady = "spec/app/notes/actions.md, \"The owner opens the menu over the note the editor shows saved, with nothing else of Notes over it\"";
-const fresh = "spec/app/notes/editor.md, \"More over a new note offers Share, Pin and Delete, as v119's did\"";
-
 const rendered = (assert: () => unknown) => vi.waitFor(async () => {
   await drawn(() => undefined);
   await assert();
@@ -57,7 +54,7 @@ async function newNote(world: Scene) {
   return opened;
 }
 
-describe(`The note's header stays steady while its saves land (${steady}; ${fresh})`, () => {
+describe(`The note's header stays steady while its saves land (spec/app/notes/actions.md, "The owner opens the menu over the note the editor shows saved, with nothing else of Notes over it"; spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete, as v119's did")`, () => {
   it("draws More enabled over a new note before its first save, and keeps it in place over a saved note on each edit before the autosave lands", async () => {
     const world = scene();
     const { alpha, runtime } = await newNote(world);
@@ -77,7 +74,7 @@ describe(`The note's header stays steady while its saves land (${steady}; ${fres
   });
 });
 
-describe(`More over a new note offers v119's Share, Pin and Delete (${fresh})`, () => {
+describe(`More over a new note offers v119's Share, Pin and Delete (spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete, as v119's did")`, () => {
   it("Delete discards the new note, untouched or written, and nothing is saved", async () => {
     const world = scene();
     const { alpha, runtime } = await newNote(world);

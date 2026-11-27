@@ -38,6 +38,7 @@ lemma loadMore_ensures(s: Mailbox)
   ensures (inv(s) ==> canLoadMore(s) ==> stepEveryReadIsForTheSelection(s, loadMore(s).state, loadMore(s).out))
   ensures (inv(s) ==> canLoadMore(s) ==> stepARevokedReadEmptiesTheList(s, loadMore(s).state, loadMore(s).out))
   ensures (inv(s) ==> canLoadMore(s) ==> stepACursorIsGivenUpWhenItsPageIsAsked(s, "loadMore", loadMore(s).state))
+  ensures (inv(s) ==> canLoadMore(s) ==> stepACheckAfterAFailedReadReadsAgain(s, "loadMore", loadMore(s).state))
   ensures (inv(s) ==> canLoadMore(s) ==> stepAHeldCheckForgetsNothing(s, "loadMore", loadMore(s).state))
   ensures (inv(s) ==> canLoadMore(s) ==> stepARestartKnowsNoGrant(s, "loadMore", loadMore(s).state))
 {
@@ -70,6 +71,7 @@ lemma AccountsAnsweredPart2(s: Mailbox, ticket: int, ok: bool, connected: seq<Li
   ensures stepEveryReadIsForTheSelection(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out)
   ensures stepARevokedReadEmptiesTheList(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out)
   ensures stepACursorIsGivenUpWhenItsPageIsAsked(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
+  ensures stepACheckAfterAFailedReadReadsAgain(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
   ensures stepAHeldCheckForgetsNothing(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
   ensures stepARestartKnowsNoGrant(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state)
 {
@@ -92,6 +94,7 @@ lemma accountsAnswered_ensures(s: Mailbox, ticket: int, ok: bool, connected: seq
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepEveryReadIsForTheSelection(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepARevokedReadEmptiesTheList(s, accountsAnswered(s, ticket, ok, connected).state, accountsAnswered(s, ticket, ok, connected).out))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepACursorIsGivenUpWhenItsPageIsAsked(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
+  ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepACheckAfterAFailedReadReadsAgain(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepAHeldCheckForgetsNothing(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
   ensures (inv(s) ==> canAccountsAnswered(s, ticket) ==> stepARestartKnowsNoGrant(s, "accountsAnswered", accountsAnswered(s, ticket, ok, connected).state))
 {

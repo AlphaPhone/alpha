@@ -18,11 +18,28 @@ reads them.
 > As the owner, I want a result notice to open the exact finished run it names.
 > When I choose Ask Alpha from the notice, I want to start with that run attached.
 
+### A result notification opens only the reread exact finished run for the same owner and version
+
 The phone reads the named workflow and run again before opening the sheet.
 The result belongs to the same owner, run and version as the notification.
 The phone consumes the tap after the exact finished run has been shown.
 An Ask Alpha tap uses the sheet’s existing handoff. It opens a draft the
 owner can review.
+
+```quint
+pure def noticeRunAdmitted(
+  rereadOk: bool, finishedRun: bool, sameNoticeOwner: bool, sameNoticeRun: bool, sameNoticeVersion: bool
+): bool =
+  rereadOk and finishedRun and sameNoticeOwner and sameNoticeRun and sameNoticeVersion
+
+pure def noticeTapConsumed(exactRunShown: bool): bool = exactRunShown
+
+pure def lawNoticeOpensOnlyExactFinishedRun(
+  rereadOk: bool, finishedRun: bool, sameNoticeOwner: bool, sameNoticeRun: bool, sameNoticeVersion: bool
+): bool =
+  (not(rereadOk) or not(finishedRun) or not(sameNoticeOwner) or not(sameNoticeRun) or not(sameNoticeVersion))
+    implies not(noticeRunAdmitted(rereadOk, finishedRun, sameNoticeOwner, sameNoticeRun, sameNoticeVersion))
+```
 
 ## Story: See a workflow's history
 

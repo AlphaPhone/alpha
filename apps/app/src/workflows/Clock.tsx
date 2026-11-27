@@ -1,5 +1,5 @@
 // spec/app/workflows/clock.md, "Story: Describe an alarm for Clock"; spec/app/workflows/clock.md, "Story: Review, then hand over to Clock"; spec/app/workflows/clock.md, "Story: Know what happened"
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 import { Button, Dialog, DialogContent, DialogTitle, Input, Spinner, aboveDock, cn, dockClearance } from "@repo/ui";
 import { ChevronLeft, Share2 } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
@@ -73,7 +73,9 @@ export function ClockPage({ runtime, container, restoreFocus }: ClockProps) {
       onEscapeKeyDown={(event) => { event.preventDefault(); tell(close); }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
-        if (runtime.runSync(Effect.flatMap(Shell, (shell) => shell.get())).assistant === "Bar") restoreFocus();
+        void runtime.runPromiseExit(Effect.flatMap(Shell, (shell) => shell.get())).then((exit) => {
+          if (Exit.isSuccess(exit) && exit.value.assistant === "Bar") restoreFocus();
+        });
       }}>
       <header className="mb-6 flex items-center gap-3">
         <Button variant="ghost" size="icon" aria-label="Close Clock" disabled={!machine.can(close)} onClick={() => tell(close)}>

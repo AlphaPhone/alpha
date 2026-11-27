@@ -188,8 +188,10 @@ const releasedOver = (port: ChannelPort) => async (...argv: string[]) => {
 };
 const released = releasedOver(channelAt().port);
 
-describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify and publish a release\")", () => {
-  it("names the one launcher channel, and keeps the APKs of the repository's earlier names (spec/release/index.md, \"Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid\")", async () => {
+// spec/release/index.md, "Story: Qualify and publish a release"
+describe("Qualify and publish a release", () => {
+  // spec/release/index.md, "Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid"
+  it("names the one launcher channel, and keeps the APKs of the repository's earlier names", async () => {
     expect(await released("channel")).toEqual({ ok: true, value: {
       repository: "eliza-research/alpha", repositoryId: 1396333361, tag: "app-stable-alphacompute",
       manifestUrl: "https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json",
@@ -201,7 +203,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     ]).toEqual([true, false, false]);
   });
 
-  it("refuses a build its verification recorded with test mocks, and one with no row at all (spec/release/index.md, \"A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate\")", async () => {
+  // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
+  it("refuses a build its verification recorded with test mocks, and one with no row at all", async () => {
     const directory = scratch();
     const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", apkManifest([candidateRow(122)], true)));
     const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", apkManifest([])));
@@ -265,7 +268,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     expect(await published(qualified(127), overtaking)).toMatchObject({ ok: true, state: { stage: "Abandoned", pointer: 140, floor: 140 } });
   });
 
-  it("refuses a manifest whose name or notes a phone would not show (spec/release/index.md, \"A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them\")", async () => {
+  // spec/release/index.md, "A manifest names the release by a version name of 1 to 64 characters with no control character, and by notes of at most 500, as phones show them"
+  it("refuses a manifest whose name or notes a phone would not show", async () => {
     const directory = scratch();
     const long = await released("manifest", "--apk", join(directory, "alpha-phone-122.apk"), "--version", "122", "--notes", "x".repeat(501), "--out", join(directory, "m.json"));
     expect(long).toMatchObject({ ok: false, tag: "UsageError" });
@@ -288,7 +292,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
     expect(host.buildConfigFields.find((field) => field.name === "ALPHA_UPDATE_MANIFEST_URL")?.value).toBe(manifestUrl());
   });
 
-  it("moves nothing for an APK it cannot admit (spec/release/index.md, \"An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold\")", async () => {
+  // spec/release/index.md, "An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold"
+  it("moves nothing for an APK it cannot admit", async () => {
     const directory = scratch();
     const missing = await released("publish", "--run", join(directory, "run.json"), "--apk", join(directory, "alpha-phone-122.apk"), "--manifest", write(directory, "m.json", {}), "--execute");
     expect([missing.ok, missing.tag !== "UsageError"]).toEqual([false, true]);
@@ -430,7 +435,8 @@ describe("Update a pilot phone by cable (spec/release/pilot.md, \"Story: Update 
     expect(pilotUpdate({ adb: pilotPhone().adb, serial: "pilot-1", apk, locks }).state.leg).toBe("Done");
   });
 
-  it("fails a run whose agent never says it is running, even with Alpha's process up (spec/release/pilot.md, \"A run passes only when the agent came back\")", () => {
+  // spec/release/pilot.md, "A run passes only when the agent came back"
+  it("fails a run whose agent never says it is running, even with Alpha's process up", () => {
     const { adb, apk } = pilotPhone({ agentLog: "" });
     const update = pilotUpdate({ adb, serial: "pilot-3", apk, locks: scratch() });
     expect([update.state.leg, update.state.agent, update.state.passed]).toEqual(["Done", "NotVerified", false]);

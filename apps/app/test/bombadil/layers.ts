@@ -1,4 +1,4 @@
-// spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen, never over the drawer"; spec/app/notices/toasts.md, "Story: Read a toast before it goes"
+// spec/app/shell/index.md, "Ask Alpha rises to typing, a sheet or the full screen"; spec/app/notices/toasts.md, "Story: Read a toast before it goes"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 

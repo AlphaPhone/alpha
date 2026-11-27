@@ -145,7 +145,7 @@ function webStorageContains(text: string) {
       .some((key) => key !== null && (key.includes(text) || store.getItem(key)?.includes(text))));
 }
 
-it("Keeps my phone draft through restart and leaves it with my account (spec/app/assistant/composer.md, \"Story: Keep what I am writing\")", async () => {
+it('Keeps my phone draft through restart and leaves it with my account (spec/app/assistant/composer.md, "Story: Keep what I am writing")', async () => {
   const world = { ...scene(), phone: true };
   const firstOwner = world.notes.ownerIdentity;
   world.ask.kept.set("c1", { roomId: "r1", title: "Shared fixture ID", messages: [] });
@@ -774,7 +774,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(world.ask.said.at(-1)).toBe(carried);
   });
 
-  it("Keeps the Later boundary ahead of my new turn when I send while reading older messages (spec/app/assistant/chats.md, \"Older or newer messages are read around a message of the conversation showing\")", async () => {
+  it('Keeps the Later boundary ahead of my new turn when I send while reading older messages (spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing")', async () => {
     const world = { ...scene(), phone };
     world.ask.kept.set("c1", { roomId: "r1", title: "Earlier history", messages: Array.from({ length: 205 }, (_, at) => ({
       id: `history-${at + 1}`, role: "user", text: `History ${at + 1}`,
@@ -920,8 +920,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const { alpha } = await open(world, mounts);
     const runtime = assistant.runtime(alpha);
     const bridge = alpha.runtime.runSync(MessagingBridge);
-    await until(alpha, runtime, Composer, (s) => s.slot === "Open");
     await until(alpha, runtime, Conversation, (s) => s.ready);
+    await until(alpha, runtime, Composer, (s) => s.binding.owner > 0 && s.slot === "Open");
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
 
     await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Telegram" }))));
@@ -954,6 +954,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Conversation, (s) => !s.context.sensitive && s.context.selected);
     world.ask.metadata = [];
     write("Summarize this chat");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     expect(world.ask.metadata?.at(-1)).toMatchObject({
@@ -963,7 +964,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     await drawn(() => alpha.runtime.runPromise(Effect.flatMap(Prefs.Machine, (prefs) => prefs.send({ type: "setShare", share: "TelegramContext", on: false, at: 0 }, "Owner"))));
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => !Prefs.allows(s, "TelegramContext"));
+    await until(alpha, runtime, Conversation, (s) => !s.context.selected);
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free");
     write("Any update?");
+    await vi.waitFor(() => expect(button("Send")?.disabled).toBe(false));
     await press("Send");
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 2 && s.turn.reply === "Complete");
     expect(world.ask.metadata?.at(-1)).toMatchObject({ observation: { view: "telegram", sensitive: true } });

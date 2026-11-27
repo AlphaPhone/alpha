@@ -71,7 +71,7 @@ async function settingsOpen(world = { ...scene(), phone: true }) {
 }
 
 describe("Settings", () => {
-  it("Opens browser Notifications from App permissions and returns to Privacy", async () => {
+  it('Opens browser Notifications from App permissions and returns to Privacy (spec/app/settings/index.md, "The owner can open Notifications from App permissions")', async () => {
     const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
     await press("Privacy");
     await press("Permissions");
@@ -93,7 +93,7 @@ describe("Settings", () => {
     await until(alpha, machines, Pages.Machine, (s) => s.page === "General");
   });
 
-  it("A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, \"A new screen is given focus within twelve frames, unless the owner has already moved it there\")", async () => {
+  it('A page opened from a row takes focus on its Back, off the row left under it (spec/app/shell/focus.md, "A new screen is given focus within twelve frames, unless the owner has already moved it there")', async () => {
     const { alpha, machines } = await settingsOpen({ ...scene(), phone: false });
     await drawn(() => button("Privacy")?.focus());
     await press("Privacy");
@@ -105,7 +105,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(button("Back to Privacy")));
   });
 
-  it("Recovers an unavailable browser account only after Try again", async () => {
+  it('Recovers an unavailable browser account only after Try again (spec/app/account/session.md, "A sign-in the phone cannot read is said so and can be read again")', async () => {
     const world = { ...scene(), signedIn: false };
     const { alpha } = await settingsOpen(world);
     await vi.waitFor(() => expect(titled("Account")?.textContent).toContain("Signed out"));
@@ -128,7 +128,7 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Top");
   });
 
-  it("On the launcher, Settings' and Workflows' first pages draw no Back and Android's Back still leaves them (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+  it(`On the launcher, Settings' and Workflows' first pages draw no Back and Android's Back still leaves them (spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it")`, async () => {
     const world = { ...scene(), phone: true };
     world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true } : role);
     const { alpha } = await settingsOpen(world);
@@ -155,7 +155,7 @@ describe("Settings", () => {
     }
   });
 
-  it("Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, \"On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it\")", async () => {
+  it(`Off the launcher, Settings' first page keeps its Back (spec/app/shell/index.md, "On the launcher the first page of Settings and of Workflows draws no Back, and Android's Back still leaves it")`, async () => {
     const { alpha } = await settingsOpen({ ...scene(), phone: false });
     await vi.waitFor(() => expect(button("Back")).toBeDefined());
     await press("Back");
@@ -308,7 +308,7 @@ describe("Settings", () => {
     expect(recovery.starts).toBe(archived === recovery.retained ? 1 : 0);
   });
 
-  it("Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, \"Story: Pay in the browser\"; spec/app/account/billing.md, \"Story: Keep billing to its sign-in\")", async () => {
+  it('Reviews the price and confirms only the exact Stripe checkout (spec/app/account/billing.md, "Story: Pay in the browser"; spec/app/account/billing.md, "Story: Keep billing to its sign-in")', async () => {
     const checkout: CheckoutScene = { starts: [], confirmations: [], opened: [], returned: null, paid: false };
     const world = { ...scene(), phone: true, checkout };
     await settingsOpen(world);
@@ -446,7 +446,7 @@ describe("Settings", () => {
     });
   });
 
-  it("Review notification collection and choose apps (spec/app/notices/collection.md, \"Story: Manage collection in Settings\")", async () => {
+  it('Review notification collection and choose apps (spec/app/notices/collection.md, "Story: Manage collection in Settings")', async () => {
     const { world } = await settingsOpen();
     await press("General");
     await tap("Notifications");
@@ -475,7 +475,7 @@ describe("Settings", () => {
     expect(world.settings.mirrorHistory).toEqual([]);
   });
 
-  it("Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, \"Story: Manage my saved passwords\"; spec/app/settings/android.md, \"Story: Change what only Android can change\")", async () => {
+  it('Manage saved passwords and choose Android autofill (spec/app/settings/facts.md, "Story: Manage my saved passwords"; spec/app/settings/android.md, "Story: Change what only Android can change")', async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("Apps");
     await press("Passwords");
@@ -548,7 +548,7 @@ describe("Settings", () => {
     expect(await page(alpha)).toBe("Apps");
   });
 
-  it("Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, \"Story: Manage my saved passwords\")", async () => {
+  it(`Shows and opens Proton Pass only from the owner's native Password manager (spec/app/settings/facts.md, "Story: Manage my saved passwords")`, async () => {
     const sceneWithProton = { ...scene(), phone: true };
     sceneWithProton.settings.passwordProvider = { installation: "absent", selection: "none", support: "available" };
     const { world } = await settingsOpen(sceneWithProton);
@@ -578,7 +578,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(button(/^Proton Pass/)).toBeUndefined());
   });
 
-  it("See and control the listener (spec/app/voice/listener.md, \"Story: See and control the listener\")", async () => {
+  it('See and control the listener (spec/app/voice/listener.md, "Story: See and control the listener")', async () => {
     const pause = Promise.withResolvers<unknown>();
     const listener: ListenerScene = {
       status: { available: true, state: "LISTENING", label: "Listening", consented: true, listening: true, microphoneOpen: true },
@@ -625,7 +625,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(titled("Listening")?.textContent).toContain("Paused during a call"));
   });
 
-  it("Opens the native destination for each App permissions row", async () => {
+  it('Opens the native destination for each App permissions row (spec/app/settings/android.md, "Each Android page is offered on the Settings page it belongs to")', async () => {
     const { alpha, world, machines } = await settingsOpen();
     await press("Privacy");
     await press("Permissions");
@@ -824,7 +824,7 @@ describe("Settings", () => {
     await vi.waitFor(() => expect(world.settings.consents.at(-1)).toEqual({ gmailChanges: true, calendarEdits: true }));
   });
 
-  it("A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, \"The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight\")", async () => {
+  it('A phone updated from the previous Alpha keeps its choices (spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, when Alpha comes back while Settings shows, and after a change the phone did not answer in time, with ten seconds to answer, never while a change or a recovery is in flight")', async () => {
     localStorage.setItem("alpha.browser.device.v1", JSON.stringify({ askBeforeAgentActions: false, agentLocationEnabled: false, autoLoadMailImages: true }));
     const { alpha } = await open({ ...scene(), phone: true });
     await until(alpha, alpha.runtime, Prefs.Machine, (s) => s.document.read.status === "Loaded");
@@ -917,7 +917,7 @@ describe("Settings", () => {
     expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).pending]).toEqual([[1, 2], false]);
   });
 
-  it("Shows Carrier setup guidance on the web without exposing phone identifiers", async () => {
+  it('Shows Carrier setup guidance on the web without exposing phone identifiers (spec/app/settings/index.md, "The carrier identifiers and Phone are sensitive screens, only on a phone")', async () => {
     const { alpha } = await open(scene());
     await press("Settings");
     await press("General");

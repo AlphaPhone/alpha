@@ -307,7 +307,7 @@ function carry(fx: Out): Job<Event, Telephony | Requested | Attempts | Time | Ag
   }
 }
 
-// spec/app/contacts/agent.md, "A change on the phone stops the review until the owner sees what is on the phone now"
+// spec/app/contacts/agent.md, "The contact can change on the phone while it is shown, and then the owner sees it again before approving"
 const watchedBook = started(effect {
   const agent = try Agent.Machine
   const contacts = try ContactsMachine

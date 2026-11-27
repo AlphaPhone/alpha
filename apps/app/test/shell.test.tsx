@@ -51,7 +51,7 @@ describe("the shell", () => {
     expect((await alpha.runtime.runPromise(Layers.use((l) => l.get()))).open).toEqual([]);
   });
 
-  it("Open text Ask Alpha from Android (spec/app/shell/index.md, \"Story: Open text Ask Alpha from Android\")", async () => {
+  it('Open text Ask Alpha from Android (spec/app/shell/index.md, "Story: Open text Ask Alpha from Android")', async () => {
     const world = { ...scene(), phone: true, image: true };
     const visit = { ticket: 0, canReturn: false, returned: [] as number[] };
     world.settings.textAsk = visit;
@@ -120,7 +120,7 @@ describe("the shell", () => {
     expect(document.documentElement.hasAttribute("data-alpha-keyboard")).toBe(false);
   });
 
-  it("Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, \"A layer that closes gives focus back to the control that opened it, never over a control that took it\")", async () => {
+  it('Waiting for a missing opener does not block tracking the next layer (spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it")', async () => {
     const { alpha } = await open({ ...scene(), phone: true }, only("home"));
     const send = (event: LayerEvent) => alpha.runtime.runPromise(Effect.flatMap(Layers, (layers) => layers.send(event)));
     const opener = document.body.appendChild(document.createElement("button"));
@@ -162,7 +162,7 @@ describe("the shell", () => {
       page.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, isPrimary: true, clientX: to.x, clientY: to.y }));
     });
 
-    // spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
+    // spec/app/shell/gestures.md, "A swipe travels more than 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back": a short or mid-page swipe scrolls and changes nothing.
     await swiped({ x: 5, y: 300 }, { x: 40, y: 300 });
     await swiped({ x: 200, y: 300 }, { x: 300, y: 300 });
     expect((await alpha.runtime.runPromise(Shell.use((s) => s.get()))).trail).toEqual(["Notes"]);
@@ -207,7 +207,8 @@ describe("the shell", () => {
     expect([home()?.classList.contains("contents"), document.querySelectorAll("h1").length]).toEqual([true, 1]);
   });
 
-  it("Let Phone's own bar stand in for Ask Alpha at rest (spec/app/shell/index.md, \"On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises\")", async () => {
+  // spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"
+  it("Let Phone's own bar stand in for Ask Alpha at rest", async () => {
     const { alpha } = await open({ ...scene(), phone: true, image: true });
     await until(alpha, alpha.runtime, Shell, (s) => s.image);
     const assistant = () => document.querySelector<HTMLElement>("main > div:nth-of-type(2)");

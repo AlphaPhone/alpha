@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import documents from "@repo/deployment/alpha-legal.json" with { type: "json" };
-import { Clock, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Clock, Deferred, Duration, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
-import { Machine, machine } from "../gen/site.effect.vibe";
+import { Machine } from "../gen/site.effect.vibe";
 import { type Demo, beats } from "../gen/site.ts";
 import { LegalPage, policyAt } from "../src/Legal.tsx";
 import { Site } from "../src/Site.tsx";
@@ -191,14 +191,38 @@ describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through
   });
 
   it('gives a beat told after a stall its full time, never running through beats at once (spec/site/index.md, "A beat moves on once its time has come, and a scene\'s last beat leads to the next scene, the spoken note back to Home")', async () => {
-    const [paced, stalled] = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+    let now = 0;
+    let wakes = 0;
+    const stall = Deferred.makeUnsafe<void>();
+    const stalledClock: Clock.Clock = {
+      currentTimeMillisUnsafe: () => now,
+      currentTimeMillis: Effect.sync(() => now),
+      currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+      currentTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+      monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+      monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+      sleep: () => Effect.suspend(() => {
+        wakes += 1;
+        if (wakes === 1) {
+          now = 1_500;
+          return Effect.yieldNow;
+        }
+        if (wakes === 2) {
+          return Effect.andThen(Deferred.await(stall), Effect.sync(() => { now = 100_000; }));
+        }
+        return Effect.never;
+      }),
+    };
+    const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.succeed(Clock.Clock, stalledClock)));
+    closing.push(() => runtime.dispose());
+    const [paced, stalled] = await runtime.runPromise(Effect.gen(function* () {
       const told = yield* Machine;
-      yield* told.send({ type: "start", now: 0 });
-      yield* told.send({ type: "tick", now: 1_500 });
+      yield* Stream.runHead(Stream.filter(told.changes, (state) => state.scene === "Home" && state.beat === 1));
       const first = (yield* told.get()).due;
-      yield* told.send({ type: "tick", now: 100_000 });
+      yield* Deferred.succeed(stall, undefined);
+      yield* Stream.runHead(Stream.filter(told.changes, (state) => state.scene === "Day"));
       return [first, yield* told.get()] as const;
-    }).pipe(Effect.provide(machine()))));
+    }));
     expect([paced, stalled.scene, stalled.beat, stalled.due]).toEqual([2_700, "Day", 0, 100_600]);
   });
 

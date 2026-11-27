@@ -59,262 +59,6 @@ lemma AnsweringAll()
   }
 }
 
-lemma RememberOne(photo: int, c: Camera)
-  ensures (c.secure ==> photo in remember(photo, c).session) && (!c.secure ==> remember(photo, c).session == c.session)
-{
-  if c.secure {
-    assert remember(photo, c).session == c.session + ProofLib.Filter((set_x: int) => !((set_x in c.session)), [photo]);
-    Joined(c.session, [photo]);
-  }
-}
-
-lemma StartingOne(out: seq<Effect>, c: Camera)
-  requires c.preview >= 0 && (forall t :: t in c.pending ==> t > 0 && t <= c.preview) && c.showing
-  ensures alwaysStartsAccounted(starting(out, c).state)
-{
-  var n := c.preview + 1;
-  var after := starting(out, c).state;
-  assert after.pending == c.pending + ProofLib.Filter((set_x: int) => !((set_x in c.pending)), [n]);
-  Joined(c.pending, [n]);
-}
-
-lemma RetiringOne(now: int, out: seq<Effect>, c: Camera)
-  requires forall e :: e in out ==> !e.Answer?
-  ensures forall e :: e in retiring(now, out, c).out ==> !e.Answer?
-{
-}
-
-lemma AnsweringOne(d: Done, before: Camera)
-  requires forall e :: e in d.out ==> !e.Answer?
-  ensures ((!before.agent.stage.Over?) && answering(d, before).state.agent.stage.Over?) == (exists e :: e in answering(d, before).out && e.Answer?)
-{
-  var r := answering(d, before);
-  if (!before.agent.stage.Over?) && d.state.agent.stage.Over? {
-    assert r.out[|r.out| - 1] in r.out;
-    assert r.out[|r.out| - 1].Answer?;
-  }
-}
-
-lemma AccessIsDeniedInv(s: Camera, grant: kit__permission_Grant, now: int)
-  requires inv(s)
-  requires !kit__permission_allows(kit__permission_observe(s.permission, grant))
-  ensures inv(answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state)
-{
-}
-
-lemma AccessIsDeniedStep(s: Camera, grant: kit__permission_Grant, now: int)
-  requires inv(s)
-  requires !kit__permission_allows(kit__permission_observe(s.permission, grant))
-  ensures stepALostPreviewFails(s, "accessIs", answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state)
-  ensures stepARetiredPreviewIsReleased(s, "accessIs", answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepOneFocusWriteAtATime(s, "accessIs", answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepASavedVideoIsTheLast(s, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state)
-  ensures stepTheShutterNeverFiresCovered(s, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepEachRequestIsAnsweredOnce(s, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepTheAgentFailsOnlyForCause(s, "accessIs", answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state)
-  ensures stepTheLockScreenOpensNothingElse(s, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state, answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, "accessIs", answering(retiring(now, [], blocking(Cause.Denied, s.(permission := kit__permission_observe(s.permission, grant)))), s).state)
-{
-  var next := s.(permission := kit__permission_observe(s.permission, grant));
-  var b := blocking(Cause.Denied, next);
-  RetiringOne(now, [], b);
-  AnsweringOne(retiring(now, [], b), s);
-}
-
-lemma AccessIsStarting(s: Camera, grant: kit__permission_Grant)
-  requires inv(s)
-  requires kit__permission_allows(kit__permission_observe(s.permission, grant))
-  requires mayStart(s.(permission := kit__permission_observe(s.permission, grant)))
-  ensures inv(starting([], s.(permission := kit__permission_observe(s.permission, grant))).state)
-  ensures stepALostPreviewFails(s, "accessIs", starting([], s.(permission := kit__permission_observe(s.permission, grant))).state)
-  ensures stepARetiredPreviewIsReleased(s, "accessIs", starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepOneFocusWriteAtATime(s, "accessIs", starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepASavedVideoIsTheLast(s, starting([], s.(permission := kit__permission_observe(s.permission, grant))).state)
-  ensures stepTheShutterNeverFiresCovered(s, starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepEachRequestIsAnsweredOnce(s, starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepTheAgentFailsOnlyForCause(s, "accessIs", starting([], s.(permission := kit__permission_observe(s.permission, grant))).state)
-  ensures stepTheLockScreenOpensNothingElse(s, starting([], s.(permission := kit__permission_observe(s.permission, grant))).state, starting([], s.(permission := kit__permission_observe(s.permission, grant))).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, "accessIs", starting([], s.(permission := kit__permission_observe(s.permission, grant))).state)
-{
-  var next := s.(permission := kit__permission_observe(s.permission, grant));
-  StartingOne([], next);
-}
-
-lemma FilmingSavedInv(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Saved?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures inv(filming(f, now, s).state)
-{
-  RememberOne(f.video, s.(film := f));
-}
-
-lemma FilmingSavedStep(f: app__camera__recording_Film, now: int, s: Camera, via: string)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Saved?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  requires via == "recordingEnded" || via == "recordingVerified"
-  ensures stepALostPreviewFails(s, via, filming(f, now, s).state)
-  ensures stepARetiredPreviewIsReleased(s, via, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOneFocusWriteAtATime(s, via, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
-  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepTheAgentFailsOnlyForCause(s, via, filming(f, now, s).state)
-  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, via, filming(f, now, s).state)
-{
-  RememberOne(f.video, s.(film := f));
-}
-
-lemma FilmingCheckingInvA(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping?
-  requires f.stage.Checking?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures alwaysNoCameraWithoutAccess(filming(f, now, s).state)
-  ensures alwaysNothingHeldAway(filming(f, now, s).state)
-  ensures alwaysStartsAccounted(filming(f, now, s).state)
-  ensures alwaysTorchBelongsToItsPreview(filming(f, now, s).state)
-  ensures alwaysLensSettingsValid(filming(f, now, s).state)
-{
-}
-
-lemma FilmingCheckingInvB(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping?
-  requires f.stage.Checking?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures alwaysFocusFollowsTheNewestTap(filming(f, now, s).state)
-  ensures alwaysRecordingHoldsThePreview(filming(f, now, s).state)
-  ensures alwaysOneShutterOnTheCamera(filming(f, now, s).state)
-  ensures alwaysTheRequestWaitsOnTheCamera(filming(f, now, s).state)
-  ensures alwaysSecureShowsOnlyItsSession(filming(f, now, s).state)
-{
-}
-
-lemma FilmingCheckingStep(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping?
-  requires f.stage.Checking?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures stepALostPreviewFails(s, "recordingEnded", filming(f, now, s).state)
-  ensures stepARetiredPreviewIsReleased(s, "recordingEnded", filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOneFocusWriteAtATime(s, "recordingEnded", filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
-  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepTheAgentFailsOnlyForCause(s, "recordingEnded", filming(f, now, s).state)
-  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, "recordingEnded", filming(f, now, s).state)
-{
-}
-
-lemma FilmingEmptyInv(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping?
-  requires f.stage.Empty?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures inv(filming(f, now, s).state)
-{
-}
-
-lemma FilmingEmptyStep(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping?
-  requires f.stage.Empty?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures stepALostPreviewFails(s, "recordingEnded", filming(f, now, s).state)
-  ensures stepARetiredPreviewIsReleased(s, "recordingEnded", filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOneFocusWriteAtATime(s, "recordingEnded", filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
-  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepTheAgentFailsOnlyForCause(s, "recordingEnded", filming(f, now, s).state)
-  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, "recordingEnded", filming(f, now, s).state)
-{
-}
-
-lemma FilmingBrokenInvA(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Broken?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures alwaysNoCameraWithoutAccess(filming(f, now, s).state)
-  ensures alwaysNothingHeldAway(filming(f, now, s).state)
-  ensures alwaysStartsAccounted(filming(f, now, s).state)
-  ensures alwaysTorchBelongsToItsPreview(filming(f, now, s).state)
-  ensures alwaysLensSettingsValid(filming(f, now, s).state)
-{
-}
-
-lemma FilmingBrokenInvB1(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Broken?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures alwaysFocusFollowsTheNewestTap(filming(f, now, s).state)
-  ensures alwaysRecordingHoldsThePreview(filming(f, now, s).state)
-{
-}
-
-lemma FilmingBrokenInvB2(f: app__camera__recording_Film, now: int, s: Camera)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Broken?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  ensures alwaysOneShutterOnTheCamera(filming(f, now, s).state)
-  ensures alwaysTheRequestWaitsOnTheCamera(filming(f, now, s).state)
-{
-}
-
-lemma FilmingBrokenInvB3(f: app__camera__recording_Film, now: int, s: Camera)
-  requires alwaysSecureShowsOnlyItsSession(s)
-  requires f.stage.Broken?
-  ensures alwaysSecureShowsOnlyItsSession(filming(f, now, s).state)
-{
-  var c := settling(f, s);
-  assert c.secure == s.secure && c.last == s.last && c.session == s.session;
-  var r := filming(f, now, s).state;
-  assert r.secure == c.secure && r.last == c.last && r.session == c.session;
-}
-
-lemma FilmingBrokenStepA(f: app__camera__recording_Film, now: int, s: Camera, via: string)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Broken?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  requires via == "recordingEnded" || via == "recordingVerified"
-  ensures stepALostPreviewFails(s, via, filming(f, now, s).state)
-  ensures stepARetiredPreviewIsReleased(s, via, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOneFocusWriteAtATime(s, via, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
-{
-}
-
-lemma FilmingBrokenStepB(f: app__camera__recording_Film, now: int, s: Camera, via: string)
-  requires inv(s)
-  requires s.film.stage.Stopping? || s.film.stage.Checking?
-  requires f.stage.Broken?
-  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
-  requires via == "recordingEnded" || via == "recordingVerified"
-  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepTheAgentFailsOnlyForCause(s, via, filming(f, now, s).state)
-  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
-  ensures stepOnlyThisVisitJoinsTheSession(s, via, filming(f, now, s).state)
-{
-}
-
 lemma RememberAll()
   ensures forall photo: int, c: Camera {:trigger remember(photo, c)} :: (c.secure ==> photo in remember(photo, c).session) && (!c.secure ==> remember(photo, c).session == c.session)
 {
@@ -1018,17 +762,20 @@ lemma recordingEnded_ensures(s: Camera, ok: bool, video: int, now: int, by_: app
   ensures (inv(s) ==> canRecordingEnded(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingEnded(s, ok, video, now, by_).state, recordingEnded(s, ok, video, now, by_).out))
   ensures (inv(s) ==> canRecordingEnded(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingEnded", recordingEnded(s, ok, video, now, by_).state))
 {
+  hide *;
   if inv(s) && canRecordingEnded(s, by_) {
     var ended := app__camera__recording_ended(s.film, ok, video);
-    assert recordingEnded(s, ok, video, now, by_) == filming(ended, now, s);
-    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
-    assert app__camera__recording_alwaysWithinLimits(ended);
-    assert app__camera__recording_alwaysSavedIsWhole(ended);
-    FilmReleased(s, ended, now);
-    FilmKeepsAgent(s, ended, now);
-    FilmKeepsSession(s, ended, now, "recordingEnded");
-    FilmKeepsCameraSettings(s, ended, now);
-    FilmKeepsRecording(s, ended, now);
+    assert recordingEnded(s, ok, video, now, by_) == filming(ended, now, s) by {
+      reveal recordingEnded;
+    }
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?
+      && app__camera__recording_alwaysWithinLimits(ended) && app__camera__recording_alwaysSavedIsWhole(ended) by {
+      reveal inv, canRecordingEnded, alwaysRecordingHoldsThePreview,
+        app__camera__recording_canEnded, app__camera__recording_ended,
+        app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, ended, now, "recordingEnded");
   }
 }
 
@@ -1054,17 +801,20 @@ lemma recordingVerified_ensures(s: Camera, ok: bool, now: int, by_: app__photos_
   ensures (inv(s) ==> canRecordingVerified(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingVerified(s, ok, now, by_).state, recordingVerified(s, ok, now, by_).out))
   ensures (inv(s) ==> canRecordingVerified(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingVerified", recordingVerified(s, ok, now, by_).state))
 {
+  hide *;
   if inv(s) && canRecordingVerified(s, by_) {
     var ended := app__camera__recording_verified(s.film, ok);
-    assert recordingVerified(s, ok, now, by_) == filming(ended, now, s);
-    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
-    assert app__camera__recording_alwaysWithinLimits(ended);
-    assert app__camera__recording_alwaysSavedIsWhole(ended);
-    FilmReleased(s, ended, now);
-    FilmKeepsAgent(s, ended, now);
-    FilmKeepsSession(s, ended, now, "recordingVerified");
-    FilmKeepsCameraSettings(s, ended, now);
-    FilmKeepsRecording(s, ended, now);
+    assert recordingVerified(s, ok, now, by_) == filming(ended, now, s) by {
+      reveal recordingVerified;
+    }
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?
+      && app__camera__recording_alwaysWithinLimits(ended) && app__camera__recording_alwaysSavedIsWhole(ended) by {
+      reveal inv, canRecordingVerified, alwaysRecordingHoldsThePreview,
+        app__camera__recording_canVerified, app__camera__recording_verified,
+        app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, ended, now, "recordingVerified");
   }
 }
 
@@ -1225,7 +975,7 @@ lemma FilmSettlement(s: Camera, f: app__camera__recording_Film)
   ensures settling(f, s).showing == s.showing && settling(f, s).covered == s.covered
   ensures settling(f, s).agent == s.agent && settling(f, s).permission == s.permission
   ensures settling(f, s).secure == s.secure && settling(f, s).visit == s.visit && settling(f, s).filmVisit == s.filmVisit
-  ensures settling(f, s).shot == s.shot && settling(f, s).lens == s.lens
+  ensures settling(f, s).shot == s.shot && settling(f, s).shots == s.shots && settling(f, s).shotFor == s.shotFor && settling(f, s).lens == s.lens
   ensures settling(f, s).torch == s.torch && settling(f, s).zoom == s.zoom && settling(f, s).flash == s.flash
   ensures settling(f, s).focus == s.focus && settling(f, s).taps == s.taps
   ensures settling(f, s).writing == s.writing && settling(f, s).confirmed == s.confirmed && settling(f, s).waited == s.waited
@@ -1250,15 +1000,17 @@ lemma FilmShape(s: Camera, f: app__camera__recording_Film, now: int)
       && (forall e :: e in prefix ==> !e.StopPreview?)
   ensures var landed := settling(f, s);
     var after := filming(f, now, s).state;
-    after == landed || (landed.phase.Ready? && !holds(landed) && !recording(landed)
-      && after == landed.(phase := Phase.Off, preview := landed.preview + 1, torch := extinguished(landed.torch)))
+    after == (if landed.phase.Ready? && !holds(landed) && !recording(landed)
+      then landed.(phase := Phase.Off, preview := landed.preview + 1, torch := extinguished(landed.torch))
+      else landed)
+  ensures forall e :: e in filming(f, now, s).out ==> e.StopRecording? || e.CheckRecording? || e.StopPreview?
 {
 }
 
-lemma FilmReleased(s: Camera, f: app__camera__recording_Film, now: int)
+lemma FilmReleased(s: Camera, f: app__camera__recording_Film, now: int, via: string)
   requires alwaysStartsAccounted(s) && alwaysSecureShowsOnlyItsSession(s)
   ensures alwaysStartsAccounted(filming(f, now, s).state)
-  ensures stepARetiredPreviewIsReleased(s, "", filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepARetiredPreviewIsReleased(s, via, filming(f, now, s).state, filming(f, now, s).out)
 {
   FilmSettlement(s, f);
   FilmShape(s, f, now);
@@ -1325,6 +1077,69 @@ lemma FilmKeepsRecording(s: Camera, f: app__camera__recording_Film, now: int)
   }
 }
 
+lemma FilmKeepsRest(s: Camera, f: app__camera__recording_Film, now: int, via: string)
+  requires alwaysNoCameraWithoutAccess(s) && alwaysNothingHeldAway(s) && alwaysOneShutterOnTheCamera(s) && alwaysSecureShowsOnlyItsSession(s)
+  requires app__camera__recording_recording(f) ==> recording(s)
+  requires via != "previewLost"
+  ensures alwaysNoCameraWithoutAccess(filming(f, now, s).state)
+  ensures alwaysNothingHeldAway(filming(f, now, s).state)
+  ensures alwaysOneShutterOnTheCamera(filming(f, now, s).state)
+  ensures stepALostPreviewFails(s, via, filming(f, now, s).state)
+  ensures stepOneFocusWriteAtATime(s, via, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepTheAgentFailsOnlyForCause(s, via, filming(f, now, s).state)
+  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
+{
+  hide *;
+  FilmSettlement(s, f);
+  FilmShape(s, f, now);
+  reveal holds, recording,
+    alwaysNoCameraWithoutAccess, alwaysNothingHeldAway, alwaysOneShutterOnTheCamera,
+    app__camera__agent_alwaysResultsAreHonest,
+    stepALostPreviewFails, stepOneFocusWriteAtATime, stepSoundOnlyWithTheMicrophone,
+    stepTheShutterNeverFiresCovered, stepEachRequestIsAnsweredOnce,
+    stepTheAgentFailsOnlyForCause, stepTheLockScreenOpensNothingElse;
+}
+
+lemma FilmingPreserves(s: Camera, f: app__camera__recording_Film, now: int, via: string)
+  requires inv(s)
+  requires app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
+  requires app__camera__recording_recording(f) ==> recording(s)
+  requires f.stage.Running? ==> holds(s)
+  requires via != "previewLost"
+  ensures alwaysNoCameraWithoutAccess(filming(f, now, s).state)
+  ensures alwaysNothingHeldAway(filming(f, now, s).state)
+  ensures alwaysStartsAccounted(filming(f, now, s).state)
+  ensures alwaysTorchBelongsToItsPreview(filming(f, now, s).state)
+  ensures alwaysLensSettingsValid(filming(f, now, s).state)
+  ensures alwaysFocusFollowsTheNewestTap(filming(f, now, s).state)
+  ensures alwaysRecordingHoldsThePreview(filming(f, now, s).state)
+  ensures alwaysOneShutterOnTheCamera(filming(f, now, s).state)
+  ensures alwaysTheRequestWaitsOnTheCamera(filming(f, now, s).state)
+  ensures alwaysSecureShowsOnlyItsSession(filming(f, now, s).state)
+  ensures stepALostPreviewFails(s, via, filming(f, now, s).state)
+  ensures stepARetiredPreviewIsReleased(s, via, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepOneFocusWriteAtATime(s, via, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepSoundOnlyWithTheMicrophone(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepASavedVideoIsTheLast(s, filming(f, now, s).state)
+  ensures stepTheShutterNeverFiresCovered(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepEachRequestIsAnsweredOnce(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepTheAgentFailsOnlyForCause(s, via, filming(f, now, s).state)
+  ensures stepTheLockScreenOpensNothingElse(s, filming(f, now, s).state, filming(f, now, s).out)
+  ensures stepOnlyThisVisitJoinsTheSession(s, via, filming(f, now, s).state)
+{
+  hide *;
+  reveal inv;
+  FilmReleased(s, f, now, via);
+  FilmKeepsAgent(s, f, now);
+  FilmKeepsSession(s, f, now, via);
+  FilmKeepsCameraSettings(s, f, now);
+  FilmKeepsRecording(s, f, now);
+  FilmKeepsRest(s, f, now, via);
+}
+
 lemma recordingStarted_ensures(s: Camera, ok: bool, now: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysNoCameraWithoutAccess(recordingStarted(s, ok, now, by_).state))
   ensures (inv(s) ==> canRecordingStarted(s, by_) ==> alwaysNothingHeldAway(recordingStarted(s, ok, now, by_).state))
@@ -1347,16 +1162,104 @@ lemma recordingStarted_ensures(s: Camera, ok: bool, now: int, by_: app__photos__
   ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingStarted(s, ok, now, by_).state, recordingStarted(s, ok, now, by_).out))
   ensures (inv(s) ==> canRecordingStarted(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingStarted", recordingStarted(s, ok, now, by_).state))
 {
+  hide *;
   if inv(s) && canRecordingStarted(s, by_) {
     var begun := app__camera__recording_started(s.film, ok, now);
     var held := if begun.stage.Running? && !holds(s) then app__camera__recording_stop(begun, now) else begun;
-    assert recordingStarted(s, ok, now, by_) == filming(held, now, s);
-    assert !held.stage.Saved?;
-    FilmReleased(s, held, now);
-    FilmKeepsAgent(s, held, now);
-    FilmKeepsSession(s, held, now, "recordingStarted");
-    FilmKeepsCameraSettings(s, held, now);
-    FilmKeepsRecording(s, held, now);
+    assert recordingStarted(s, ok, now, by_) == filming(held, now, s) by {
+      reveal recordingStarted;
+    }
+    assert app__camera__recording_alwaysWithinLimits(held) && app__camera__recording_alwaysSavedIsWhole(held)
+      && (app__camera__recording_recording(held) ==> recording(s))
+      && (held.stage.Running? ==> holds(s)) by {
+      reveal inv, canRecordingStarted, alwaysRecordingHoldsThePreview, recording,
+        app__camera__recording_canStarted, app__camera__recording_started,
+        app__camera__recording_stop, app__camera__recording_stopping,
+        app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole,
+        app__camera__recording_maxBytes, app__camera__recording_maxSeconds;
+    }
+    FilmingPreserves(s, held, now, "recordingStarted");
+  }
+}
+
+lemma stopRecording_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysNoCameraWithoutAccess(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysNothingHeldAway(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysStartsAccounted(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysTorchBelongsToItsPreview(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysLensSettingsValid(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysFocusFollowsTheNewestTap(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysRecordingHoldsThePreview(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysOneShutterOnTheCamera(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> alwaysSecureShowsOnlyItsSession(stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepALostPreviewFails(s, "stopRecording", stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepARetiredPreviewIsReleased(s, "stopRecording", stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepOneFocusWriteAtATime(s, "stopRecording", stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepASavedVideoIsTheLast(s, stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepTheShutterNeverFiresCovered(s, stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepEachRequestIsAnsweredOnce(s, stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "stopRecording", stopRecording(s, now, by_).state))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepTheLockScreenOpensNothingElse(s, stopRecording(s, now, by_).state, stopRecording(s, now, by_).out))
+  ensures (inv(s) ==> canStopRecording(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "stopRecording", stopRecording(s, now, by_).state))
+{
+  hide *;
+  if inv(s) && canStopRecording(s, by_) {
+    var stopped := app__camera__recording_stop(s.film, now);
+    assert stopRecording(s, now, by_) == filming(stopped, now, s) by {
+      reveal stopRecording;
+    }
+    assert app__camera__recording_alwaysWithinLimits(stopped) && app__camera__recording_alwaysSavedIsWhole(stopped)
+      && (app__camera__recording_recording(stopped) ==> recording(s))
+      && !stopped.stage.Running? by {
+      reveal inv, canStopRecording, alwaysRecordingHoldsThePreview, recording,
+        app__camera__recording_canStop, app__camera__recording_stop,
+        app__camera__recording_stopping, app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, stopped, now, "stopRecording");
+  }
+}
+
+lemma recordingInterrupted_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysNoCameraWithoutAccess(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysNothingHeldAway(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysStartsAccounted(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysTorchBelongsToItsPreview(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysLensSettingsValid(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysFocusFollowsTheNewestTap(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysRecordingHoldsThePreview(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysOneShutterOnTheCamera(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysTheRequestWaitsOnTheCamera(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> alwaysSecureShowsOnlyItsSession(recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepALostPreviewFails(s, "recordingInterrupted", recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepARetiredPreviewIsReleased(s, "recordingInterrupted", recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepOneFocusWriteAtATime(s, "recordingInterrupted", recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepSoundOnlyWithTheMicrophone(s, recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepASavedVideoIsTheLast(s, recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepTheShutterNeverFiresCovered(s, recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepEachRequestIsAnsweredOnce(s, recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepTheAgentFailsOnlyForCause(s, "recordingInterrupted", recordingInterrupted(s, now, by_).state))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepTheLockScreenOpensNothingElse(s, recordingInterrupted(s, now, by_).state, recordingInterrupted(s, now, by_).out))
+  ensures (inv(s) ==> canRecordingInterrupted(s, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "recordingInterrupted", recordingInterrupted(s, now, by_).state))
+{
+  hide *;
+  if inv(s) && canRecordingInterrupted(s, by_) {
+    var stopped := app__camera__recording_interrupted(s.film, now);
+    assert recordingInterrupted(s, now, by_) == filming(stopped, now, s) by {
+      reveal recordingInterrupted;
+    }
+    assert app__camera__recording_alwaysWithinLimits(stopped) && app__camera__recording_alwaysSavedIsWhole(stopped)
+      && (app__camera__recording_recording(stopped) ==> recording(s))
+      && !stopped.stage.Running? by {
+      reveal inv, canRecordingInterrupted, alwaysRecordingHoldsThePreview, recording,
+        app__camera__recording_canInterrupted, app__camera__recording_interrupted,
+        app__camera__recording_stopping, app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, stopped, now, "recordingInterrupted");
   }
 }
 
@@ -1382,16 +1285,53 @@ lemma stopTimedOut_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepTheLockScreenOpensNothingElse(s, stopTimedOut(s, now, by_).state, stopTimedOut(s, now, by_).out))
   ensures (inv(s) ==> canStopTimedOut(s, now, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "stopTimedOut", stopTimedOut(s, now, by_).state))
 {
+  hide *;
   if inv(s) && canStopTimedOut(s, now, by_) {
     var ended := app__camera__recording_timedOut(s.film, now);
-    assert stopTimedOut(s, now, by_) == filming(ended, now, s);
-    assert !app__camera__recording_recording(ended) && !ended.stage.Running?;
-    assert app__camera__recording_alwaysWithinLimits(ended);
-    assert app__camera__recording_alwaysSavedIsWhole(ended);
-    FilmReleased(s, ended, now);
-    FilmKeepsAgent(s, ended, now);
-    FilmKeepsSession(s, ended, now, "stopTimedOut");
-    FilmKeepsCameraSettings(s, ended, now);
-    FilmKeepsRecording(s, ended, now);
+    assert stopTimedOut(s, now, by_) == filming(ended, now, s) by {
+      reveal stopTimedOut;
+    }
+    assert !app__camera__recording_recording(ended) && !ended.stage.Running?
+      && app__camera__recording_alwaysWithinLimits(ended) && app__camera__recording_alwaysSavedIsWhole(ended) by {
+      reveal inv, canStopTimedOut, alwaysRecordingHoldsThePreview,
+        app__camera__recording_canTimedOut, app__camera__recording_timedOut,
+        app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, ended, now, "stopTimedOut");
   }
+}
+
+lemma delayTick_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysNoCameraWithoutAccess(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysNothingHeldAway(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysStartsAccounted(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysTorchBelongsToItsPreview(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysLensSettingsValid(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysFocusFollowsTheNewestTap(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysRecordingHoldsThePreview(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysOneShutterOnTheCamera(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysTheRequestWaitsOnTheCamera(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> alwaysSecureShowsOnlyItsSession(delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepALostPreviewFails(s, "delayTick", delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepARetiredPreviewIsReleased(s, "delayTick", delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepOneFocusWriteAtATime(s, "delayTick", delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepSoundOnlyWithTheMicrophone(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepASavedVideoIsTheLast(s, delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepTheShutterNeverFiresCovered(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepEachRequestIsAnsweredOnce(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepTheAgentFailsOnlyForCause(s, "delayTick", delayTick(s, now, by_).state))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepTheLockScreenOpensNothingElse(s, delayTick(s, now, by_).state, delayTick(s, now, by_).out))
+  ensures (inv(s) ==> canDelayTick(s, now, by_) ==> stepOnlyThisVisitJoinsTheSession(s, "delayTick", delayTick(s, now, by_).state))
+{
+  hide *;
+  reveal inv, canDelayTick, delayTick, shutter, emit, ready, holds, free, recording,
+    alwaysNoCameraWithoutAccess, alwaysNothingHeldAway, alwaysStartsAccounted,
+    alwaysTorchBelongsToItsPreview, alwaysLensSettingsValid, alwaysFocusFollowsTheNewestTap,
+    alwaysRecordingHoldsThePreview, alwaysOneShutterOnTheCamera, alwaysTheRequestWaitsOnTheCamera,
+    alwaysSecureShowsOnlyItsSession, app__camera__agent_alwaysResultsAreHonest,
+    stepALostPreviewFails, stepARetiredPreviewIsReleased, stepOneFocusWriteAtATime,
+    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered,
+    stepEachRequestIsAnsweredOnce, stepTheAgentFailsOnlyForCause,
+    stepTheLockScreenOpensNothingElse, stepOnlyThisVisitJoinsTheSession;
 }

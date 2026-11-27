@@ -412,7 +412,8 @@ describe("Workflows", () => {
     });
   });
 
-  it('Reads the exact run on Android and stops it when Alpha goes into the background (spec/app/workflows/sheet.md, "Story: Read a run’s sheet")', async () => {
+  // spec/app/workflows/sheet.md, "Story: Read a run's sheet"
+  it("Reads the exact run on Android and stops it when Alpha goes into the background", async () => {
     const world = scene();
     world.phone = true;
     world.voice.onDevice = true;
@@ -562,7 +563,8 @@ const openStepsBuilder = async (alpha: Awaited<ReturnType<typeof open>>["alpha"]
     expect(world.workflows.statement).toMatchObject({ removed: false, active: false });
   });
 
-  it('Cancels speech synthesis on Stop reading and sheet close (spec/app/workflows/sheet.md, "Story: Read a run\'s sheet")', async () => {
+  // spec/app/workflows/sheet.md, "Story: Read a run's sheet"
+  it("Cancels speech synthesis on Stop reading and sheet close", async () => {
     const cancel = vi.fn();
     const speak = vi.fn();
     class FakeUtterance {
