@@ -3614,6 +3614,133 @@ lemma comeBack_ensures(m: Maps)
   }
 }
 
+lemma AnswerCoverageAlwaysA1(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures alwaysTheSheetFitsTheMode(res.state)
+  ensures alwaysDirectionsAreForThePlace(res.state)
+  ensures alwaysARouteBelongsToThePlace(res.state)
+  ensures alwaysTheCardShowsARealPlace(res.state)
+  ensures alwaysNavigationKeepsItsDirections(res.state)
+{
+}
+
+lemma AnswerCoverageAlwaysA2(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures alwaysAWaitingSearchHasNoProvider(res.state)
+  ensures alwaysAPauseIsForAnOpenSearch(res.state)
+  ensures alwaysRecentSearchesAreFiveAtMost(res.state)
+  ensures alwaysAPressHasValidCoordinates(res.state)
+  ensures alwaysResultsAnswerTheQuery(res.state)
+{
+}
+
+lemma AnswerCoverageAlwaysB1(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures alwaysThePinsNameIsToldOnItsCard(res.state)
+  ensures alwaysTheNameFieldIsOnAPlace(res.state)
+  ensures alwaysSavedPlacesAreDistinctAndNamed(res.state)
+  ensures alwaysACopyIsOfThePlaceShown(res.state)
+  ensures alwaysTheChosenRouteIsOneOffered(res.state)
+{
+}
+
+lemma AnswerCoverageAlwaysB2(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures alwaysRoutesNeedTheProvider(res.state)
+  ensures alwaysAStartPlaceIsAnotherPlace(res.state)
+  ensures alwaysStartsFoundAreForDirections(res.state)
+  ensures alwaysOnlyGuidanceIsImprecise(res.state)
+  ensures alwaysGuidanceHoldsTheLocation(res.state)
+{
+}
+
+lemma AnswerCoverageAlwaysC(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures alwaysFindingWaitsForGuidance(res.state)
+  ensures alwaysExplainingOnlyBeforeTheDisclosure(res.state)
+  ensures alwaysExplainingOnlyWhileLocationIsNotAllowed(res.state)
+  ensures alwaysTheQuietFixIsTheFinders(res.state)
+  ensures alwaysALocateOwedWasAsked(res.state)
+  ensures alwaysOnlyAPlaceOrRouteIsReadable(res.state)
+  ensures alwaysAReadAnswersAQuestion(res.state)
+  ensures alwaysAQuestionIsAboutWhatIsShown(res.state)
+  ensures alwaysTheTripKeepsItsRules(res.state)
+  ensures alwaysTheConnectionKeepsItsRules(res.state)
+{
+  app__maps__connection_answerCoverage_ensures(m.link, ticket, ok, covered, google, offer);
+}
+
+lemma AnswerCoverageStepsA(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures stepAnotherPlaceForgetsTheOldRoute(m, "answerCoverage", res.state)
+  ensures stepBackLeavesOneMode(m, "answerCoverage", res.state)
+  ensures stepTypingEndsALocate(m, "answerCoverage", res.state)
+  ensures stepTheSameTextIsNotAskedAgain(m, "answerCoverage", res.state, res.out)
+  ensures stepANewSearchIsTheNewest(m, "answerCoverage", res.state)
+  ensures stepAnotherAccountForgetsTheRecentSearches(m, "answerCoverage", res.state)
+  ensures stepAPinIsAPlaceOfTheGlobe(m, res.state, res.out)
+  ensures stepAPressPinsOnce(m, "answerCoverage", res.state, res.out)
+  ensures stepAMenuPinsOnlyWithNoFingerDown(m, "answerCoverage", res.state, res.out)
+  ensures stepAHandedQueryNeverInterruptsGuidance(m, "answerCoverage", res.state)
+  ensures stepAResultOpensItsPlace(m, "answerCoverage", res.state)
+  ensures stepNamingThePinSavesNothing(m, "answerCoverage", res.state, res.out)
+  ensures stepASavedPlaceOpensOnlyWhenSaved(m, "answerCoverage", res.state)
+  ensures stepSavedPlacesAreKeptOnThePhone(m, "answerCoverage", res.state, res.out)
+  ensures stepThePreviousListIsTakenOnlyByAnUnusedList(m, "answerCoverage", res.state)
+  ensures stepAnUnreadableListIsNeverWrittenOver(m, res.state, res.out)
+  ensures stepAChangeIsToldOnlyOnceItReadsBack(m, "answerCoverage", res.state)
+  ensures stepOnlyThePlaceShownIsHandedOn(m, res.state, res.out)
+  ensures stepACopyIsToldOnlyOfACopyAsked(m, "answerCoverage", res.state)
+  ensures stepDetailsAreForThePlaceShown(m, res.state, res.out)
+  ensures stepDirectionsOpenOnlyFromACard(m, "answerCoverage", res.state)
+  ensures stepRoutesAreForThePlaceShown(m, res.state, res.out)
+  ensures stepASwapExchangesTheEnds(m, "answerCoverage", res.state)
+  ensures stepGuidanceStartsOnTheRouteShown(m, "answerCoverage", res.state)
+  ensures stepArrivalAwayIsToldOnce(m, "answerCoverage", res.state, res.out)
+  ensures stepScreenOffOnlyForThisJourney(m, res.state, res.out)
+{
+  NoArrival(m, "answerCoverage", res.state, res.out);
+}
+
+lemma AnswerCoverageStepsB(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures stepEndKeepsTheRoute(m, "answerCoverage", res.state)
+  ensures stepALateQuietFixMovesNothing(m, "answerCoverage", res.state, res.out)
+  ensures stepAFixIsForTheSessionInPlace(m, "answerCoverage", res.state)
+  ensures stepTheQuietFixFailsSilently(m, "answerCoverage", res.state)
+  ensures stepGivingUpStopsLocating(m, "answerCoverage", res.state, res.out)
+  ensures stepLosingTheLocationEndsWhatHeldIt(m, "answerCoverage", res.state)
+  ensures stepGuidanceEndsOnlyWhenTold(m, "answerCoverage", res.state)
+  ensures stepOnlyTheOwnerStartsGuidance(m, "answerCoverage", res.state)
+  ensures stepLeavingKeepsWhatArrived(m, "answerCoverage", res.state)
+  ensures stepLeavingWithoutTheServiceEndsGuidance(m, "answerCoverage", res.state)
+  ensures stepANotificationOpensOnlyWhatCanShow(m, "answerCoverage", res.state, res.out)
+  ensures stepGuidanceNoticesNameTheirCause(m, "answerCoverage", res.state)
+  ensures stepAnotherAccountHidesTheLast(m, "answerCoverage", res.state)
+  ensures stepAHandedQuerySurvivesAnotherAccount(m, "answerCoverage", res.state)
+  ensures stepAWaitingSearchIsSentOnceAProviderWorks(m, "answerCoverage", res.state, res.out)
+  ensures stepNothingIsAskedWhileAWaitHolds(m, "answerCoverage", res.state, res.out)
+  ensures stepTheDisclosureClosesWithTheVisit(m, "answerCoverage", res.state)
+  ensures stepContinuingOwesTheLocate(m, "answerCoverage", res.state, res.out)
+  ensures stepYourLocationIsReused(m, "answerCoverage", res.state, res.out)
+  ensures stepSettingsOnlyAfterNo(m, res.state, res.out)
+  ensures stepReturnGoesToTheEventMapsCameFrom(m, res.state, res.out)
+  ensures stepTheRevisionChangesOnlyWithWhatIsShown(m, res.state)
+  ensures stepTheAgentNeverMakesAndroidAsk(m, "answerCoverage", res.state, res.out)
+  ensures stepARerouteNeedsAFixThatGuides(m, "answerCoverage", res.state)
+  ensures stepEachReadIsSentOnce(m, res.state, res.out)
+  ensures stepAChangeVoidsTheQuestion(m, res.state)
+  ensures stepNoPlaceToTheAgentWithoutApproval(m, "answerCoverage", res.state, res.out)
+{
+}
+
 lemma answerCoverage_ensures(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer)
   ensures (inv(m) ==> canAnswerCoverage(m, ticket, ok, covered, google, offer) ==> alwaysTheSheetFitsTheMode(answerCoverage(m, ticket, ok, covered, google, offer).state))
   ensures (inv(m) ==> canAnswerCoverage(m, ticket, ok, covered, google, offer) ==> alwaysDirectionsAreForThePlace(answerCoverage(m, ticket, ok, covered, google, offer).state))
@@ -3701,7 +3828,13 @@ lemma answerCoverage_ensures(m: Maps, ticket: int, ok: bool, covered: bool, goog
 {
   if inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer) {
     var res := answerCoverage(m, ticket, ok, covered, google, offer);
-    NoArrival(m, "answerCoverage", res.state, res.out);
+    AnswerCoverageAlwaysA1(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageAlwaysA2(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageAlwaysB1(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageAlwaysB2(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageAlwaysC(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageStepsA(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageStepsB(m, ticket, ok, covered, google, offer, res);
   }
 }
 
