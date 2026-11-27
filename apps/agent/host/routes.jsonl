@@ -120,3 +120,6 @@
 { "method": "POST", "path": "/api/wallet/requests" }
 { "method": "POST", "path": "/api/wallet/requests/{id}/review" }
 { "method": "POST", "path": "/api/wallet/requests/{id}/decide" }
+{ "method": "GET", "path": "/api/alpha/control/state" }
+{ "method": "POST", "path": "/api/alpha/control/lease", "maxBodyBytes": 4096 }
+{ "method": "POST", "path": "/api/alpha/control/stop", "maxBodyBytes": 1024 }
