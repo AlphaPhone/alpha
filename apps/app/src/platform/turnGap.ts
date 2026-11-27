@@ -17,6 +17,7 @@ export class TurnGap {
   #held = "";
   #timer: unknown;
   #done = false;
+  #speaking = false;
 
   /** @throws {never} */
   constructor(
@@ -30,14 +31,22 @@ export class TurnGap {
     return this.#held;
   }
 
+  /** Whether this utterance still has words to send: words held for the gap, or speech whose final has not come yet. */
+  get waiting(): boolean {
+    return !this.#done && (this.#held !== "" || this.#speaking);
+  }
+
   /** Speech started again: the turn is not sent at the gap, and the utterance continues. @throws {never} */
   speechStarted(): void {
+    if (this.#done) return;
+    this.#speaking = true;
     this.#stopTimer();
   }
 
   /** A final from the relay: its words join the utterance, and the gap starts again from now. @throws {never} */
   segment(text: string | null): void {
     if (this.#done) return;
+    this.#speaking = false;
     const words = text?.trim() ?? "";
     if (words !== "") this.#held = this.#held === "" ? words : `${this.#held} ${words}`;
     this.#stopTimer();
@@ -61,6 +70,7 @@ export class TurnGap {
   cancel(): void {
     this.#stopTimer();
     this.#held = "";
+    this.#speaking = false;
     this.#done = true;
   }
 

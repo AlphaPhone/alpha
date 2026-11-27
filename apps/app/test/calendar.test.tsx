@@ -1048,6 +1048,23 @@ describe("on a phone", () => {
     expect(world.calendar.writes).toEqual([]);
   });
 
+  it("The card names the calendar its request names by the summary the agent lists for it, as the Sunday demo build did (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    const world = morning(true);
+    world.calendar.summary = "Family";
+    const { alpha, agent, file } = await askingCalendar(world);
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/calendar-approval-fields.ts:17 and 48 printed the summary of the request's source, for "primary" and for the calendar the agent lists alike.
+    await file("approval-primary", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Family", "Eliza Calendar", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
+    await press("Decline");
+    await file("approval-listed", "lens check", 11, "eliza-calendar/primary");
+    await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
+    expect(["Family", "Calendar eliza-calendar/primary"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual(["reject approval-primary"]);
+  });
+
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
     const { world, alpha, agent } = await fileTwoCalendarRequests();
     const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
