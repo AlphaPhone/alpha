@@ -67,7 +67,11 @@ names the same way: the agent's own calendar by that summary, and another
 calendar by the summary the agent lists for it, or as the request names
 it where the agent lists none, as the Sunday demo build printed the summary
 of the request's source (apps/app/src/prototype/calendar-approval-fields.ts:17
-and 48).
+and 48). The card reads the agent's calendar list itself where it reads the
+request, when Calendar holds no summary for the calendar the request names,
+so a card filed from Talk or Ask Alpha on Home names it the same way whether
+or not Calendar was ever opened, as v119 read the owner's sources for each
+card it built.
 
 ```quint
 pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed

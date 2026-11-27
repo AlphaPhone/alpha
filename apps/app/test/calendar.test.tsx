@@ -1066,6 +1066,20 @@ describe("on a phone", () => {
     expect(world.calendar.writes).toEqual(["reject approval-primary"]);
   });
 
+  it("A card filed from Ask Alpha on Home names the calendar the agent lists though Calendar was never opened (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": signed out, Calendar reads no calendar list for an owner, as where Calendar was never opened, so only the card's own read names it
+    const world = { ...morning(true), signedIn: false };
+    const { alpha, agent, file } = await askingCalendar(world);
+    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).not.toContain("Calendar");
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/calendar-approval-fields.ts:17 printed the summary of the source it read for the card; demo frame v100-077 shows Eliza Calendar.
+    await file("approval-home", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Eliza Calendar", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual([]);
+  });
+
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
     const { world, alpha, agent } = await fileTwoCalendarRequests();
     const earlier = world.calendar.approvals.find((one) => one.id === "approval-earlier-reply")?.payload.change["fields"];
