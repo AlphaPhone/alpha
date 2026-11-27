@@ -1,7 +1,7 @@
 // spec/app/settings/reset.md, "Story: Erase all data"
 import * as Reset from "../../gen/app__settings__reset.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__settings__reset.effect.vibe"
-import { type Job, answer, due, reacting, untimed } from "../runtime/index.vibe"
+import { type Job, answer, due, fieldsOf, filledStore, reacting, untimed, withoutFields } from "../runtime/index.vibe"
 
 module held {
   import { resetPlugin, reviewDataReset } from "@elizaos/os-bridges"
@@ -36,5 +36,19 @@ function timers(state: Reset.Reset) {
 // spec/app/settings/reset.md, "Alpha starting again retires any review left in flight"
 const launching = succeed<readonly [Event]>([{ type: "launch" }] as const)
 
+// spec/app/settings/reset.md, "A reset holds the phone's review in flight and what Alpha said when nothing was reset"
+/** What a reset kept before it held only its review and what was said. */
+const dropped = ["recording", "pending", "mayBeRecorded", "tries", "made", "launchTry", "stopping", "revoking", "revokedIn", "clear", "clearDue", "checking"]
+/** The words a reset said then that Alpha no longer says. */
+const unsaid: ReadonlyArray<unknown> = ["NotConfirmedItsYou", "ReviewExpired", "ReviewAlreadyOpen", "SetAScreenLock", "NoDeviceAuth", "MayStillGoAhead", "NotErased", "CouldNotTell", "Erased"]
+
+/** A reset an earlier build kept: read with only its review and what was said, a word no longer said read as a fresh machine has it. */
+function stored(key: string, start = Reset.initial) {
+  return Layer.provide(Reset.stored(key, start), filledStore(key, (kept) => {
+    const { said, ...rest } = fieldsOf(withoutFields(kept, dropped)) ?? {}
+    return { ...rest, said: unsaid.includes(said) ? Reset.initial.said : said }
+  }, Reset.parseState))
+}
+
 /** Erasing all data, handed over to Android's native `ElizaReset` plugin. */
-export const resetting = reacting(Reset, { keep: 1, open: launching, carry, timers })
+export const resetting = reacting({ ...Reset, stored }, { keep: 1, open: launching, carry, timers })

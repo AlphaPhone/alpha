@@ -22,7 +22,10 @@ survive a restart and a lost permission (AC-30).
 `key` names the subject on screen (`messages:thread:<id>`, `phone:recents:`,
 `contacts:contact:<id>`): it changes exactly when the subject changes.
 `ring` names the ringing call, not the caller: the same caller ringing again
-is a new ring.
+is a new ring. A state an earlier build kept while it also held a proposal,
+the proposals past and how many were approved is read without them, with
+the screen, the bar's target, the sheet height, the stage and the requests
+as they were.
 
 ```quint
 type Actor = Owner | Agent | Device

@@ -7,7 +7,7 @@ import { Machine as Contacts } from "../../gen/app__contacts.effect.vibe"
 import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone, clear, liveCall } from "../../gen/app__phone.effect.vibe"
 import { Machine as Voicemail } from "../../gen/app__phone__voicemail.effect.vibe"
-import { contained, following, reacting, started, together } from "../runtime/index.vibe"
+import { contained, filledStore, following, reacting, started, together, withoutFields } from "../runtime/index.vibe"
 import { Dialer } from "./phone.vibe"
 
 /** The actual shell app an entry in the communications stage can return to. */
@@ -15,7 +15,13 @@ export function commsViewOf(app: Comms.CommsApp): "Phone" | "Messages" | "Contac
   return app === "PhoneApp" ? "Phone" : app === "MessagesApp" ? "Messages" : "Contacts"
 }
 
-const machine = reacting(Comms, { keep: 1, open: [{ type: "voiceChanged", on: false }, "Device"] })
+// spec/app/phone/comms.md, "The comms state holds the screen's subject, the bar's target, the sheet height and the stage history"
+/** Comms kept while they also held a proposal, the proposals past and how many were approved: read without them. */
+function stored(key: string, start = Comms.initial) {
+  return Layer.provide(Comms.stored(key, start), filledStore(key, (kept) => withoutFields(kept, ["proposal", "past", "approved"]), Comms.parseState))
+}
+
+const machine = reacting({ ...Comms, stored }, { keep: 1, open: [{ type: "voiceChanged", on: false }, "Device"] })
 
 /** A request handed from owner-side search to the open Ask Alpha sheet. */
 export interface CommsPrompt {
