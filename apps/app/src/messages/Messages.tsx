@@ -527,7 +527,7 @@ function Compose({ runtime, title, addresses, thread }: MessagesProps & { title:
   const checking = here && uncertain(outgoing);
   const sendNow = { type: "send", supported: runtime.runSync(supported(state.recipients, pictures.length)), clear: clear(phone) } as const;
   const simReady = selectedSim === undefined ? state.sims <= 1 : subscriptions.some((sim) => sameSubscription(sim, selectedSim));
-  const sendable = (checking || simReady && (Boolean(text.trim()) || pictures.length > 0)) && can(sendNow);
+  const sendable = (checking || simReady && (Boolean(text.trim()) || pictures.length > 0) && text.length <= MMS_MAX_BODY) && can(sendNow);
   const submit = (event: MouseEvent<HTMLButtonElement>) => {
     if (!sendable) return;
     const trustedTap = event.nativeEvent.isTrusted && event.currentTarget.matches("[data-alpha-bar-send],[data-alpha-draft-send]");

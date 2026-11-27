@@ -58,7 +58,7 @@ export function NewMessageDock({ runtime, scope, contactsAllowed, draft, textare
   const checking = state.newSend.revision === revision && uncertain(state.outgoing);
   const supportedSend = runtime.runSync(supported(addresses.length, draft.pictures.length));
   const canPicture = editable && saved && !picking && draft.pictures.length < MMS_MAX_ATTACHMENTS && runtime.runSync(supported(1, 1));
-  const canSend = saved && hasContent && !picking && (checking || state.sims <= 1 || selected !== undefined)
+  const canSend = saved && hasContent && body.length <= MMS_MAX_BODY && !picking && (checking || state.sims <= 1 || selected !== undefined)
     && composer.can({ type: "sendNew", thread: recipient, recipients: addresses.length, visit, revision, supported: supportedSend, clear: clear(phone.state) });
   const subscriptions = runtime.runSync(Effect.flatMap(Drafts, (store) => store.subscriptions()));
   const recorder = voice.state?.recorder;
