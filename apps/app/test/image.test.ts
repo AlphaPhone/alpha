@@ -200,8 +200,8 @@ describe("Qualify and publish a release (spec/release/index.md, \"Story: Qualify
 
   it("refuses a build its verification recorded with test mocks, and one with no row at all (spec/release/index.md, \"A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate\")", async () => {
     const directory = scratch();
-    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { apks: [{ variant: "launcher", build: "release", testMocks: true }] }));
-    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { apks: [] }));
+    const mocked = await released("blockers", "--apk-manifest", write(directory, "mocked.json", { results: [{ variant: "launcher", mode: "release", testMocks: true }] }));
+    const empty = await released("blockers", "--apk-manifest", write(directory, "empty.json", { results: [] }));
     expect([mocked.ok, mocked.ok ? "" : mocked.said.includes("\"mocks\":true"), empty.ok]).toEqual([false, true, false]);
   });
 
@@ -294,7 +294,8 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     const run = join(directory, "run.json");
     const unsigned = join(directory, "launcher-release-unsigned.apk");
     writeFileSync(unsigned, "unsigned candidate bytes");
-    const verified = write(directory, "apk-manifest.json", { apks: [candidateRow()] });
+    const debugRow = candidateRow({ mode: "debug", sha256: digest("debug"), signed: true, signerSha256: digest("debug key"), distributable: false });
+    const verified = write(directory, "apk-manifest.json", { results: [debugRow, candidateRow()] });
     const lock = JSON.parse(readFileSync(place("../../eliza.lock.json"), "utf8")) as { remote: string; branch: string; commit: string };
     const upstream = write(directory, "upstream.json", { ...lock, status: "ahead", mergeBase: lock.commit });
     const candidate = (number: string, apks: string, reached = upstream) => released("candidate", "--run", run, "--number", number, "--attempt", "1", "--apk-manifest", apks, "--upstream", reached);
@@ -306,7 +307,7 @@ describe("Build a candidate and sign it (spec/release/index.md, \"Story: Build a
     expect(await candidate("121", verified, write(directory, "another.json", { ...lock, branch: "main", status: "ahead", mergeBase: lock.commit }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     const stage = () => (JSON.parse(readFileSync(run, "utf8")) as { state: { stage: string; attempt: number; reviewed: boolean } }).state;
     // spec/release/index.md, "A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate"
-    expect(await candidate("121", write(directory, "mocked.json", { apks: [candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
+    expect(await candidate("121", write(directory, "mocked.json", { results: [debugRow, candidateRow({ testMocks: true })] }))).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A build its verification found not distributable is no candidate, and its run number is spent"
     expect(await candidate("121", verified)).toMatchObject({ ok: false, tag: "ReleaseRefused" });
     // spec/release/index.md, "A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version"
