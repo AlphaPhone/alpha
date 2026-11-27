@@ -46,6 +46,8 @@ export interface CalendarScene {
   events: FakeEvent[];
   /** What `/api/lifeops/calendar/feed` reports as its `state` (defaults to `"complete"`). */
   feedState?: "complete" | "partial" | "unavailable";
+  /** How many times `/api/lifeops/calendar/feed` was read. */
+  feedReads?: number;
   /** The summary `/api/lifeops/calendar/calendars` lists for the agent's calendar (defaults to eliza's own, "Eliza Calendar"). */
   summary?: string;
   /** Every write the agent took, as `<method> <id>`, and the idempotency keys it took them under. */
@@ -195,6 +197,7 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
       if (request.method !== "GET" || url.pathname !== `${base}/feed`) return;
       if (scene.silent) return never();
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
+      scene.feedReads = (scene.feedReads ?? 0) + 1;
       const [timeMin, timeMax] = [url.searchParams.get("timeMin") ?? "", url.searchParams.get("timeMax") ?? ""];
       const [from, to] = [Date.parse(timeMin), Date.parse(timeMax)];
       const events = scene.events.filter((event) => Date.parse(event.startAt) < to && Date.parse(event.endAt) > from);

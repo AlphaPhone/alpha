@@ -76,6 +76,8 @@ effect function tellOwner() {
   const changed = before.owner !== owner
   if (changed) {
     (try Shown).drop("Google")
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
+    ;(try Shown).listed([])
     ;(try Requests).clear()
     ;(try LinkCache).invalidate()
   }

@@ -974,8 +974,8 @@ describe("on a phone", () => {
   });
 
   /** Ask Alpha alone on `world`, with Calendar's card, and a way to send a reply that files `request` titled `title` at `hours` tomorrow. */
-  async function askingCalendar(world: ReturnType<typeof morning>) {
-    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar"));
+  async function askingCalendar(world: ReturnType<typeof morning>, ...more: Parameters<typeof only>) {
+    const { alpha } = await open(world, only("home", "assistant", "assistant/calendar", ...more));
     const ask = assistant.runtime(alpha);
     const agent = calendar.runtime(alpha);
     await until(alpha, ask, Composer, (s) => s.slot === "Open");
@@ -1081,6 +1081,67 @@ describe("on a phone", () => {
       Boolean(button("Approve")),
       world.calendar.writes,
     ]).toEqual([true, false, true, []]);
+  });
+
+  it("An unavailable Google feed takes the agent's rows away but not the name it lists, on Home and after Calendar is opened (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": eliza 436741a67bdf answers its resident calendar's empty window with state "unavailable" (plugin-calendar routes.vibe:104) while it lists that calendar as Eliza Calendar (providers.vibe:237), as on a fresh agent with no Google
+    const world = morning(true);
+    world.calendar.events = [];
+    world.calendar.feedState = "unavailable";
+    const { alpha, agent, file } = await askingCalendar(world, "view:Calendar");
+    await file("approval-unavailable", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    const named = () => [askedCard().includes("Eliza Calendar"), askedCard().includes("Agent Calendar")];
+    expect(named()).toEqual([true, false]);
+    // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once": opening Calendar reads the feed again, which still says unavailable
+    const reads = world.calendar.feedReads ?? 0;
+    await openCalendar(alpha);
+    await vi.waitFor(() => expect(world.calendar.feedReads ?? 0).toBeGreaterThan(reads));
+    await until(alpha, agent, View, (s) => s.front && !s.connected);
+    await drawn(() => {});
+    expect([...named(), Boolean(button("Approve")), world.calendar.writes]).toEqual([true, false, true, []]);
+  });
+
+  it("Signing out forgets the name the agent listed for the owner before, so the next card reads the list again (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    const world = morning(true);
+    world.calendar.summary = "Family";
+    const { alpha, agent, file } = await askingCalendar(world, "view:Calendar");
+    const goHome = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" })));
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.connected && s.owner > 0);
+    await goHome();
+    world.signedIn = false;
+    world.calendar.summary = undefined;
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.owner === 0);
+    await goHome();
+    await file("approval-signed-out", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Eliza Calendar", "Family", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
+  });
+
+  it("A card names the calendar the agent lists now, never one a Google account that went away listed before (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    const world = morning(true);
+    world.calendar.summary = "Family";
+    const { alpha, agent, file } = await askingCalendar(world, "view:Calendar");
+    const goHome = () => alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" })));
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && s.connected && s.owner > 0);
+    await goHome();
+    world.calendar.summary = undefined;
+    world.calendar.feedState = "unavailable";
+    world.calendar.events = [];
+    const reads = world.calendar.feedReads ?? 0;
+    await openCalendar(alpha);
+    await vi.waitFor(() => expect(world.calendar.feedReads ?? 0).toBeGreaterThan(reads));
+    await until(alpha, agent, View, (s) => s.front && !s.connected);
+    await goHome();
+    await file("approval-account-gone", "camera setup", 9, "primary");
+    await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
+    await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    expect(["Eliza Calendar", "Family", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
   });
 
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
