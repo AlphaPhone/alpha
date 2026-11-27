@@ -289,68 +289,6 @@ export function refusedForFunds(cause: unknown, depth = 0): boolean {
   return refusedForFunds(data.data, depth + 1) || refusedForFunds(data.cause, depth + 1)
 }
 
-export type CloudSpeechFaultKind = VoiceFault
-
-export interface CloudSpeechFault {
-  readonly fault: CloudSpeechFaultKind
-  readonly wait: number
-  readonly notice: string | undefined
-}
-
-function errorToken(cause: unknown, depth = 0): string {
-  if (depth > 4 || cause === undefined || cause === null) return ""
-  if (typeof cause === "string") return cause.toLowerCase()
-  const data = asRecord(cause)
-  if (data === undefined) return ""
-  for (const field of ["code", "reason", "error"] as const) {
-    const value = data[field]
-    if (typeof value === "string" && value !== "") return value.toLowerCase()
-  }
-  const nested = errorToken(data.data, depth + 1) || errorToken(data.cause, depth + 1)
-  if (nested !== "") return nested
-  return typeof data.message === "string" ? data.message.toLowerCase() : ""
-}
-
-function retryWaitSeconds(cause: unknown, depth = 0): number {
-  if (depth > 4 || cause === undefined || cause === null) return 0
-  const data = asRecord(cause)
-  if (data === undefined) return 0
-  for (const field of ["retryAfterSeconds", "retryAfter", "wait"] as const) {
-    const value = data[field]
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.ceil(value)
-  }
-  return retryWaitSeconds(data.data, depth + 1) || retryWaitSeconds(data.cause, depth + 1)
-}
-
-/** Classify a Cloud speech failure for route fallback/retry and an actionable owner-facing notice when fallback is unavailable. */
-export function cloudSpeechFault(cause: unknown): CloudSpeechFault {
-  if (refusedForFunds(cause)) {
-    return { fault: "AccountRefused", wait: 0, notice: "Voice needs more Eliza Cloud credits. Add credits, then try again." }
-  }
-  const token = errorToken(cause)
-  const data = asRecord(cause)
-  const status = typeof data?.status === "number" ? data.status : typeof asRecord(data?.data)?.status === "number" ? Number(asRecord(data?.data)?.status) : 0
-  if (token === "voice-http-503" || token.includes("503") || status === 503) {
-    return { fault: "Brief", wait: 0, notice: "Voice unavailable" }
-  }
-  if (token === "voice-preparation-timeout" || token.includes("timeout")) {
-    return { fault: "Brief", wait: 0, notice: "Voice timed out" }
-  }
-  if (token === "rate_limited" || token === "limit_reached" || token.includes("429") || status === 429) {
-    return { fault: "RateLimited", wait: retryWaitSeconds(cause), notice: "Too many voice requests. Try again shortly." }
-  }
-  if (token === "unauthorized" || token === "sign-in-required" || token === "sign_in_required" || status === 401) {
-    return { fault: "SignInNeeded", wait: 0, notice: "Sign in to use Cloud voice." }
-  }
-  if (token === "denied" || token === "permission-denied") {
-    return { fault: "NotTheNetwork", wait: 0, notice: "Microphone access is off" }
-  }
-  if (token === "no-microphone" || token === "no_microphone") {
-    return { fault: "NotTheNetwork", wait: 0, notice: "No usable microphone" }
-  }
-  return { fault: "NotTheNetwork", wait: 0, notice: undefined }
-}
-
 function asString(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
