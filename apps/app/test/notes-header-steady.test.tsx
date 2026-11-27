@@ -74,7 +74,7 @@ function expectSavedPinnedNote(world: Scene, runtime: ReturnType<typeof notes.ru
   expect(runtime.runSync(NoteContent).snapshot().draft?.pinned).toBeUndefined();
 }
 
-describe(`The note's header stays steady while its saves land (spec/app/notes/actions.md, "The owner opens the menu over the note the editor shows saved, with nothing else of Notes over it"; spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete, as v119's did")`, () => {
+describe(`The note's header stays steady while its saves land (spec/app/notes/actions.md, "The owner opens the menu over the note the editor shows saved, with nothing else of Notes over it"; spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete")`, () => {
   it("draws More enabled over a new note before its first save, and keeps it in place over a saved note on each edit before the autosave lands", async () => {
     const world = scene();
     const { alpha, runtime } = await newNote(world);
@@ -94,7 +94,7 @@ describe(`The note's header stays steady while its saves land (spec/app/notes/ac
   });
 });
 
-describe(`More over a new note offers v119's Share, Pin and Delete (spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete, as v119's did")`, () => {
+describe(`More over a new note offers v119's Share, Pin and Delete (spec/app/notes/editor.md, "More over a new note offers Share, Pin and Delete")`, () => {
   it("Delete discards the new note, untouched or written, and nothing is saved", async () => {
     const world = scene();
     const { alpha, runtime } = await newNote(world);

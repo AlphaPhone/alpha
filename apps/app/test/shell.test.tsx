@@ -172,7 +172,7 @@ describe("the shell", () => {
     });
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
 
-    // spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"
+    // spec/app/shell/gestures.md, "On the launcher a swipe up from the bottom bar goes Home; nothing else is a shell swipe"
     await press("Notes");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Notes");
     await swiped({ x: 200, y: Math.round(height / 2) }, { x: 200, y: Math.round(height / 2) - 100 });

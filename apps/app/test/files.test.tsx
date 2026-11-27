@@ -518,7 +518,7 @@ describe("Files on a phone", () => {
     // spec/app/files/preview.md, "Story: Look at a file": v119's live paper cards (selection-adapter.ts:272-283), eight numbered lines a card, as the demo's brief showed (wn-057, v100-15)
     expect([shownText(), textCards()]).toEqual([revised, [["notes.txt", "1 2 3 4 5 6 7 8"], ["notes.txt (continued)", "9"]]]);
 
-    // spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"
+    // spec/app/files/preview.md, "Ask Alpha and Open elsewhere hand the file on and change nothing here"
     world.files.texts[updated.path] = "These are the altered notes";
     await choose("Ask Alpha", "File actions");
     await vi.waitFor(() => expect(document.body.textContent).toContain("Alpha could not attach this file"));

@@ -450,7 +450,7 @@ effect function excerpt(content: Content, page: number, id: string, name: string
   return { id, name: name.slice(0, nameLimit - suffix.length) + suffix, mimeType: image.type, data: base64(new Uint8Array(bytes)) }
 }
 
-// spec/app/files/preview.md, "Ask Alpha, Transcribe and Open elsewhere hand the file on and change nothing here"; spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
+// spec/app/files/preview.md, "Ask Alpha and Open elsewhere hand the file on and change nothing here"; spec/app/files/preview.md, "A file that holds a verification code or another secret is never handed to Ask Alpha"
 effect function readAttachment(prior: FileSelection, allowExcerpt: boolean): (Attached | undefined)!!(FilePreview | Documents) {
   const machine = try Shown.Machine
   const shown = try machine.get()
