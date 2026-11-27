@@ -964,9 +964,7 @@ As in the existing app, a conversation that could not start or went on
 failing shows no words: voice returns to idle at once, and Talk is offered
 again. Talk asked for during a call or while speech is unavailable, from
 Ask Alpha or the communications bar, does nothing and shows no words, and
-speech that cannot be played ends the turn the same way, with no words. A
-call state the phone has not told is not a call: as in the Sunday demo
-build, Talk asked for then starts.
+speech that cannot be played ends the turn the same way, with no words.
 
 ```quint
 pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
@@ -994,7 +992,9 @@ line, then or when Alpha shows again. A call reported by the phone or a
 matching native speech request can identify this stop. If the activity
 hid during Talk, remember whether a call was observed until Alpha shows
 again; a plain app switch clears the pending cause the same way. Only an
-explicit Talk request starts a new conversation after the call.
+explicit Talk request starts a new conversation after the call. A call
+state the phone has not told is not a call, and does not keep Talk from
+starting.
 
 ```quint
 pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
@@ -1375,7 +1375,10 @@ A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
 Dictation asked for on a phone without speech does not start, and a
 transcript that would make the text too long is left out; neither shows
-words.
+words. A call state the phone has not told does not keep dictation from
+starting. A messaging bar's recorder shows no words: its stage, a failed
+transcription included, is said only to a screen reader, and its retry,
+discard and stop controls stay.
 In a Messages conversation, stopping a recording puts a successful transcript
 straight into that conversation's editable draft. Leaving the conversation
 before it arrives discards it.

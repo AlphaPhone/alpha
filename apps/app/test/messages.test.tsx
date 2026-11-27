@@ -115,6 +115,22 @@ async function dictateToMaya(alpha: Awaited<ReturnType<typeof openImage>>["alpha
   await ready(messageView, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
 }
 
+/** The words `element` shows on screen, leaving out what only a screen reader hears. */
+function shownWords(element: Element | null) {
+  const copy = element?.cloneNode(true);
+  if (!(copy instanceof Element)) return undefined;
+  for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+  return copy.textContent?.trim();
+}
+
+/** Wait until Maya's message field reads `text`. */
+async function mayaReads(text: string) {
+  await vi.waitFor(async () => {
+    await drawn(() => undefined);
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Text Maya"]')?.value).toBe(text);
+  }, { timeout: 12_000 });
+}
+
 const toastsIssued = async (alpha: Awaited<ReturnType<typeof openImage>>["alpha"]) =>
   (await alpha.runtime.runPromise(Effect.flatMap(Toasts, (toasts) => toasts.get()))).issued;
 
@@ -392,6 +408,9 @@ describe("Messages on an Alpha image", () => {
     await ready(alpha.runtime, Messages, "Recipient picker open", (s) => s.newDraft.picking);
     await press("Dictate a text to Ben");
     await ready(messages.runtime(alpha), Voice, "New message recording", (s) => s.recorder.field === "MessagesBar" && s.recorder.stage === "Recording");
+    // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends": the bar's recorder shows no words
+    await drawn(() => undefined);
+    expect(shownWords(document.querySelector("[data-alpha-bar-recorder]"))).toBe("");
     await press("Stop recording");
     await ready(messages.runtime(alpha), Voice, "New message transcript returned", (s) => s.recorder.stage === "Closed");
     const dictated = `${body} Dictated note`;
@@ -1119,6 +1138,41 @@ describe("Messages on an Alpha image", () => {
     const tab = runtime.runSync(Effect.map(Tabs.use((machine) => machine.get()), (state) => state.selected));
     const page = runtime.runSync(Effect.flatMap(Pages, (pages) => pages.of(tab)));
     await ready(page, Page, "Browser link page", (state) => state.phase === "Shown" && !state.secure);
+  });
+
+  it(`A messaging bar's recorder shows no words, and a failed transcription keeps its retry and discard controls (spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends")`, async () => {
+    const world = image();
+    world.voice.transcriptionFailures = 1;
+    const alpha = await readyImageWithIdlePhone(world);
+    await openMaya(alpha);
+    const messageView = messages.runtime(alpha);
+    const before = await toastsIssued(alpha);
+    const bar = () => document.querySelector("[data-alpha-bar-recorder]");
+    await press("Dictate a text to Maya");
+    await ready(messageView, Voice, "Messages recording", (state) => state.recorder.field === "MessagesBar" && state.recorder.stage === "Recording");
+    await drawn(() => undefined);
+    expect([shownWords(bar()), bar()?.querySelector("[role=status]")?.textContent]).toEqual(["", "Recording"]);
+    await press("Stop recording");
+    await ready(messageView, Voice, "Messages transcription failed", (state) => state.recorder.stage === "Recorded");
+    await drawn(() => undefined);
+    expect([shownWords(bar()), bar()?.querySelector("[role=status]")?.textContent, [...(bar()?.querySelectorAll("button") ?? [])].map((one) => one.getAttribute("aria-label"))])
+      .toEqual(["", "Couldn’t transcribe", ["Try transcription again", "Discard transcription"]]);
+    await press("Try transcription again");
+    await ready(messageView, Voice, "Messages transcript returned", (state) => state.recorder.stage === "Closed");
+    await mayaReads("Dictated note");
+    expect([await toastsIssued(alpha) - before, world.telephony.sent]).toEqual([0, []]);
+  });
+
+  it(`Dictation starts while the phone has not told its call state, as the Sunday demo build did (spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends")`, async () => {
+    const world = image();
+    world.telephony.callStateKnown = false;
+    const { alpha } = await openImage(world);
+    await ready(alpha.runtime, Shell, "Alpha image admitted", (state) => state.image);
+    await ready(alpha.runtime, Phone, "Unknown call state", (state) => state.telecom === "CallUnknown");
+    await openMaya(alpha);
+    await dictateToMaya(alpha);
+    await mayaReads("Dictated note");
+    expect(world.telephony.sent).toEqual([]);
   });
 
   it(`Dictation that cannot start on this phone does not start and shows no words (spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends")`, async () => {

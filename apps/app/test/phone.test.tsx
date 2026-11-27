@@ -407,7 +407,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (s) => s.dial.status === "Loaded");
     expect([world.telephony.dialed, world.telephony.placed]).toEqual([["+14155550100", "+14155550100"], []]);
 
-    // spec/app/voice/index.md, "A failed conversation ends quietly: why it failed is kept only until voice returns to idle, and nothing is shown": a call state the phone cannot tell is no call, so Talk from the bar starts
+    // spec/app/voice/index.md, "A phone call ends Talk quietly, and only the owner starts it again": a call state the phone has not told is no call, so Talk from the bar starts
     await until(alpha, alpha.runtime, Phone, (s) => s.front && s.telecom === "CallUnknown");
     await press("Talk");
     await vi.waitFor(async () => {

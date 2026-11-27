@@ -953,6 +953,21 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
     expect(world.voice.startLiveCaptureCalls).toBe(2);
+
+    const again = await issued();
+    await seen(false);
+    world.telephony.live = [{ id: "talk-shown-in-call", state: "active", connectedAt: world.now }];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "OrdinaryCall");
+    await seen(true);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off" && state.callNotice === "NoCallNotice");
+    await drawn(() => undefined);
+    expect([await issued() - again, world.voice.activeMicSession]).toEqual([0, undefined]);
+    world.telephony.live = [];
+    await drawn(() => world.telephony.report());
+    await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
     await press("Stop voice conversation");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
   });
