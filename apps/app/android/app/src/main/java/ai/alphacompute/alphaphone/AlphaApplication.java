@@ -1,4 +1,4 @@
-// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/platform/adoption.md, "Background work the earlier Alpha queued never runs: at every start the phone cancels each job queued for the work manager the earlier Alpha shipped, and only those"
+// spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/platform/adoption.md, "Background work the earlier Alpha queued under a worker this Alpha does not ship never runs: at every start the phone cancels that work, and only that"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.os.agent.AgentService;

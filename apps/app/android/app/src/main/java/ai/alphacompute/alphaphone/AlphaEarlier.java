@@ -1,11 +1,11 @@
-// spec/app/platform/adoption.md, "The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read"; spec/app/platform/adoption.md, "Background work the earlier Alpha queued never runs: at every start the phone cancels each job queued for the work manager the earlier Alpha shipped, and only those"
+// spec/app/platform/adoption.md, "The page reads the earlier Alpha's encrypted store where it is and never writes it: it may only read one of the earlier page's own slots, or clear it while it still holds what was read"; spec/app/platform/adoption.md, "Background work the earlier Alpha queued under a worker this Alpha does not ship never runs: at every start the phone cancels that work, and only that"
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.securestore.nativeonly.JsonCredentialSlots;
-import android.app.job.JobInfo;
-import android.app.job.JobScheduler;
 import android.content.Context;
+import androidx.work.WorkManager;
 import java.io.File;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /** What the earlier Alpha left on the phone: its encrypted slot store, read where it is, and the jobs it queued. */
@@ -16,7 +16,6 @@ final class AlphaEarlier {
  private static final String KEY = "alpha.connection.aes.v1";
  private static final String DIGEST = "[a-f0-9]{64}";
  private static final String SMS_DRAFT = "sms-draft:v1:(new|thread:[1-9][0-9]{0,18})";
- private static final String WORK_MANAGER_SERVICE = "androidx.work.impl.background.systemjob.SystemJobService";
  private static final int MIB = 1024 * 1024;
 
  /** The earlier page's own drafts and pending records, which an area of this Alpha moves through `AlphaConnection`. */
@@ -68,16 +67,16 @@ final class AlphaEarlier {
   if (directory(context).isDirectory()) store(context).remove(slot);
  }
 
- /** Cancels every job of this app queued for the work manager the earlier Alpha shipped and this one does not. */
+ /**
+  * The workers the earlier Alpha queued its work under and this Alpha does not ship: hosted results and source renewals,
+  * Calendar's deletion window and the Notes Trash backstop. The work manager tags each request with its worker's class name.
+  */
+ static final List<String> EARLIER_WORKERS = List.of("ai.alphacompute.alphaphone.HostedDeliveryWorker",
+  "ai.alphacompute.alphaphone.DeletionWorker", "ai.alphacompute.alphaphone.AlphaNoteAudioPlugin$NotesTrashBackstopWorker");
+
+ /** Cancels the work the earlier Alpha queued under a worker this Alpha does not ship, in the work manager both share, and nothing of this Alpha's own. */
  static void retireWork(Context context) {
-  JobScheduler jobs = context.getSystemService(JobScheduler.class);
-  if (jobs == null) return;
-  try {
-   for (JobInfo job : jobs.getAllPendingJobs()) {
-    if (WORK_MANAGER_SERVICE.equals(job.getService().getClassName())) jobs.cancel(job.getId());
-   }
-  } catch (RuntimeException cancelledAtTheNextStart) {
-   android.util.Log.w("AlphaEarlier", "Earlier work not cancelled yet", cancelledAtTheNextStart);
-  }
+  WorkManager work = WorkManager.getInstance(context);
+  for (String worker : EARLIER_WORKERS) work.cancelAllWorkByTag(worker);
  }
 }
