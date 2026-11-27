@@ -1,6 +1,6 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, SHEET_EASE, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
-import { type MouseEvent, type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type MouseEvent, type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine as useComms } from "../gen/app__phone__comms.react.ts";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { type Shell, type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
@@ -77,6 +77,7 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
   const tabReturnRef = useRef(false);
   const slidRef = useRef<Risen["slide"]>(undefined);
   const slide = risen.slide;
+  const showing = shell?.trail.at(-1);
   const risenOver = useCallback(() => setRisen((was) => ({ ...was, overHome: false })), []);
   // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": Phone's own tabs on its Contacts tab swap at once (45f6bed30 prototype/phone-adapter.ts:256-270).
   const holdLayer = useCallback((node: HTMLDivElement | null) => {
@@ -84,16 +85,14 @@ function useAppLayer(shell: Shell | undefined, landscape: boolean, emergency: bo
     if (slide !== undefined && slidRef.current !== slide) {
       slidRef.current = slide;
       const fromTabs = slide.from === "Contacts" && slide.to === "Phone" && tabReturnRef.current;
-      tabReturnRef.current = false;
       if (!fromTabs) slideStage(node, slide.side);
     }
+    if (showing !== "Contacts") tabReturnRef.current = false;
     // spec/app/shell/index.md, "The shell holds the apps opened on the way here, the Apps drawer, how far Ask Alpha is raised, and what this phone admits": Home shows under a rising app until the rise is over, ended or stopped early.
     const stopped = (event: Event) => { if (event.target === node) risenOver(); };
     node.addEventListener("animationcancel", stopped);
     return () => node.removeEventListener("animationcancel", stopped);
-  }, [slide, risenOver]);
-  const showing = shell?.trail.at(-1);
-  useEffect(() => { tabReturnRef.current = false; }, [showing]);
+  }, [showing, slide, risenOver]);
   if (shell !== undefined && risen.view !== showing) {
     // spec/app/shell/index.md, "Opening another communications app from the stage keeps Ask Alpha open": an emergency call is never staged (45f6bed30 prototype/model.js:6286).
     const staged = shell.assistant === "Sheet" && !landscape && !emergency && isCommsView(risen.view) && isCommsView(showing);
