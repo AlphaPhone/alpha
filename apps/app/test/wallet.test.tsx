@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { Machine as Ledger } from "../gen/app__wallet.effect.vibe";
 import { agents, own, readingOf } from "../gen/app__wallet.ts";
@@ -270,6 +270,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     world.wallet.stalled = true;
     await pressOnTop("Approve");
     await until(first.alpha, first.runtime, Sending, (s) => s.stage === "Deciding");
+    await vi.waitFor(() => expect(world.wallet.decisions).toEqual([{ id: 1, decision: "approve" }]));
     await first.close();
 
     world.wallet.stalled = false;

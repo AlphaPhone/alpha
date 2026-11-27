@@ -694,7 +694,7 @@ describe("Messages on an Alpha image", () => {
     });
     await expect(alpha.runtime.runPromise(readAgentSms(sms, call))).resolves.toBeUndefined();
     const waitForRead = (count: number) => vi.waitFor(async () => {
-      await later(alpha, 500);
+      if (world.telephony.smsQueries.length < count) await later(alpha, 100);
       expect(world.telephony.smsQueries).toHaveLength(count);
     }, { timeout: 4_000 });
     await waitForRead(2);
