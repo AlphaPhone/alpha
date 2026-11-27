@@ -1,0 +1,24 @@
+{
+  "key": "alpha/app/phone/comms@1",
+  "spec": "spec/app/phone/comms.md",
+  "shape": "dcf61a2fb7ca8991",
+  "state": {
+    "app": "MessagesApp",
+    "subject": "ListSubject",
+    "key": "messages:list:",
+    "target": "PersonTarget",
+    "height": "SheetClosed",
+    "voice": false,
+    "stage": [],
+    "callLive": false,
+    "emergency": false,
+    "ring": "",
+    "proposal": {
+      "tag": "NoProposal"
+    },
+    "past": [],
+    "briefed": "",
+    "approved": 0,
+    "requests": []
+  }
+}

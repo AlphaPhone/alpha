@@ -1,0 +1,102 @@
+{
+  "key": "alpha/app/inbox/index@1",
+  "spec": "spec/app/inbox/index.md",
+  "shape": "daaff64c78c48bbd",
+  "state": {
+    "signedIn": false,
+    "accounts": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "connected": [],
+    "checked": 0,
+    "selected": {
+      "account": 0,
+      "folder": "Incoming",
+      "query": ""
+    },
+    "list": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "further": false,
+    "failure": "Fine",
+    "searchable": false,
+    "pages": 0,
+    "total": 0,
+    "cursor": 0,
+    "spent": [],
+    "saved": false,
+    "moved": false,
+    "chosen": [],
+    "revision": 0,
+    "doubtful": false,
+    "searching": false,
+    "kept": {
+      "account": 0,
+      "folder": "Incoming",
+      "query": ""
+    },
+    "keptPages": 0,
+    "keptTotal": 0,
+    "keptCredential": 0,
+    "count": {
+      "account": 0,
+      "unread": 0,
+      "more": false,
+      "at": 0,
+      "fresh": false
+    }
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686, d263ff7f70",
+      "until": "729a506fc0 (#1788)",
+      "state": {
+        "signedIn": false,
+        "accounts": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "connected": [],
+        "checked": 0,
+        "selected": {
+          "account": 0,
+          "folder": "Incoming",
+          "query": ""
+        },
+        "list": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "further": false,
+        "failure": "Fine",
+        "searchable": false,
+        "pages": 0,
+        "total": 0,
+        "cursor": 0,
+        "spent": [],
+        "saved": false,
+        "moved": false,
+        "chosen": [],
+        "revision": 0,
+        "doubtful": false,
+        "kept": {
+          "account": 0,
+          "folder": "Incoming",
+          "query": ""
+        },
+        "keptPages": 0,
+        "keptTotal": 0,
+        "keptCredential": 0,
+        "count": {
+          "account": 0,
+          "unread": 0,
+          "more": false,
+          "at": 0,
+          "fresh": false
+        }
+      }
+    }
+  ]
+}

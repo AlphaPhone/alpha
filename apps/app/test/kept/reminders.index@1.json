@@ -1,0 +1,54 @@
+{
+  "key": "alpha/app/reminders/index@1",
+  "spec": "spec/app/reminders/index.md",
+  "shape": "8e061c7b3c009229",
+  "state": {
+    "owner": 1,
+    "today": 10,
+    "sync": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "write": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "lists": [
+      {
+        "id": 1,
+        "isDefault": true,
+        "revision": 1
+      }
+    ],
+    "nextListId": 2,
+    "items": [],
+    "nextItemId": 1,
+    "hiddenId": 0,
+    "view": {
+      "tag": "Overview"
+    },
+    "sort": "SortDue",
+    "filter": {
+      "showCompleted": false,
+      "flaggedOnly": false,
+      "priority": "NoPriority"
+    },
+    "searchOpen": false,
+    "selectedId": 0,
+    "undo": {
+      "holding": "Free",
+      "until": 0
+    },
+    "undoData": {
+      "kind": "NoUndo",
+      "itemId": 0,
+      "prevCompleted": false,
+      "prevDueDay": 0,
+      "prevHasDue": false,
+      "prevSnoozedUntil": 0,
+      "prevRevision": 0
+    },
+    "front": false,
+    "again": false
+  }
+}

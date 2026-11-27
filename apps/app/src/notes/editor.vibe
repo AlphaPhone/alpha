@@ -8,7 +8,7 @@ import { NoteStore } from "../platform/notes.vibe"
 import { type Agent } from "../platform/agent.vibe"
 import { ownerAt } from "../platform/owner.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Job, answer, migratedStore, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, answer, filledStore, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
 import { type Collection, type DraftWords, NoteContent, formatOf, fromSaved, hasContent, newWords, numberOf, wordsOf } from "./content.vibe"
 
 export type Fields = Pick<DraftWords, "title" | "body" | "items" | "kind" | "pinned">
@@ -296,17 +296,11 @@ const binning = started(effect {
   })
 }, "delete the note the owner asked to delete once its save lands")
 
-/** An editor kept before a Delete could wait on a save has no `binning`: it is read as asking for none, so its draft is not set aside. */
-effect function editorRecord(raw: string | undefined): (string | undefined)!! {
-  if (raw === undefined) return undefined
-  const fields = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
-  if (fields === undefined || "binning" in fields) return raw
-  const migrated = Editor.decodeState({ binning: Editor.initial.binning, ...fields }) catch () => undefined
-  return migrated === undefined ? raw : JSON.stringify(migrated)
-}
-
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** An editor kept before a Share or a Delete could wait on a save is read as waiting for neither, so its draft is not set aside. */
 function stored(key: string, start = Editor.initial) {
-  return Layer.provide(Editor.stored(key, start), migratedStore(key, editorRecord))
+  const { asked, binning } = Editor.initial
+  return Layer.provide(Editor.stored(key, start), filledStore(key, (kept) => ({ asked, binning, ...kept }), Editor.parseState))
 }
 
 /** On leaving or reloading Notes, the saved words live in the phone vault, with only revision metadata in the machine. */

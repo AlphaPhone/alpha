@@ -31,6 +31,15 @@ module pure {
       ...(stampAt ? { at: now } : {}),
     }
   }
+  /** The fields of `value` where it is a JSON object, as a kept state is. @throws {never} */
+  export function fieldsOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : undefined
+  }
+  /** `value` with each of `fields` it lacks, where it is a JSON object, and as it was otherwise. @throws {never} */
+  export function withFields(value: unknown, fields: Readonly<Record<string, unknown>>): unknown {
+    const kept = fieldsOf(value)
+    return kept === undefined ? value : { ...fields, ...kept }
+  }
   /** Whether a stored-layer failure is `NotAState` rather than a transient store read error. @throws {never} */
   export function isNotAState(cause: unknown): boolean {
     return typeof cause === "object" && cause !== null && "_tag" in cause && (cause as { readonly _tag?: unknown })._tag === "NotAState"
@@ -43,8 +52,8 @@ module pure {
     return correlationKeys.some((key) => key in ev) && !correlationKeys.some((key) => key in lo)
   }
 }
-import { isNotAState, isUnticketedLost, stamped, untimed, written } from pure
-export { stamped, untimed }
+import { fieldsOf, isNotAState, isUnticketedLost, stamped, untimed, withFields, written } from pure
+export { fieldsOf, stamped, untimed, withFields }
 
 /** What a transition that returns effects gives: the state it led to and what it asks of the world. */
 export interface Moved<S, Fx> {
@@ -191,6 +200,22 @@ export function migratedStore(key: string, migrate: (raw: string | undefined) =>
   return Layer.effect(KeyValueStore.KeyValueStore, effect {
     const store = try KeyValueStore.KeyValueStore
     return KeyValueStore.make({ ...store, get: (name: string) => name === key ? Effect.flatMap(store.get(name), migrate) : store.get(name) })
+  })
+}
+
+/**
+ * The store for a state kept in a shape an earlier build wrote: `filled` brings what is kept under `key` to today's
+ * shape, giving each field it lacks the value a fresh machine starts with and dropping each it no longer has, and
+ * `parse` says whether that is a state. A state in today's shape, and what is still not a state after it is filled, are
+ * read as they were, so that the one is never changed and the other is set aside.
+ */
+export function filledStore(key: string, filled: (kept: Readonly<Record<string, unknown>>) => unknown, parse: (input: unknown) => unknown) {
+  return migratedStore(key, effect (raw: string | undefined) => {
+    if (raw === undefined) return undefined
+    const kept = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)))(raw) catch () => undefined
+    if (kept === undefined || parse(kept) !== undefined) return raw
+    const state = parse(filled(kept))
+    return state === undefined ? raw : JSON.stringify(state)
   })
 }
 

@@ -11,7 +11,7 @@ import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
 import { Launcher, type Presentation, type Why } from "../platform/launcher.vibe"
-import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, due, filledStore, following, hearing, reacting, run, started, untimed, together } from "../runtime/reactor.vibe"
 import { createShelf } from "../runtime/shelf.vibe"
 import type { HomeAsk, HomeNoticeMessage } from "@repo/ui"
 import { type Said, say } from "../notices/toasts.vibe"
@@ -345,10 +345,16 @@ const shelfLifecycle = started(effect {
   }))
 }, "clearing retired Home notices")
 
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** Home kept while it held its own search and app menu, which Apps holds now: read without them. */
+function storedHome(key: string, start = Home.initial) {
+  return Layer.provide(Home.stored(key, start), filledStore(key, ({ query: _query, menu: _menu, ...kept }) => kept, Home.parseState))
+}
+
 /** Home's machine, kept across restarts for its numbers, and what tells it of the phone and the shell. */
 export const home = together(
   addHomeLayer,
-  reacting(Home, {
+  reacting({ ...Home, stored: storedHome }, {
     keep: 1,
     open: [{ type: "restart" }, owner],
     carry,

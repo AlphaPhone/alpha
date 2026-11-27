@@ -1,0 +1,39 @@
+{
+  "key": "alpha/app/startup/access@1",
+  "spec": "spec/app/startup/access.md",
+  "shape": "0333796f4d1b3df9",
+  "state": {
+    "begun": false,
+    "steps": [],
+    "pregrants": false,
+    "grants": {},
+    "reads": {},
+    "known": [],
+    "promptless": [],
+    "off": [],
+    "stale": [],
+    "choices": {},
+    "kept": {},
+    "ahead": 0,
+    "acted": [],
+    "prompting": false,
+    "promptFor": "Notifications",
+    "since": 0,
+    "stalled": false,
+    "store": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "notice": "Quiet",
+    "covered": false,
+    "finish": {
+      "setUp": false,
+      "created": false,
+      "allSet": false,
+      "silent": false,
+      "trouble": "NoTrouble"
+    },
+    "look": "NotLooking",
+    "target": "Notifications"
+  }
+}

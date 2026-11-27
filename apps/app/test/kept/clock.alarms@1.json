@@ -1,0 +1,28 @@
+{
+  "key": "alpha/app/clock/alarms@1",
+  "spec": "spec/app/clock/alarms.md",
+  "shape": "193719e91c48cdd5",
+  "state": {
+    "issued": 0,
+    "items": [],
+    "hidden": {
+      "id": 0,
+      "hour": 0,
+      "minute": 0,
+      "daysMask": 0,
+      "enabled": false,
+      "snoozeMinutes": 10,
+      "vibrate": true,
+      "phase": "Idle",
+      "fireAt": 0,
+      "snoozeUntil": 0,
+      "missed": false,
+      "revision": 0
+    },
+    "hasHidden": false,
+    "undo": {
+      "holding": "Free",
+      "until": 0
+    }
+  }
+}

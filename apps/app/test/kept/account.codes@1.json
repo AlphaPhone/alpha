@@ -1,0 +1,25 @@
+{
+  "key": "alpha/app/account/codes@1",
+  "spec": "spec/app/account/codes.md",
+  "shape": "ceff845c5fab996d",
+  "state": {
+    "authority": "",
+    "redeem": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "redeemCode": "",
+    "apply": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "applyCode": "",
+    "unknown": [],
+    "referral": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "unsettled": false,
+    "notice": "Quiet"
+  }
+}

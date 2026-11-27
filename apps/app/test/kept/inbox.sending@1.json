@@ -1,0 +1,41 @@
+{
+  "key": "alpha/app/inbox/sending@1",
+  "spec": "spec/app/inbox/sending.md",
+  "shape": "87ac376b4be6ad2c",
+  "state": {
+    "session": 0,
+    "of": 0,
+    "kind": "Send",
+    "account": 0,
+    "draft": 0,
+    "messages": [],
+    "gmail": 0,
+    "history": 0,
+    "review": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "warned": false,
+    "addressed": false,
+    "repeat": false,
+    "again": false,
+    "changed": false,
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "attempts": 0,
+    "withdrawn": false,
+    "undo": {
+      "holding": "Free",
+      "until": 0
+    },
+    "clock": 0,
+    "approvedBy": "World",
+    "confirmations": 0,
+    "requests": 0,
+    "noticed": true,
+    "offered": 0
+  }
+}

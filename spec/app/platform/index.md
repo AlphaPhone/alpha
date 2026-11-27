@@ -317,6 +317,25 @@ pure def lawAHeldCopyIsNeverWrittenOver(kept: Kept): bool = not(setAside(kept, t
 pure def lawOnlyAnUnreadableValueIsSetAside(kept: Kept, placeHeld: bool): bool = setAside(kept, placeHeld) implies kept == KeptUnreadable
 ```
 
+### A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it
+
+A machine's state gains and loses fields while its version stays the same.
+A state an earlier build kept is read with each field it lacks at the value
+a fresh machine starts with, and without each field the state no longer
+has; nothing else in it changes, so the owner's choices in it are there
+after the restart. Only a value that is still not a state after that is set
+aside, as a value of a wrong kind always is.
+
+```quint
+type Written = InTodaysShape | InAnEarlierShape | NotAState
+
+pure def keptAs(written: Written): Kept = if (written == NotAState) KeptUnreadable else KeptState
+
+pure def lawAnEarlierShapeIsNeverSetAside(placeHeld: bool): bool = not(setAside(keptAs(InAnEarlierShape), placeHeld))
+
+pure def lawAValueOfAWrongKindIsStillSetAside(placeHeld: bool): bool = setAside(keptAs(NotAState), placeHeld) iff not(placeHeld)
+```
+
 ## Story: Ship only what this build allows
 
 > As the owner, I want the phone I use to contain no test mocks, fixtures
