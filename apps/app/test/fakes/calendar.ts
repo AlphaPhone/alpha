@@ -355,11 +355,12 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       return create(event, creationId, event.allDay, Boolean(event.rrule));
     },
     pendingCreations: () => Promise.resolve({ status: "ready", creations: [...scene.creations].map(([creationId, status]) => ({ creationId, status })) }),
-    inspectDeletion({ id }) {
-      const event = find(id);
+    inspectDeletion({ id, expected }) {
+      const series = scene.phoneEvents.filter((event) => event.id === id);
+      const event = series.find((one) => one.begin === expected.begin) ?? series[0];
       if (!event) return Promise.resolve({ status: "conflict" });
       return Promise.resolve({
-        status: "ready", recurrence: "one-off", writable: true, revision: revisionOf(event), sourceRevision: revisionOf(event),
+        status: "ready", recurrence: event.recurring ? "rule" : "one-off", writable: true, revision: revisionOf(event), sourceRevision: revisionOf(event),
         evidence: { selectedRow: "ParentRow", sync: "LocalUnsynced", sourceCurrent: true, bounded: true, otherExceptions: false, liveException: "NoLiveException", instances: 1, begin: event.begin, finish: event.end, exceptionOriginal: 0 },
       });
     },
@@ -385,9 +386,10 @@ export function elizaCalendar(scene: CalendarScene): Faked {
         .map((event) => ({ id: event.id, calendarId: event.calendarId, revision: "0".repeat(64), title: event.title ?? "", start: new Date(event.begin).toISOString(), end: new Date(event.end).toISOString(), allDay: event.allDay }));
       return Promise.resolve({ status: "ready", events });
     },
-    dispatchDeletion({ id }) {
-      scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id);
-      return Promise.resolve({ status: "committed", readback: { parentAfter: "ParentGone", fieldsMatch: true, exclusionExact: true, cancelledAtStart: 0, instanceRemains: false } });
+    dispatchDeletion({ id, change, originalStart }) {
+      const occurrence = change === "ExcludeOccurrence";
+      scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id || (occurrence && event.begin !== originalStart));
+      return Promise.resolve({ status: "committed", readback: { parentAfter: occurrence ? "ParentLive" : "ParentGone", fieldsMatch: true, exclusionExact: true, cancelledAtStart: 0, instanceRemains: false } });
     },
   }));
 }

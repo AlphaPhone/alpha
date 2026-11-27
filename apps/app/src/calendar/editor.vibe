@@ -500,8 +500,9 @@ effect function readEventDraft(owning: number) {
 
 // spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
 // spec/app/calendar/writing.md, "Guests, alerts and video rooms go to Android Calendar; zones, all-day and repeats use the direct save for a new event"; spec/app/calendar/writing.md, "The agent's own calendar holds no repeats, alerts or video rooms"
-/** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
-effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean) {
+// spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged"
+/** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review; a deletion only of the event at `base`, the revision the owner confirmed. */
+effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "UpdateReminder" | "RescheduleReminder">, id: number, scope: Scope, going: boolean, base: number) {
   const phone = try PhoneCalendar
   const owning = try owner()
   if (kind === "Create") {
@@ -527,6 +528,7 @@ effect function send(attempt: number, kind: Exclude<Write, "CreateReminder" | "U
   const shown = try Shown
   const row = shown.find(id) ?? (kind === "Remove" ? shown.lastSeen(id) : undefined)
   if (row === undefined) return refused
+  if (kind === "Remove" && row.revision !== base) return changedSince
   if (kind === "Update") {
     const draft = try readEventDraft(owning)
     if (draft === undefined) return refused
@@ -585,7 +587,7 @@ effect function handOff() {
 
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged"
 /** How write `attempt` ended; the calendar asks to read its day again, which waits for the write and then shows it or releases its doubt. */
-effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean) {
+effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean, base: number) {
   const owning = try owner()
   const draft = try readKept(owning)
   const changingReminder = kind === "UpdateReminder" || kind === "RescheduleReminder"
@@ -598,7 +600,7 @@ effect function written(attempt: number, kind: Write, id: number, scope: Scope, 
     ? (Option.isSome(draft) ? try createCalendarReminder(draft.value, owning) : refused)
     : changingReminder
       ? (Option.isSome(draft) ? try updateCalendarReminder(draft.value, owning, id, attempt, kind === "RescheduleReminder") : refused)
-      : try send(attempt, kind, id, scope, going)
+      : try send(attempt, kind, id, scope, going, base)
   const view = try View.Machine
   if (kind !== "CreateReminder" && !changingReminder) try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
   if ((kind === "Create" || kind === "CreateReminder" || kind === "Update") && outcome.confirmed && !("filed" in outcome) && Option.isSome(draft)) {
@@ -610,10 +612,10 @@ effect function written(attempt: number, kind: Write, id: number, scope: Scope, 
 
 function carry(fx: Out) {
   return match (fx) {
-    when { tag: "Send", let attempt, let kind, let id, let scope }:
-      answer(`write ${attempt}`, written(attempt, kind, id, scope, false), { type: "written", attempt, confirmed: false, known: false, filed: false });
-    when { tag: "Answer", let attempt, let id, let going }:
-      answer(`answer ${attempt}`, written(attempt, "Reply", id, "ThisOne", going), { type: "written", attempt, confirmed: false, known: false, filed: false });
+    when { tag: "Send", let attempt, let kind, let id, let scope, let base }:
+      answer(`write ${attempt}`, written(attempt, kind, id, scope, false, base), { type: "written", attempt, confirmed: false, known: false, filed: false });
+    when { tag: "Answer", let attempt, let id, let going, let base }:
+      answer(`answer ${attempt}`, written(attempt, "Reply", id, "ThisOne", going, base), { type: "written", attempt, confirmed: false, known: false, filed: false });
     when { tag: "HandOff" }: run("hand off", Effect.ignore(handOff()));
     when { tag: "CheckReceipts", let ticket }: answer("receipts", receipts(ticket), { type: "receiptsChecked", ticket, found: false });
     when { tag: "ResetSlot" }:

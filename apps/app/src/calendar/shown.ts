@@ -48,7 +48,7 @@ export interface Row {
   readonly cancel: Cancellation;
   /** The provider's version of the event, which a write names, or "" where the calendar keeps none. */
   readonly version: string;
-  /** The revision the form builds on: the provider's change time where it has one, otherwise one more each time a read shows it different. */
+  /** The revision the form builds on: the provider's change time where it has one, otherwise one more each time a read shows it different; the occurrences of a repeating event on the phone share one, which their times leave out. */
   readonly revision: number;
 }
 
@@ -118,7 +118,7 @@ export interface ShownStore {
   readonly visible: (hidden: ReadonlyArray<number>, phone: boolean, google: boolean) => ReadonlyArray<Row>;
   /** Whether the last read of `source` said it gave only part of its window. @throws {never} */
   readonly partial: (source: Source) => boolean;
-  /** Forget what `source` read, including seen titles, numbers, and revisions, but not the names the agent listed: an account changed, a permission went, or the feed came back unavailable. @throws {never} */
+  /** Forget what `source` read, including seen titles and revisions, but not the numbers its events were given or the names the agent listed: an account changed, a permission went, or the feed came back unavailable. @throws {never} */
   readonly drop: (source: Source) => void;
   /** Whether this phone has calendars of its own: a browser has none, and is never asked for access. @throws {never} */
   readonly present: () => boolean;
@@ -130,6 +130,8 @@ export interface ShownStore {
   readonly restore: (kept: ReadonlyArray<readonly [string, string, number]>) => void;
   /** The number an event of `source` keyed `key` has, or is given now. @throws {never} */
   readonly number: (source: Source, key: string) => number;
+  /** Whether `id` is a number this store gave an event, or took back from before a restart, and still holds. @throws {never} */
+  readonly known: (id: number) => boolean;
   /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
   readonly lastSeen: (id: number) => Row | undefined;
   /** The event numbered `id`, wherever it was last read. @throws {never} */
@@ -144,14 +146,44 @@ export interface ShownStore {
   readonly reset: () => void;
 }
 
+/**
+ * The numbers events were given, kept on the phone so that an event keeps its number across a restart and no other
+ * event is given it: the last number given, and each event's `source:key` with its number.
+ */
+export interface KeptNumbers {
+  readonly last: number;
+  readonly numbers: ReadonlyArray<readonly [string, number]>;
+}
+
+/** Where numbering starts on a phone that kept no numbers: past any number a build that kept none gave in one run. */
+const unkeptFloor = 2 ** 32;
+
+/** What numbering goes on from where the kept numbers can no longer be read: past any number given before, and holding none. */
+export const unreadableNumbers: KeptNumbers = { last: 2 ** 52, numbers: [] };
+
+/** How far numbering moves on at each start past the last number kept, so a number given after the last one kept is never given again. */
+const startGap = 2 ** 20;
+
+/** How many events' numbers are kept: those seen least lately go first, and a deletion or form that named one then names no event. */
+const keptNumbers = 10_000;
+
+/**
+ * What names an event of `source` among the others: its key, and for an occurrence of a repeating event on the phone, whose
+ * occurrences all share their event's key, its key and its start.
+ */
+export function occurrenceOf(source: Source, read: Pick<Read, "key" | "recurring" | "begin">): string {
+  return source === "Phone" && read.recurring ? `${read.key}@${read.begin}` : read.key;
+}
+
 /** The calendar eliza lists as its own, its resident calendar, where it writes a new event (plugin-calendar providers.vibe `residentCalendarId`, host.vibe `writeTarget`). */
 const ownCalendarId = "primary";
 
 let activeStore: ShownStore | undefined;
 let fallbackStore: ShownStore | undefined;
 
-function makeShownStore(onReset?: () => void): ShownStore {
-  const numbers = new Map<string, number>();
+function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
+  const numbers = new Map<string, number>(kept?.numbers ?? []);
+  const given = new Set(numbers.values());
   const calendars = new Map<string, number>();
   const seen = new Map<string, { readonly content: string; readonly revision: number }>();
   const windows = new Map<Source, ReadonlyArray<Row>>();
@@ -160,16 +192,36 @@ function makeShownStore(onReset?: () => void): ShownStore {
   const names = new Map<string, string>();
   let ownName = "";
   const version = createShelf(0);
-  let nextNumber = 0;
+  let nextNumber = keepNumbers === undefined ? 0 : kept === undefined ? unkeptFloor : kept.last + startGap;
   let present = false;
+  let unkept = keepNumbers !== undefined;
+  let open = true;
+
+  /** @throws {never} */
+  function keepGiven(): void {
+    if (!unkept || !open) return;
+    unkept = false;
+    for (const [name, id] of numbers) {
+      if (numbers.size <= keptNumbers) break;
+      numbers.delete(name);
+      given.delete(id);
+    }
+    keepNumbers?.({ last: nextNumber, numbers: [...numbers] });
+  }
 
   /** @throws {never} */
   function numbered(source: Source, key: string): number {
     const name = `${source}:${key}`;
     const known = numbers.get(name);
-    if (known !== undefined) return known;
+    numbers.delete(name);
+    if (known !== undefined) {
+      numbers.set(name, known);
+      return known;
+    }
     const made = ++nextNumber;
     numbers.set(name, made);
+    given.add(made);
+    unkept = keepNumbers !== undefined;
     return made;
   }
 
@@ -189,7 +241,8 @@ function makeShownStore(onReset?: () => void): ShownStore {
   function revised(source: Source, row: Read): number {
     if (row.changedAt !== undefined && Number.isFinite(row.changedAt)) return Math.floor(row.changedAt / 1000);
     const name = `${source}:${row.key}`;
-    const content = JSON.stringify([row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
+    const series = source === "Phone" && row.recurring;
+    const content = JSON.stringify(series ? [row.title, row.place, row.notes, row.allDay] : [row.title, row.place, row.notes, row.begin, row.end, row.allDay]);
     const before = seen.get(name);
     const revision = before === undefined ? 0 : before.content === content ? before.revision : before.revision + 1;
     seen.set(name, { content, revision });
@@ -202,7 +255,7 @@ function makeShownStore(onReset?: () => void): ShownStore {
     return {
       ...rest,
       source,
-      id: numbered(source, read.key),
+      id: numbered(source, occurrenceOf(source, read)),
       calendar: calendarNumber(source, read.calendarId),
       revision: revised(source, { ...rest, changedAt }),
     };
@@ -222,22 +275,28 @@ function makeShownStore(onReset?: () => void): ShownStore {
       const rows = read.map((one) => toRow(source, one));
       windows.set(source, [...rows].sort((a, b) => a.begin - b.begin));
       for (const row of rows) last.set(row.id, row);
+      keepGiven();
       told();
       return rows.filter((row) => onDay(row, day));
     },
     mergeOne(source, read) {
       const row = toRow(source, read);
       const existing = windows.get(source) ?? [];
-      const idx = existing.findIndex((candidate) => candidate.id === row.id || candidate.key === row.key);
+      const idx = existing.findIndex((candidate) => candidate.id === row.id);
       const next = idx >= 0
         ? existing.map((candidate, at) => (at === idx ? row : candidate))
         : [...existing, row];
       windows.set(source, [...next].sort((a, b) => a.begin - b.begin));
       last.set(row.id, row);
+      keepGiven();
       told();
       return row;
     },
-    toRow,
+    toRow(source, read) {
+      const row = toRow(source, read);
+      keepGiven();
+      return row;
+    },
     of(source, day) {
       return (windows.get(source) ?? []).filter((row) => onDay(row, day));
     },
@@ -254,7 +313,6 @@ function makeShownStore(onReset?: () => void): ShownStore {
       cut.delete(source);
       const prefix = `${source}:`;
       for (const [id, row] of [...last]) if (row.source === source) last.delete(id);
-      for (const key of [...numbers.keys()]) if (key.startsWith(prefix)) numbers.delete(key);
       for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
       if (source === "Phone") calendars.clear();
       told();
@@ -270,7 +328,12 @@ function makeShownStore(onReset?: () => void): ShownStore {
     restore(kept) {
       for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
     },
-    number: (source, key) => numbered(source, key),
+    number(source, key) {
+      const id = numbered(source, key);
+      keepGiven();
+      return id;
+    },
+    known: (id) => given.has(id),
     lastSeen: (id) => last.get(id),
     find(id) {
       for (const rows of windows.values()) {
@@ -290,9 +353,11 @@ function makeShownStore(onReset?: () => void): ShownStore {
     listedName: (calendarId) => names.get(calendarId) ?? ownName,
     listedSummary: (calendarId) => names.get(calendarId) ?? "",
     reset() {
+      open = false;
       names.clear();
       ownName = "";
       numbers.clear();
+      given.clear();
       calendars.clear();
       seen.clear();
       windows.clear();
@@ -304,6 +369,7 @@ function makeShownStore(onReset?: () => void): ShownStore {
       onReset?.();
     },
   };
+  keepGiven();
   return store;
 }
 
@@ -313,11 +379,14 @@ function currentStore(): ShownStore {
   return fallbackStore;
 }
 
-/** Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. @throws {never} */
-export function createShownStore(): ShownStore {
+/**
+ * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. Given
+ * `keepNumbers`, it numbers events on from `kept`, what an earlier run kept, and hands it each change to keep. @throws {never}
+ */
+export function createShownStore(kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
   const store = makeShownStore(() => {
     if (activeStore === store) activeStore = undefined;
-  });
+  }, kept, keepNumbers);
   activeStore = store;
   return store;
 }
@@ -339,6 +408,7 @@ export const shown: ShownStore = {
   revisions: () => currentStore().revisions(),
   restore: (kept) => currentStore().restore(kept),
   number: (source, key) => currentStore().number(source, key),
+  known: (id) => currentStore().known(id),
   lastSeen: (id) => currentStore().lastSeen(id),
   find: (id) => currentStore().find(id),
   listed: (calendars) => currentStore().listed(calendars),
