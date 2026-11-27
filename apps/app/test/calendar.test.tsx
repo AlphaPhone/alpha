@@ -997,6 +997,93 @@ describe("on a phone", () => {
     expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Piano", "Walk", "Gym"]);
   });
 
+  it("A deletion and a doubt kept across a start that could not read the kept numbers are kept as they were (spec/app/calendar/deletions.md, \"A restart pauses a deletion still in its window; the owner sends it or keeps the event\"; spec/app/calendar/editor.md, \"A read of the event releases the doubt; a form waiting on it then shows the event as it now is\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const first = await open(world, only("view:Calendar", "notice"));
+    const before = calendar.runtime(first.alpha);
+    await openCalendar(first.alpha);
+    await until(first.alpha, before, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    await tap("Gym");
+    await until(first.alpha, before, View, (s) => s.open !== 0);
+    await chooseEventAction("Delete");
+    await until(first.alpha, before, Held, (d) => d.asked !== 0);
+    await press("Yes");
+    await until(first.alpha, before, Held, (d) => d.waiting !== 0 && d.notice);
+    const gym = (await before.runPromise(Held.use((d) => d.get()))).waiting;
+    const standup = shown.all("Google").find((row) => row.title === "Standup")?.id ?? 0;
+    const form = await before.runPromise(Editor.use((e) => e.get()));
+    await first.close();
+    localStorage.setItem("alpha/app/calendar/editor@1", JSON.stringify({ ...form, latched: [gym] }));
+    const deletions = "alpha/app/calendar/deletions@1";
+    localStorage.setItem(deletions, JSON.stringify({ ...JSON.parse(localStorage.getItem(deletions) ?? "{}"), hiding: standup }));
+    const numbers = localStorage.getItem("alpha.calendar.numbers");
+
+    const getItem = localStorage.getItem.bind(localStorage);
+    const failing = vi.spyOn(localStorage, "getItem").mockImplementation((key: string) => {
+      if (key === "alpha.calendar.numbers") throw new Error("the store could not be read");
+      return getItem(key);
+    });
+    asleep(world, 60_000);
+    const second = await open(world, only("view:Calendar", "notice"));
+    const unread = calendar.runtime(second.alpha);
+    await until(second.alpha, unread, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    await later(second.alpha, 100);
+    failing.mockRestore();
+    const held = await unread.runPromise(Held.use((d) => d.get()));
+    expect([held.waiting, held.paused, held.undo.holding, held.hiding, (await unread.runPromise(Editor.use((e) => e.get()))).latched, localStorage.getItem("alpha.calendar.numbers")]).toEqual([gym, true, "Held", standup, [gym], numbers]);
+    await second.close();
+
+    asleep(world, 60_000);
+    const third = await open(world, only("view:Calendar", "notice"));
+    const runtime = calendar.runtime(third.alpha);
+    await until(third.alpha, runtime, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    await until(third.alpha, runtime, Held, (d) => d.paused && d.waiting === gym);
+    expect(document.body.textContent).toContain("Alpha restarted before deleting Gym.");
+  });
+
+  it("Kept numbers JavaScript cannot hold exactly are set aside, and each event keeps a number of its own (spec/app/calendar/deletions.md, \"Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.phoneEvents.push({ id: "p2", calendarId: "local", title: "Piano", begin: world.at(0, 16), end: world.at(0, 17), allDay: false, recurring: false });
+    const unsafe = `{"last":${2 ** 60},"numbers":[["Phone:p1",${2 ** 60}]]}`;
+    localStorage.setItem("alpha.calendar.numbers", unsafe);
+    await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 2);
+    const ids = shown.all("Phone").map((row) => row.id);
+    expect([localStorage.getItem("alpha.calendar.numbers.unreadable"), new Set(ids).size, ids.every((id) => Number.isSafeInteger(id))]).toEqual([unsafe, 2, true]);
+  });
+
+  it("Numbering long after 2109, or after a clock set far ahead, still gives each event a number of its own (spec/app/calendar/deletions.md, \"Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const ahead = 2 ** 43;
+    world.calendar.phoneEvents = ["Gym", "Piano"].map((title, at) => ({ id: `p${at + 1}`, calendarId: "local", title, begin: ahead + (at + 1) * hour, end: ahead + (at + 2) * hour, allDay: false, recurring: false }));
+    localStorage.setItem("alpha.time", String(ahead));
+    await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phone.status === "Loaded" && shown.all("Phone").length === 2);
+    const ids = shown.all("Phone").map((row) => row.id);
+    expect([new Set(ids).size, ids.every((id) => Number.isSafeInteger(id))]).toEqual([2, true]);
+  });
+
+  it("A doubt whose event went while Alpha was closed is let go by the first read that shows it gone (spec/app/calendar/editor.md, \"A read of the event releases the doubt; a form waiting on it then shows the event as it now is\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const first = await open(world, only("view:Calendar", "notice"));
+    const before = calendar.runtime(first.alpha);
+    await openCalendar(first.alpha);
+    await until(first.alpha, before, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    const gym = shown.all("Phone").find((row) => row.title === "Gym")?.id ?? 0;
+    const form = await before.runPromise(Editor.use((e) => e.get()));
+    await first.close();
+    localStorage.setItem("alpha/app/calendar/editor@1", JSON.stringify({ ...form, latched: [gym] }));
+    world.calendar.phoneEvents = world.calendar.phoneEvents.filter((event) => event.title !== "Gym");
+
+    const second = await open(world, only("view:Calendar", "notice"));
+    const runtime = calendar.runtime(second.alpha);
+    await until(second.alpha, runtime, View, (s) => s.front && s.phone.status === "Loaded" && s.google.status === "Loaded");
+    await later(second.alpha, 100);
+    expect((await runtime.runPromise(Editor.use((e) => e.get()))).latched).toEqual([]);
+  });
+
   it("A repeating event that moved after the owner confirmed deleting one occurrence is not deleted (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;

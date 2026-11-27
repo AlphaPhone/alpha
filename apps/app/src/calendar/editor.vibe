@@ -637,12 +637,12 @@ const unnamed = started(effect {
   const editor = try Editor.Machine
   const shown = try Shown
   try Stream.runForEach(editor.changes, effect (form) => {
-    for (const id of form.latched) if (!shown.known(id)) try contained(editor.send({ type: "eventMissing", id, whole: true }), "letting go a doubt Calendar cannot name")
+    for (const id of form.latched) if (shown.forgets(id)) try contained(editor.send({ type: "eventMissing", id, whole: true }), "letting go a doubt Calendar cannot name")
   })
 }, "letting go the doubts Calendar cannot name")
 
 // spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is"
-/** Each read of either calendar tells the form what it found of the event it edits or holds in doubt. */
+/** Each read of either calendar tells the form what it found of the event it edits or holds in doubt, looked for where it was last seen, though only kept from before a restart. */
 const reread = started(effect {
   const view = try View.Machine
   const editor = try Editor.Machine
@@ -652,7 +652,7 @@ const reread = started(effect {
     const state = try view.get()
     for (const id of new Set([...(form.form === "EditReminder" ? [] : [form.target]), ...form.latched])) {
       if (id === 0) continue
-      const row = shown.find(id) ?? shown.lastSeen(id)
+      const row = shown.find(id) ?? shown.lastSeen(id) ?? shown.seenAt(id)
       const source = row?.source === "Phone" ? state.phone : state.google
       const whole = source.status === "Loaded" && !(row?.source === "Phone" && state.phoneLimited) && row !== undefined && Math.abs(civilDay(row.begin) - state.anchor) <= 31
       const there = shown.find(id)

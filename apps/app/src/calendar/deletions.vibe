@@ -147,7 +147,7 @@ const notices = started(effect {
 }, "notifying Calendar deletions")
 
 // spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged"
-/** Reconcile a hidden sent deletion after each calendar read so declined invitations reappear and removed events clear `hiding`. */
+/** Reconcile a hidden sent deletion after each calendar read so declined invitations reappear and removed events clear `hiding`; one whose number Calendar cannot tell, after a start that could not read the kept numbers, waits. */
 const reconciled = started(effect {
   const view = try View.Machine
   const held = try Held.Machine
@@ -158,6 +158,7 @@ const reconciled = started(effect {
     if (d.hiding === 0) return
     const id = d.hiding
     const prior = shown.lastSeen(id)
+    if (prior === undefined && !shown.known(id) && !shown.forgets(id)) return
     const sourceLoaded = prior === undefined
       ? s.phone.status === "Loaded" || s.google.status === "Loaded"
       : prior.source === "Phone" ? s.phone.status === "Loaded" : s.google.status === "Loaded"
@@ -186,7 +187,7 @@ const unnamed = started(effect {
   const held = try Held.Machine
   const shown = try Shown
   try Stream.runForEach(held.changes, effect (state) => {
-    if (state.paused && state.waiting !== 0 && !shown.known(state.waiting)) try contained(held.send({ type: "undoShown" }), "keeping unsent a deletion whose event is unknown")
+    if (state.paused && state.waiting !== 0 && shown.forgets(state.waiting)) try contained(held.send({ type: "undoShown" }), "keeping unsent a deletion whose event is unknown")
   })
 }, "keeping unsent the deletions Calendar cannot name")
 
