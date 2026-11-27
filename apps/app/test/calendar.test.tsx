@@ -247,12 +247,25 @@ const calendarSettings = () => document.querySelector('[data-settings-page="Cale
 
 const dayButton = (day: number) => `${narrowDay.format(dateOf(day))} ${dateOf(day).getDate()}`;
 
-async function declineLunch(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+/** Open Team lunch, answer No, and confirm Decline in its review. */
+async function answerNoToLunch(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
   await tap("Team lunch");
   await until(alpha, runtime, View, (s) => s.open !== 0);
   await press("No");
   await until(alpha, runtime, Held, (d) => d.asked !== 0);
   await press("Decline");
+}
+
+/** Choose Delete for the open event and confirm its review, so the deletion waits with its Undo notice. */
+async function deleteOpenEvent(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+  await chooseEventAction("Delete");
+  await until(alpha, runtime, Held, (d) => d.asked !== 0);
+  await press("Yes");
+  await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+}
+
+async function declineLunch(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+  await answerNoToLunch(alpha, runtime);
   await until(alpha, runtime, Held, (d) => d.waiting !== 0);
   await hardware("home");
   await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome !== "Sent");
@@ -822,10 +835,7 @@ describe("on a phone", () => {
     await press("No");
     await until(alpha, runtime, Held, (d) => d.asked === 0 && d.waiting === 0);
     // spec/app/calendar/deletions.md, "Confirming the review holds the deletion; a deletion still waiting is sent first, so the only Undo shown is the newest"; spec/app/calendar/deletions.md, "Undo inside the window sends nothing, and shows the event again"
-    await chooseEventAction("Delete");
-    await until(alpha, runtime, Held, (d) => d.asked !== 0);
-    await press("Yes");
-    await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    await deleteOpenEvent(alpha, runtime);
     expect(titles()).not.toContain("Gym");
     await press("Undo");
     await until(alpha, runtime, Held, (d) => d.waiting === 0 && d.undo.holding === "Undone");
@@ -1683,10 +1693,7 @@ describe("Calendar Wave 1 regressions", () => {
     expect(document.querySelector("[data-alpha-subview=calendar-detail]")?.hasAttribute("inert")).toBe(true);
     await hardware("back");
     await until(alpha, runtime, Editor, (e) => !e.shown);
-    await chooseEventAction("Delete");
-    await until(alpha, runtime, Held, (d) => d.asked !== 0);
-    await press("Yes");
-    await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    await deleteOpenEvent(alpha, runtime);
     await until(alpha, runtime, View, (s) => s.open === 0);
     await press("Search events");
     await until(alpha, runtime, View, (s) => s.overlay === "Search");
@@ -1732,11 +1739,7 @@ describe("Calendar Wave 1 regressions", () => {
   it('Unhides declined invitations via readShows once the calendar read shows the decline (spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")', async () => {
     const world = morning(false);
     const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.googleRows === 2);
-    await tap("Team lunch");
-    await until(alpha, runtime, View, (s) => s.open !== 0);
-    await press("No");
-    await until(alpha, runtime, Held, (d) => d.asked !== 0);
-    await press("Decline");
+    await answerNoToLunch(alpha, runtime);
     await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
     await later(alpha, 10_000);
     await later(alpha, 1_000);
@@ -1746,13 +1749,15 @@ describe("Calendar Wave 1 regressions", () => {
 });
 
 describe("the agent on a phone", () => {
-  it("Let the assistant act only on what I have open (spec/app/calendar/index.md, \"Story: Let the assistant act only on what I have open\")", async () => {
+  /** Calendar on a phone that may read Android's calendar, once it shows Google's two rows and the phone's one. */
+  async function onGrantedPhone() {
     const world = morning(true);
     world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.front && s.googleRows === 2 && s.phoneRows === 1);
+    return mountCalendar(world, only("view:Calendar"), (s) => s.front && s.googleRows === 2 && s.phoneRows === 1);
+  }
+
+  it("Let the assistant act only on what I have open (spec/app/calendar/index.md, \"Story: Let the assistant act only on what I have open\")", async () => {
+    const { world, alpha, runtime } = await onGrantedPhone();
 
     // spec/app/calendar/index.md, "The assistant is given the open event only while it shows, and the day shown only on a plain, current day"
     await vi.waitFor(() => expect(subjectNow()).toEqual({ day: world.today, event: undefined }));
@@ -1765,12 +1770,7 @@ describe("the agent on a phone", () => {
   });
 
   it("Let the agent change my phone's calendar only through my reviews (spec/app/calendar/actions.md, \"Story: Let the agent change my phone's calendar only through my reviews\"; spec/app/calendar/sharing.md, \"Story: Let a reviewed step read my phone's calendars for the range I approved\"; spec/app/calendar/sharing.md, \"Story: Be told plainly what the agent was shown of an event I named\")", async () => {
-    const world = morning(true);
-    world.calendar.granted = true;
-    const { alpha } = await open(world, only("view:Calendar"));
-    const runtime = calendar.runtime(alpha);
-    await openCalendar(alpha);
-    await until(alpha, runtime, View, (s) => s.front && s.googleRows === 2 && s.phoneRows === 1);
+    const { world, alpha } = await onGrantedPhone();
     const call = (id: string) => ({ proposalId: id, operationId: id, attemptId: 1 });
     const approved = { current: () => Promise.resolve(true) };
     const fields = { title: "Haircut", description: "", location: "", start: new Date(world.at(1, 9)).toISOString(), end: new Date(world.at(1, 10)).toISOString(), timeZone: "UTC" };

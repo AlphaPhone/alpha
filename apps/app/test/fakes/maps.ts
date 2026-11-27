@@ -118,6 +118,10 @@ async function asked(scene: MapsScene, request: Request, url: URL): Promise<unkn
 
 /** Cloud Maps as eliza's cloud answers it, raw JSON in eliza's own shapes. */
 export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
+  const rateLimited = (wait: number) => Response.json(
+    { error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) },
+    { status: 429, ...(wait > 0 ? { headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } } : {}) },
+  );
   return [
     (request, url) => (request.method === "GET" && url.pathname === "/api/v1/maps/capabilities" ? Response.json(scene.coverage) : undefined),
     (request, url) => {
@@ -126,10 +130,7 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
         if (scene.limited !== undefined) {
           const wait = scene.limited;
           scene.limited = undefined;
-          return Response.json(
-            { error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) },
-            { status: 429, ...(wait > 0 ? { headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } } : {}) },
-          );
+          return rateLimited(wait);
         }
         const query = typeof body === "object" && body !== null && "query" in body ? String(body.query).toLowerCase() : "";
         const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
@@ -159,10 +160,7 @@ export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
       if (scene.tilesLimited !== undefined) {
         const wait = scene.tilesLimited;
         scene.tilesLimited = undefined;
-        return Response.json(
-          { error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) },
-          { status: 429, ...(wait > 0 ? { headers: { "retry-after": new Date(now() + wait * 1000).toUTCString() } } : {}) },
-        );
+        return rateLimited(wait);
       }
       return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
     },

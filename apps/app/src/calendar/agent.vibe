@@ -10,7 +10,7 @@ import { type Attempts, type Job, Time, answer, contained, following, hearing, r
 import * as View from "../../gen/app__calendar.effect.vibe"
 import { type AgentCalendar, readsRequestsAgain, refreshes } from "../../gen/app__calendar__agent.ts"
 import { asked } from "./asked.ts"
-import { calendarInFront, readFeed } from "./calendar.vibe"
+import { calendarInFront, readFeed, versionOf } from "./calendar.vibe"
 import { Calendars } from "./owner.vibe"
 import { type Request, complete, decodeRequest } from "./requests.ts"
 import type { Row } from "./shown.ts"
@@ -95,12 +95,6 @@ effect function reject(filing: number): void!!(Agent | Requests) {
 function holds(event: Listed["events"][number], fields: NonNullable<Request["fields"]>): boolean {
   return event.title === fields.title && event.location === fields.location && event.description === fields.description
     && Date.parse(event.startAt) === Date.parse(fields.startAt) && Date.parse(event.endAt) === Date.parse(fields.endAt) && event.isAllDay === fields.isAllDay
-}
-
-/** The version a deletion's receipt compares, as eliza's `eventVersion` reads it: the provider's etag, or the change time. */
-function versionOf(event: Listed["events"][number]): string {
-  const etag = typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : ""
-  return etag !== "" ? etag : event.updatedAt
 }
 
 /** Whether `listed` shows the change `request` asked for as asked; for a deletion, whether the reviewed version is still there. */
