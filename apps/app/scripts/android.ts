@@ -31,7 +31,7 @@ const nodeLicenceBySource = new Map([
 ]);
 const mockSwitches = ["ELIZA_DEV_ALLOW_TEST_MOCKS", "VITE_ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_FAKES"];
 const signingNames = ["ELIZAOS_KEYSTORE_PATH", "ELIZAOS_KEYSTORE_PASSWORD", "ELIZAOS_KEY_ALIAS", "ELIZAOS_KEY_PASSWORD"];
-const usage = "Usage: node scripts/android.ts <inputs|pack|stage|web|host|build [--release]|verify [--release-only]|audit DIR>";
+const usage = "Usage: node scripts/android.ts <pin|inputs|pack|stage|web|host|build [--release]|verify [--release-only]|audit DIR>";
 const JAVA_HOME_CANDIDATES = [
   "/opt/homebrew/opt/openjdk@21",
   "/usr/local/opt/openjdk@21",
@@ -714,6 +714,10 @@ async function main(argv: readonly string[]) {
       if (problems.length === 0) process.stdout.write(`Every Android build input is present for eliza ${String(record(readJson(join(root, "eliza.lock.json"))).commit)}\n`);
       return problems.length === 0 ? 0 : 2;
     }
+    case "pin":
+      refuseOn(pinProblems());
+      process.stdout.write(`The pinned eliza ${prepared().commit} is clean and on eliza's origin/develop\n`);
+      return 0;
     case "pack":
       refuseOn(pinProblems());
       buildPack();

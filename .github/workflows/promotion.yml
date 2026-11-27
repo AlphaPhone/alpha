@@ -37,15 +37,7 @@ jobs:
       - name: Prepare pinned Eliza checkout and verify upstream reachability
         run: |
           pnpm eliza
-          node --input-type=module - <<'JS'
-          import { pinProblems } from "./apps/app/scripts/android.ts";
-          const problems = pinProblems();
-          if (problems.length > 0) {
-            for (const p of problems) process.stderr.write(`PIN PROBLEM ${p.input}: ${p.problem} (${p.fix})\n`);
-            process.exit(1);
-          }
-          process.stdout.write("Pinned Eliza commit is clean and reachable upstream.\n");
-          JS
+          pnpm --filter @repo/app android pin
       - name: Verify third-party notices and release signer record
         run: |
           pnpm --filter @repo/app licences --check

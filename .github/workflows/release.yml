@@ -62,7 +62,6 @@ jobs:
       - name: Prepare the pinned Eliza packages
         run: |
           pnpm eliza
-          pnpm --filter @repo/eliza-harness build
       - run: pnpm --filter @repo/app android build --release
         env:
           ELIZAOS_VERSION_CODE: ${{ github.run_number }}

@@ -568,7 +568,6 @@ jobs:
       - name: Prepare the pinned Eliza packages and Android host
         run: |
           pnpm eliza
-          pnpm --filter @repo/eliza-harness build
           pnpm --filter @repo/app android pack
           pnpm --filter @repo/app android host
       - name: Prepare the pinned Robolectric Android framework
