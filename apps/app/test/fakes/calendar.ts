@@ -58,6 +58,10 @@ export interface CalendarScene {
   /** While set, each read of `/api/lifeops/calendar/calendars` waits for its release, kept here in the order the reads came. */
   holdCalendars?: boolean;
   readonly heldCalendars: Array<() => void>;
+  /** While set, each read of `/api/approvals` answers the list as it was when read, once released; the releases are kept here in the order the reads came, and how many answered. */
+  holdApprovals?: boolean;
+  readonly heldApprovals: Array<() => void>;
+  approvalsAnswered?: number;
   /** Every write the agent took, as `<method> <id>`, and the idempotency keys it took them under. */
   readonly writes: string[];
   readonly keys: Map<string, FakeEvent>;
@@ -95,7 +99,7 @@ export function calendarScene(): CalendarScene {
     calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     reviewed: [], review: "applied",
-    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [],
+    control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [], heldApprovals: [],
   };
 }
 
@@ -176,9 +180,15 @@ export function calendarRoutes(scene: CalendarScene): Route[] {
   const primary = { connectorAccountId: "google-owner", providerCalendarId: "primary" };
   const controlView = () => ({ revision: scene.control.revision, paused: scene.control.paused, destination: scene.control.destination, pendingDispatch: null, conflicts: 0 });
   return [
-    (request, url) => (request.method === "GET" && url.pathname === "/api/approvals"
-      ? Response.json({ ownerEntityId: "owner", approvals: scene.approvals.filter((one) => one.state === (url.searchParams.get("state") ?? "pending")).toReversed() })
-      : undefined),
+    (request, url) => {
+      if (request.method !== "GET" || url.pathname !== "/api/approvals") return;
+      const listed = { ownerEntityId: "owner", approvals: scene.approvals.filter((one) => one.state === (url.searchParams.get("state") ?? "pending")).toReversed() };
+      const answer = () => {
+        scene.approvalsAnswered = (scene.approvalsAnswered ?? 0) + 1;
+        return Response.json(listed);
+      };
+      return scene.holdApprovals ? new Promise<void>((release) => scene.heldApprovals.push(release)).then(answer) : answer();
+    },
     (request, url) => {
       const found = /^\/api\/approvals\/([^/]+)\/resolve$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
