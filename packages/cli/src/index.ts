@@ -1,5 +1,19 @@
 export { commands } from "./commands/index.ts";
 export {
+  cssLengthToDp,
+  generateAndroidResources,
+  oklchToHex,
+  parseAlphaDesignTokens,
+  type AlphaNextSubcommand,
+  type DpLength,
+  type FontAssetStatus,
+  type GeneratedResource,
+  type HexColor,
+  type ParsedDesignTokens,
+  type SyncTokensReport,
+  type TokenSyncTarget,
+} from "./commands/alpha-next.ts";
+export {
   defineCommand,
   runCli,
   type CliContext,
