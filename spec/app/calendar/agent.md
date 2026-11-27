@@ -115,10 +115,11 @@ Sunday's v119 kept each request's card until it was answered: leaving
 Calendar, Back, a hidden page or a locked screen leave it waiting, in
 Calendar and under the reply that filed it. A card shows only with the
 request Calendar read for it: a changed owner drops the requests Calendar
-read, so a card still waiting for them ends unsent, the list is read again
-at once, and a read begun before the change shows nothing: each read of the
-list is for the owner it began under, and its answer is refused once
-another owner, or none, is signed in. A change the
+read, so a card still waiting for them ends unsent and the list is read
+again at once. Each read of the list is for the owner it began under: its
+answer is refused if another owner, or none, is signed in when it answers,
+so a read begun for one owner never shows that owner's requests to another
+owner, or to no one. A change the
 owner declined, the agent withdrew or Google refused reads the list again at once, so the next
 pending request's card shows without waiting for Calendar's next read; the
 request just declined is not proposed again while its decline is on its
@@ -230,7 +231,10 @@ Approving reads the agent's request again before the agent is asked to
 make it. Where the request or its event moved on since the card showed it,
 the approval is spent unsent and the card shows the change again at its
 new revision, marked updated, for the owner to approve or decline once
-more. A decision whose answer was lost is never sent again.
+more. A decision whose answer was lost is never sent again. Approving is
+for the owner signed in at the tap: if another owner, or none, is signed in
+when the agent would be asked, nothing is sent and the card ends as a change
+the agent did not make.
 
 ```quint
 pure def canStaleAtTap(s: AgentCalendar, attempt: int, revision: int, complete: bool, by: Actor): bool =
