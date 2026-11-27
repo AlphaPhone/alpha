@@ -572,14 +572,16 @@ describe("project CLI", () => {
     expect(missingAccessibility.missingComponents).toEqual(["ai.alphacompute.control.AlphaAccessibilityService"]);
 
     const ipcOk = inspectCrossAppIpcLog(
-      "11-27 00:40:01.120 4120 4120 I AlphaThinApp: app=notes prefsSnapshot=ok broker=bound",
+      "11-27 00:40:01.120 4120 4120 I AlphaThinApp: event=launch app=notes view=Notes coreSignatureMatch=true prefsConnected=true prefsKeys=2 agentBrokerBound=true agentState=running",
       10201,
       10209,
     );
     expect(ipcOk.passed).toBe(true);
     expect(ipcOk.distinctUids).toBe(true);
-    expect(inspectCrossAppIpcLog("I AlphaThinApp: prefsSnapshot=ok broker=bound", 10201, 10201).passed).toBe(false);
-    expect(inspectCrossAppIpcLog("I AlphaThinApp: prefsSnapshot=ok", 10201, 10209).passed).toBe(false);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: coreSignatureMatch=true prefsConnected=true agentBrokerBound=true", 10201, 10201).passed).toBe(false);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: coreSignatureMatch=false prefsConnected=true agentBrokerBound=true", 10201, 10209).passed).toBe(false);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: coreSignatureMatch=true prefsConnected=false agentBrokerBound=true", 10201, 10209).passed).toBe(false);
+    expect(inspectCrossAppIpcLog("I AlphaThinApp: coreSignatureMatch=true prefsConnected=true agentBrokerBound=false", 10201, 10209).passed).toBe(false);
 
     const enabledSetting = "ai.alphacompute.alphaphone/ai.alphacompute.control.AlphaAccessibilityService";
     const boundDump = [
@@ -603,7 +605,7 @@ describe("project CLI", () => {
     expect(report.ok).toBe(true);
     expect(report.data.status).toBe("pass");
     expect(report.data.presentCount).toBe(report.data.totalCount);
-    expect(report.data.totalCount).toBe(28);
+    expect(report.data.totalCount).toBe(30);
     expect(report.data.tokensInSync).toBe(true);
     expect(report.data.manifestValid).toBe(true);
     expect(report.data.securityPassed).toBe(true);

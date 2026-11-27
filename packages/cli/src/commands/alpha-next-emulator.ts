@@ -288,11 +288,18 @@ export function inspectCrossAppIpcLog(
 ): CrossAppIpcInspection {
   const distinctUids = coreUid !== null && thinUid !== null && coreUid !== thinUid;
   const hasThinAppTag = /\bAlphaThinApp\b/.test(logcat);
-  const hasPreferencesEvidence = /\bAlphaPreferencesProvider\b|pref(?:erence)?s|textScale|snapshot/i.test(logcat);
-  const hasBrokerEvidence = /\bAlphaAgentBroker\b|IAlphaAgentBroker|broker|binder/i.test(logcat);
+  const signatureExplicitlyFalse = /\bcoreSignatureMatch=false\b/i.test(logcat);
+  const hasStructuredPrefs = /\bprefsConnected=(?:true|false)\b/i.test(logcat);
+  const hasStructuredBroker = /\bagentBrokerBound=(?:true|false)\b/i.test(logcat);
+  const hasPreferencesEvidence = hasStructuredPrefs
+    ? /\bprefsConnected=true\b/i.test(logcat)
+    : /\bAlphaPreferencesProvider\b|textScale|snapshot/i.test(logcat);
+  const hasBrokerEvidence = hasStructuredBroker
+    ? /\bagentBrokerBound=true\b/i.test(logcat)
+    : /\bAlphaAgentBroker\b|IAlphaAgentBroker/i.test(logcat);
 
   return {
-    passed: distinctUids && hasPreferencesEvidence && hasBrokerEvidence,
+    passed: distinctUids && !signatureExplicitlyFalse && hasPreferencesEvidence && hasBrokerEvidence,
     distinctUids,
     coreUid,
     thinUid,

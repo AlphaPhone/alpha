@@ -515,6 +515,8 @@ export function runValidate(flags: ValidateFlags, ctx: CliContext): CommandResul
   const checkPaths = [
     DEFAULT_TOKENS_PATH,
     DEFAULT_SUITE_PATH,
+    "apps/app/android/suite/build-thin.ts",
+    "apps/app/android/alpha-ipc/src/main/assets/alpha-suite-policy.json",
     "apps/app/android/alpha-ipc/src/main/aidl/ai/alphacompute/ipc/IAlphaAgentBroker.aidl",
     "apps/app/android/alpha-ipc/src/main/aidl/ai/alphacompute/ipc/IAlphaPlatformBroker.aidl",
     "apps/app/android/alpha-ipc/src/main/aidl/ai/alphacompute/ipc/IAlphaContextRegistry.aidl",
