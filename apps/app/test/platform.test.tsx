@@ -153,7 +153,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await vi.waitFor(() => expect(world.platform.hanging.size).toBe(1));
     await alpha.runtime.runPromise(Fiber.interrupt(hanging));
     await vi.waitFor(() => expect(world.platform.hanging.size).toBe(0));
-    // spec/app/account/index.md, "Story: Have the agent running": the phone's host reports, stops and starts its agent; a page that is no phone reads the agent it reaches, and starts or stops none.
+    // spec/app/platform/index.md, "Story: Talk to the resident agent": the phone's host reports, stops and starts its agent; a page that is no phone reads the agent it reaches, and starts or stops none.
     const life = <A,>(work: (agent: Reached) => Effect.Effect<A, unknown>) => alpha.runtime.runPromiseExit(Effect.flatMap(Agent, work));
     expect(await life((agent) => Effect.map(agent.life.status(), (status) => [status.available, status.state]))).toEqual(Exit.succeed([true, "running"]));
     expect(await life((agent) => agent.life.review())).toEqual(Exit.succeed({ kind: "unavailable" }));

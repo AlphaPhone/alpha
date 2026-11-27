@@ -7,7 +7,7 @@ export type StartupMockBannerProps = {
 
 /**
  * Says that what is on screen is simulated, on every surface, with the way out of it.
- * @model spec/app/startup/index.md
+ * @model spec/app/startup/access.md
  */
 export function StartupMockBanner({ onExit }: StartupMockBannerProps) {
   return (

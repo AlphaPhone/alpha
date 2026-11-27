@@ -287,15 +287,12 @@ const messagingHandlers = started(effect {
     const tokenOpt = try currentSessionToken().pipe(Effect.provideService(MessagingSessions, sessions))
     if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Sign in to Telegram first" }
     const replyTo = draft.replyToMessageId ? Number(draft.replyToMessageId) : undefined
-    const res = telegram.sendMessage(
-      tokenOpt.value,
-      {
-        peer: draft.targetId,
-        message: draft.body,
-        ...(replyTo !== undefined && Number.isFinite(replyTo) && replyTo > 0 ? { reply_to_msg_id: replyTo } : {}),
-      },
-      `alpha-card-${draft.id}-r${draft.revision}`,
-    ) catch (failure) => ({ failed: failure })
+    const payload = {
+      peer: draft.targetId,
+      message: draft.body,
+      ...(replyTo !== undefined && Number.isFinite(replyTo) && replyTo > 0 ? { reply_to_msg_id: replyTo } : {}),
+    }
+    const res = telegram.sendMessage(tokenOpt.value, payload, `alpha-card-${draft.id}-r${draft.revision}`) catch (failure) => ({ failed: failure })
     if ("failed" in res) {
       if (isRevokedFailure(res.failed)) {
         try reportSessionRevoked().pipe(

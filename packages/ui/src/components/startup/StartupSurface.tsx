@@ -29,7 +29,7 @@ export type StartupSurfaceProps = {
 /**
  * What Alpha shows first: the mark until the agent has answered, then Home, or on the assistant-only surface chat and
  * close alone. Mock mode's banner is on every surface, and Home is inert while anything shows over it.
- * @model spec/app/startup/index.md
+ * @model spec/app/startup/access.md
  */
 export function StartupSurface({ presentation, known, connection, mocking = false, homeTakesInput, home, chat, onClose, onExitMock }: StartupSurfaceProps) {
   const alone = known && presentation === "AssistantOnly";

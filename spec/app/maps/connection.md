@@ -55,6 +55,7 @@ pure val sessionValues = Set(1, 2)
 pure val offerValues = Set(
   { drive: true, transit: true, walk: true, bicycle: true },
   { drive: true, transit: false, walk: true, bicycle: false },
+  { drive: false, transit: false, walk: false, bicycle: false },
 )
 
 pure def working(c: Connection): bool = c.provider != 0

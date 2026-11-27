@@ -60,6 +60,8 @@ pure val addressValues = Set("", "owner@example.com", "+14155550100", "415-555-0
 pure val codeValues = Set("123456")
 pure val weight_sent = 10
 pure val weight_verified = 10
+pure val weight_returned = 6
+pure val weight_expire = 3
 ```
 
 ### A typed code is secret, and what the page asks of the phone never carries the sign-in back

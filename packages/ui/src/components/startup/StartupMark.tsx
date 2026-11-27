@@ -8,7 +8,7 @@ export type StartupMarkProps = Omit<ComponentProps<"div">, "children">;
  * The Alpha mark alone on a white page, which holds Home still until the connection to the agent has resolved: v119's
  * startup cover (apps/app/src/prototype/phone.css:319), the thin black mark at 56 points that waits 0.3 s, then fades
  * in over 0.7 s. It is drawn light whatever look the owner keeps, as v119's page was always white (phone.css:1).
- * @model spec/app/startup/index.md
+ * @model spec/app/startup/access.md
  */
 export function StartupMark({ className, ...props }: StartupMarkProps) {
   return (

@@ -11,7 +11,7 @@ export type StartupAssistantSurfaceProps = {
 
 /**
  * The surface Android shows when the assistant is called: chat and a way to close it, and nothing of Home.
- * @model spec/app/startup/index.md
+ * @model spec/app/startup/access.md
  */
 export function StartupAssistantSurface({ children, onClose }: StartupAssistantSurfaceProps) {
   return (
