@@ -4,7 +4,7 @@ import {
   type AssistantAttachment, type AssistantComposerProps, type AssistantPull, type AssistantDraftNoticeProps, type AssistantMessageProps, type AssistantTranscriptProps, type AssistantTurnNoteProps,
 } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { FileText } from "lucide-react";
+import { FileText, FileWarning } from "lucide-react";
 import { type FormEvent, type ReactNode, type RefObject, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type Conversation as Talking, Machine as ConversationMachine } from "../../gen/app__assistant.effect.vibe";
 import { askable, inFlight, pending } from "../../gen/app__assistant.ts";
@@ -48,7 +48,7 @@ import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
 import type { Documents } from "../platform/index.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
-import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
+import { askComms, damagedCopyKept, freedom, holdAndSend, keepBoth, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
 import { contactChatActionsId } from "./contact-chat-id.ts";
 import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, removeContactFile, removeFile, retireTranscript, sameBinding } from "./attachments.vibe";
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
@@ -102,11 +102,6 @@ function turnOf(talking: Talking, label: string, writing: boolean, live: boolean
 
 function noticeOf(writing: Writing): AssistantDraftNoticeProps["status"] | undefined {
   if (writing.read.status === "Loading") return "opening";
-  if (writing.slot === "Damaged") return "damaged";
-  if (writing.slot === "Unreadable") return "unreadable";
-  if (writing.unsettled) return "review";
-  if (writing.draft.sync === "Conflicted") return "conflict";
-  if (writing.failing) return "failed";
   if (writing.long) return "long";
   return undefined;
 }
@@ -492,34 +487,35 @@ function keyboardScope(runtime: AssistantProps["runtime"]): string | undefined {
   return held._tag === "Success" ? held.value : undefined;
 }
 
-function buildDraftNotice(
-  notice: AssistantDraftNoticeProps["status"] | undefined,
-  onComms: boolean,
+type TranscriptRow = NonNullable<AssistantTranscriptProps["liveMessages"]>[number];
+
+// spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"; spec/app/assistant/composer.md, "Retry writes the draft again after storage failed"; spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+/** The one card the conversation shows about the draft once Alpha could not settle it by itself; never by the field. */
+function draftCard(
+  runtime: AssistantProps["runtime"],
   writing: Writing,
   seen: Seen,
-  board: Board,
   composer: ReturnType<typeof useComposer>,
   conversation: ReturnType<typeof useConversation>,
-): AssistantDraftNoticeProps | undefined {
-  if (notice === undefined || onComms) return undefined;
-  return {
-    status: notice,
-    saved: seen.saved,
-    onRetry: composer.can({ type: "retry" }) ? () => void composer.send({ type: "retry" }) : undefined,
-    onRecover: composer.can({ type: "recover" }) ? () => void composer.send({ type: "recover" }) : undefined,
-    onReopen: composer.can({ type: "open" }) ? () => void composer.send({ type: "open" }) : undefined,
-    onRestoreSaved: composer.can({ type: "restoreSaved" }) ? () => {
-      const next = writing.unsettled || seen.typed === "" ? seen.saved : `${seen.saved}\n${seen.typed}`;
-      board.type(next);
-      void composer.send({ type: "restoreSaved" }).then((outcome) => {
-        if (outcome._tag === "Success" && next.length > textLimit) {
-          void composer.send({ type: "edit", blank: next.trim() === "", long: true });
-        }
-      });
-    } : undefined,
-    onKeepCurrent: composer.can({ type: "replaceSaved" }) ? () => void composer.send({ type: "replaceSaved" }) : undefined,
-    onCheck: writing.unsettled && conversation.can(check) ? () => void conversation.send(check) : undefined,
-  };
+): TranscriptRow | undefined {
+  const small = (label: string, event: ComposerEvent) => composer.can(event)
+    ? <Button key={label} variant="secondary" size="sm" onClick={() => void composer.send(event)}>{label}</Button> : null;
+  const card = (title: string, actions: ReactNode, children?: ReactNode): TranscriptRow => ({
+    id: "draft", author: "alpha", text: "",
+    children: <AssistantCardFrame icon={<FileWarning />} title={title} actions={actions}>{children}</AssistantCardFrame>,
+  });
+  if (writing.slot === "Damaged") {
+    return card("Your saved draft is damaged", <>{damagedCopyKept() ? small("Keep a copy", { type: "recover", keep: true }) : null}{small("Discard", { type: "recover", keep: false })}</>);
+  }
+  if (seen.mending === "Unchecked" && writing.unsettled) {
+    return card("Your last message may not have arrived", <>
+      {conversation.can(check) ? <Button variant="secondary" size="sm" onClick={() => void conversation.send(check)}>Check again</Button> : null}
+      {composer.can({ type: "restoreSaved" }) ? <Button variant="secondary" size="sm" onClick={() => void runtime.runPromise(keepBoth())}>Put back in the field</Button> : null}
+    </>, seen.saved === "" ? undefined : <p className="line-clamp-3 break-words text-muted-foreground">{seen.saved}</p>);
+  }
+  if (seen.mending === "Unkept" && writing.failing) return card("Alpha cannot keep your draft", small("Try again", { type: "retry" }));
+  if (seen.mending === "Unread" && writing.slot === "Unreadable") return card("Alpha cannot open your draft", small("Try again", { type: "open" }));
+  return undefined;
 }
 
 function removeAttachmentById(
@@ -800,6 +796,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
     ? (request.trim() !== "" || contactFiles.length > 0) && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
     : newChat ? content(writing.editor) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
   const notice = noticeOf(writing);
+  const heldDraft = onComms ? undefined : draftCard(runtime, writing, seen, composer, conversation);
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
   const transcriptTitle = sameBinding(seen.transcript?.binding, writing.binding) ? seen.transcript?.offered.title : undefined;
   const previewed = seen.preview?.ticket === attachments.state?.preview ? seen.preview?.file : undefined;
@@ -881,7 +878,10 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             </div>
           ) : undefined}
         attachmentNotice={onComms ? undefined : seen.attachmentNotice}
-        transcript={{ ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} /> }}
+        transcript={{
+          ...transcript, briefing: brief === "" ? undefined : <AssistantNoticeCard key={`briefing:${subject}`} title="Phone" detail={brief} />,
+          ...(heldDraft === undefined ? {} : { liveMessages: [...transcript.liveMessages ?? [], heldDraft], turn: writing.unsettled ? undefined : transcript.turn }),
+        }}
         composer={{
           ...speechProps,
           className: compact ? "[&>div]:pointer-events-auto [&>section]:pointer-events-auto" : undefined,
@@ -902,7 +902,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
           placeholder: onComms ? "Ask Alpha" : undefined,
           leading: onComms ? <CommsTarget runtime={runtime} placement="composer" /> : undefined,
           closed: subject === undefined && !draftEditable,
-          notice: buildDraftNotice(notice, onComms, writing, seen, board, composer, conversation),
+          notice: notice === undefined || onComms ? undefined : { status: notice },
           unavailable: !talking.ready ? "away" : talking.context.sensitive ? "sensitive" : undefined,
           attachments: onComms ? contactFiles.map(chip) : waiting(writing, draftFiles, transcriptTitle),
           onPreviewAttachment: canPreview ? (id) => {
