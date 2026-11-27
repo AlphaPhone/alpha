@@ -28,12 +28,12 @@ export function resolvePackageAssets(basePkgDir = path.resolve(import.meta.dirna
       : path.join(repoRoot, inRepo);
 
   const assetSkills = path.join(assetsDir, "skills");
-  const repoSkills = path.join(repoRoot, SKILL_ROOT);
   const pkgSkills = path.join(pkgRoot, SKILL_ROOT);
-  const skillsDirs: string[] = [];
-  if (fs.existsSync(repoSkills) && repoRoot !== pkgRoot) skillsDirs.push(repoSkills);
-  if (fs.existsSync(pkgSkills)) skillsDirs.push(pkgSkills);
-  if (fs.existsSync(assetSkills)) skillsDirs.push(assetSkills);
+  const repoSkills = path.join(repoRoot, SKILL_ROOT);
+  const skillsDirs = fs.existsSync(assetSkills) ? [assetSkills]
+    : fs.existsSync(pkgSkills) ? [pkgSkills]
+    : fs.existsSync(repoSkills) && repoRoot !== pkgRoot ? [repoSkills]
+    : [];
 
   return {
     pkgRoot,
