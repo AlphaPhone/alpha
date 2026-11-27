@@ -26,7 +26,7 @@ import { calendarInFront } from "./calendar.vibe"
 import { type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
 import { type Row, androidWindowOf } from "./shown.ts"
 import { Shown } from "./stores.vibe"
-import { civilDay, feedParams, utcStart, wallDateTime, zone } from "./time.ts"
+import { civilDay, feedParams, readHolds, utcStart, wallDateTime, zone } from "./time.ts"
 
 /** What the owner typed into the form, kept on the phone as it is typed: the spec counts the edits, this holds them. */
 export schema Fields {
@@ -653,8 +653,10 @@ const reread = started(effect {
     for (const id of new Set([...(form.form === "EditReminder" ? [] : [form.target]), ...form.latched])) {
       if (id === 0) continue
       const row = shown.find(id) ?? shown.lastSeen(id) ?? shown.seenAt(id)
-      const source = row?.source === "Phone" ? state.phone : state.google
-      const whole = source.status === "Loaded" && !(row?.source === "Phone" && state.phoneLimited) && row !== undefined && Math.abs(civilDay(row.begin) - state.anchor) <= 31
+      const read = row?.source === "Phone"
+        ? { status: state.phone.status, limited: state.phoneLimited, day: state.phoneDay }
+        : { status: state.google.status, limited: state.googleLimited, day: state.googleDay }
+      const whole = row !== undefined && read.status === "Loaded" && !read.limited && readHolds(row.begin, read.day)
       const there = shown.find(id)
       if (there === undefined && whole) try contained(editor.send({ type: "eventMissing", id, whole }), "telling the form its event is gone")
       else if (there !== undefined) try contained(editor.send({ type: "eventRead", id, revision: there.revision, whole }), "telling the form what the read found")

@@ -73,7 +73,7 @@ import { type DictationKeyboard, useTalkKeyboard } from "../voice/useTalkKeyboar
 export interface AssistantProps {
   runtime: ManagedRuntime.ManagedRuntime<ConversationMachine | AttachmentMachine | ChatsMachine | ComposerMachine | SearchMachine | ReplyMachine | DockMachine | ShellMachine | CommsMachine | ContactMachine | CommsTargetServices | CommsBriefing | Talk | MailQuestions | MessagingBridge | LayersMachine | MediaReview | Documents | AttachmentPicker | Agent | Device | KeyValueStore.KeyValueStore | NoteStore | NotesMachine | Backs, unknown>;
   messageActions?: MessageActions;
-  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk" | "voiceNotice"> & {
+  speech?: Pick<AssistantComposerProps, "onTalk" | "onDictate" | "showUnavailableTalk"> & {
     voicePanel?: (onKeyboard: DictationKeyboard) => ReactNode;
     interim?: ReactNode;
     voice?: (presentation: { compactDock: boolean; atBar: boolean }) => ReactNode;
