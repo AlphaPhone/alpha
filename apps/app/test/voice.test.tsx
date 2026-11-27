@@ -1890,6 +1890,15 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     world.ask.nextActions = () => [kept("not-a-text")];
     await drawn(() => speakUtterance(world, "When does Maya land?"));
     await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["It is sunny today.", "Maya lands at six."])));
+
+    // spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open": a listed review of this phone that is not a text, shown as no card, is said in full.
+    alsoPending(review, "listed-note", { type: "create_note", title: "Maya's flight", body: "Lands at six." });
+    world.ask.nextReplyChunks = ["I've drafted a note about Maya's flight."];
+    world.ask.nextActions = () => [kept("listed-note")];
+    await drawn(() => speakUtterance(world, "Make a note of Maya's flight."));
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 4 && s.phase === "Listening" && s.mic === "On" && !s.reviewPending);
+    await drawn(() => vi.waitFor(() => expect(world.voice.spoken.slice(from).map((one) => one.text)).toEqual(["It is sunny today.", "Maya lands at six.", "I've drafted a note about Maya's flight."])));
+    expect([button("Approve"), review.decisions, review.claims]).toEqual([undefined, [], []]);
   });
 
   async function openAskFirstPageCard(url: string) {
