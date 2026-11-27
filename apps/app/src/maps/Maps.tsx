@@ -6,7 +6,7 @@ import { type ReactNode, useRef, useState, useSyncExternalStore } from "react";
 import { Time } from "../runtime/index.vibe";
 import type { Resident, Shown } from "../runtime/ui.tsx";
 import { untimed } from "../runtime/index.vibe";
-import { AppBack } from "../shell/ui.tsx";
+import { AppBack, SharePanel } from "../shell/ui.tsx";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
 import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice, Sheet } from "../../gen/app__maps.ts";
@@ -535,10 +535,19 @@ function SearchSheet({ screen, state, seen, store, saved, height, onRecent }: { 
   );
 }
 
+/** The share panel's rows over a place, in v119's order (maps/share.ts:6 through runtime/share-panel.ts): Email, the phone's share sheet, Copy link. */
+const sharedFromThePanel = [
+  { kind: "EmailPlace", label: "Email", Icon: Mail },
+  { kind: "SharePlace", label: "Share", Icon: Share2 },
+  { kind: "CopyLink", label: "Copy link", Icon: Link },
+] as const;
+
 /** A place's card: its name and kind, Directions, Save, Share and the like, its address and number. */
 function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { screen: Screen; state: State; spot: Spot; kept: Kept | undefined; height: number | string; back: (() => void) | undefined; outside: boolean }) {
   const [name, setName] = useState("");
+  const [sharing, setSharing] = useState(0);
   const { can, send } = screen;
+  const shareTo = sharedFromThePanel.filter(({ kind }) => can({ type: "handOn", kind })).map(({ label, Icon, kind }) => ({ label, Icon, choose: () => { setSharing(0); void send({ type: "handOn", kind }); } }));
   // spec/app/maps/index.md, "A saved place is renamed in a name field the owner opens on its card": Save keeps the pin under the name the owner gave it, as v119's toggleSaved kept its label (ui/maps/maps-screen.ts:843-856)
   const saveName = kept?.name ?? (pinNameOf(state) || spot.name);
   const applied = name.trim() || (kept === undefined ? titleOf(spot, kept, state) : saveName);
@@ -562,9 +571,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
           {kept === undefined
             ? can({ type: "namePlace", name: saveName }) && <MapsRoundButton aria-label="Save" aria-pressed={false} onClick={() => void send({ type: "namePlace", name: saveName })}><Star /></MapsRoundButton>
             : can({ type: "forgetPlace" }) && <MapsRoundButton aria-label="Remove from saved" aria-pressed className="text-primary" onClick={() => void send({ type: "forgetPlace" })}><Star className="fill-current" /></MapsRoundButton>}
-          {can({ type: "handOn", kind: "SharePlace" }) && <MapsRoundButton aria-label="Share" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 /></MapsRoundButton>}
-          {can({ type: "handOn", kind: "EmailPlace" }) && <MapsRoundButton aria-label="Email" onClick={() => void send({ type: "handOn", kind: "EmailPlace" })}><Mail /></MapsRoundButton>}
-          {can({ type: "handOn", kind: "CopyLink" }) && <MapsRoundButton aria-label="Copy link" onClick={() => void send({ type: "handOn", kind: "CopyLink" })}><Link /></MapsRoundButton>}
+          {shareTo.length > 0 && <MapsRoundButton aria-label="Share" onClick={() => setSharing(state.place)}><Share2 /></MapsRoundButton>}
           {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <MapsRoundButton aria-label="Website" onClick={() => void send({ type: "handOn", kind: "Website" })}><Globe /></MapsRoundButton>}
           {outside && can({ type: "handOn", kind: "MapsApp" }) && <MapsRoundButton aria-label="Open in another app" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}><ExternalLink /></MapsRoundButton>}
         </div>
@@ -586,6 +593,7 @@ function PlaceSheet({ screen, state, spot, kept, height, back, outside }: { scre
         )}
         {!hasRoom(state.saved, state.place) && !googleShown(state) && kept === undefined && <p className="mt-2 text-sm text-muted-foreground">Saved places are full. Remove one before adding another.</p>}
       </div>
+      <SharePanel open={sharing === state.place && shareTo.length > 0} close={() => setSharing(0)} destinations={shareTo} />
     </MapsSheet>
   );
 }
