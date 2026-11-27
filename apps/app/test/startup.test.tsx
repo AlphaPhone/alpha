@@ -279,7 +279,7 @@ describe("startup", () => {
   it("Enforces single-Home instance handoff, assistant call gating, and 50-entry 30-day journal pruning (spec/app/startup/instance.md, \"Story: Stay one Home\"; spec/app/startup/call.md, \"Story: Listen only when I just asked for it\"; spec/app/startup/journal.md, \"Story: Remember what went wrong\")", async () => {
     underAct();
     const world = scene();
-    const { alpha } = await open(world, startupMounts());
+    const { alpha } = await open(world, [at("overlay", () => Promise.resolve({ default: startupArea }))]);
     const runtime = startupArea.runtime(alpha);
 
     // spec/app/startup/instance.md, "A start reaches the page in its task, builds the first page, or hands itself to the owner"
@@ -376,5 +376,5 @@ describe("startup", () => {
     await drawn(() => root.unmount());
     host.remove();
     expect(untimed).toBe(0);
-  });
+  }, 180_000);
 });

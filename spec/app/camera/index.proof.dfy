@@ -1,7 +1,3 @@
-// spec/app/camera/index.md: a preview started joins the starts the phone may still answer, and
-// one answered leaves them; an answer to the agent is added exactly when its request ends; a
-// capture on the lock screen joins its session.
-
 lemma Joined(xs: seq<int>, ys: seq<int>)
   ensures forall x :: x in xs + ProofLib.Filter((set_x: int) => !((set_x in xs)), ys) <==> (x in xs || x in ys)
 {
@@ -115,7 +111,7 @@ lemma PermissionEffects(before: Camera, after: Done)
 {
   hide *;
   reveal stepALostPreviewFails, stepARetiredPreviewIsReleased, stepOneFocusWriteAtATime,
-    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered,
+    stepSoundOnlyWithTheMicrophone, stepASavedVideoIsTheLast, stepTheShutterNeverFiresCovered;
 }
 
 lemma PermissionCamera(s: Camera, grant: kit__permission_Grant, now: int, by_: app__photos__actor_Actor)

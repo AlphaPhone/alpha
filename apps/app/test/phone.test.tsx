@@ -483,7 +483,7 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Voicemail, (s) => s.confirming && s.playback === "Stopped");
     expect(world.telephony.voicemails.at(0)?.deleted).toBe(false);
 
-    // spec/app/phone/voicemail.md, "Confirming removes the open voicemail under a new number"
+    // spec/app/phone/voicemail.md, "Confirming removes the open voicemail under a new number, never during a call that may be an emergency call"
     await confirm("Delete");
     await until(alpha, alpha.runtime, Voicemail, (s) => s.removal.outcome === "Confirmed" && s.list.status === "Loaded" && s.items === 0);
     expect(world.telephony.voicemails.at(0)?.deleted).toBe(true);

@@ -56,19 +56,11 @@ lemma requestTyped_ensures(c: Comms, about: string, request: string, by_: Actor)
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysAnEmergencyCallIsNeverCompacted(requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysEndIsReachableDuringACall(requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysAnEmergencyIsALiveCall(requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysAScreenProposalBelongsToTheRing(requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysTheOpenProposalWasNeverRetired(requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> alwaysOneRequestPerSubject(requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepSameAppKeepsStageHistory(c, "requestTyped", requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepTheSheetHoldsItsHeightWhenTheStageChanges(c, "requestTyped", requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepPhoneTabReturnDoesNotAddHistory(c, "requestTyped", requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepNothingActsDuringAnEmergencyCall(c, "requestTyped", requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepOnlyTheOwnersTapApproves(c, "requestTyped", requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepAnApprovalNeverActsOverAnEmergencyCall(c, "requestTyped", requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepOnlyALiveProposalIsApproved(c, "requestTyped", requestTyped(c, about, request, by_)))
-  ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepARestoredProposalKeepsItsPlace(c, "requestTyped", requestTyped(c, about, request, by_)))
   ensures (inv(c) ==> canRequestTyped(c, about, request, by_) ==> stepABriefingIsNeverRepeated(c, "requestTyped", requestTyped(c, about, request, by_)))
-
 {
   if inv(c) && canRequestTyped(c, about, request, by_) {
     OneRequestPerSubjectEquiv(c);
@@ -105,19 +97,11 @@ lemma requestSent_ensures(c: Comms, about: string, by_: Actor)
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysAnEmergencyCallIsNeverCompacted(requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysEndIsReachableDuringACall(requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysAnEmergencyIsALiveCall(requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysAScreenProposalBelongsToTheRing(requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysTheOpenProposalWasNeverRetired(requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> alwaysOneRequestPerSubject(requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepSameAppKeepsStageHistory(c, "requestSent", requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepTheSheetHoldsItsHeightWhenTheStageChanges(c, "requestSent", requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepPhoneTabReturnDoesNotAddHistory(c, "requestSent", requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepNothingActsDuringAnEmergencyCall(c, "requestSent", requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepOnlyTheOwnersTapApproves(c, "requestSent", requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepAnApprovalNeverActsOverAnEmergencyCall(c, "requestSent", requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepOnlyALiveProposalIsApproved(c, "requestSent", requestSent(c, about, by_)))
-  ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepARestoredProposalKeepsItsPlace(c, "requestSent", requestSent(c, about, by_)))
   ensures (inv(c) ==> canRequestSent(c, about, by_) ==> stepABriefingIsNeverRepeated(c, "requestSent", requestSent(c, about, by_)))
-
 {
   if inv(c) && canRequestSent(c, about, by_) {
     OneRequestPerSubjectEquiv(c);

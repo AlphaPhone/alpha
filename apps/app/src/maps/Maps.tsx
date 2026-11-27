@@ -56,6 +56,7 @@ const told: Record<GuideNotice, string> = {
   StoppedFromNotification: "Navigation stopped from the notification.",
   PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
   AccountChanged: "The Maps account changed. Navigation ended.",
+  RerouteKept: "Rerouting needs a precise, up-to-date location. The current route was kept.",
 };
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };

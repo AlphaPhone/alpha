@@ -176,7 +176,7 @@ effect function signInForMail(usual: () => void): void!!(Cloud | Mail | Inbox.Ma
   else if (next === "AsAlways") usual()
 }
 
-// spec/app/inbox/index.md, "The owner authorizes Gmail in Google and Inbox checks access on return"
+// spec/app/inbox/index.md, "Connecting or reconnecting Gmail authorizes the signed-in owner, keeps Calendar access, and uses only what Google granted"
 effect function authorizeGmail(intent: ConsentIntent, popup: GmailAuthorizationWindow | undefined): boolean!!MailConsent {
   const shell = try Shell
   const mailbox = try Inbox.Machine

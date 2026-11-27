@@ -184,7 +184,9 @@ describe("Maps on a phone", () => {
     world.maps.guidance.opened = true;
     await drawn(() => { window.dispatchEvent(new Event("alpha:maps-open")); });
     await until(alpha, runtime, Screen, (s) => !s.trip.away && s.trip.guidance === "Going");
+    await until(alpha, runtime, Screen, (s) => s.trip.speaking === 0);
     expect(world.maps.guidance.opened).toBe(false);
+    expect(heard.spoken).toEqual(["Head north", "Head north"]);
 
     // spec/app/maps/index.md, "Story: Keep guiding away from Maps": locking the phone is leaving
     await seen(false);
@@ -192,14 +194,14 @@ describe("Maps on a phone", () => {
 
     // spec/app/maps/navigation.md, "The next turn is spoken with Maps on screen, never while it is away, and the instruction owed is spoken on coming back"
     await until(alpha, runtime, Screen, (s) => s.trip.speaking === -1);
-    expect(heard.spoken).toEqual(["Head north"]);
+    expect(heard.spoken).toEqual(["Head north", "Head north"]);
 
     // spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
     world.maps.guidance.opened = true;
     await seen(true);
     await until(alpha, runtime, Screen, (s) => !s.trip.away && s.trip.guidance === "Going");
     await until(alpha, runtime, Screen, (s) => s.trip.speaking === 0);
-    expect(heard.spoken).toEqual(["Head north", "Head north"]);
+    expect(heard.spoken).toEqual(["Head north", "Head north", "Head north"]);
     await seen(false);
     await until(alpha, runtime, Screen, (s) => s.trip.away);
     await drawn(() => { world.maps.guidance.stop?.("notification"); });

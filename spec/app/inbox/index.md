@@ -520,6 +520,8 @@ pure def sometimesTheListMayBeOutOfDate(s: Mailbox): bool = s.doubtful and s.pag
 > there is none, to choose among several, to see only what my grant
 > allows, and to see nothing once I withdraw it.
 
+### Connecting or reconnecting Gmail authorizes the signed-in owner, keeps Calendar access, and uses only what Google granted
+
 Connect Gmail, Give access and Reconnect open Google's authorization for
 the same signed-in Cloud owner. The request covers reading, sending,
 saving drafts and organizing mail. Reconnecting keeps the selected

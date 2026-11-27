@@ -59,7 +59,7 @@ lemma Fewer(p: int -> bool, xs: seq<int>, x: int)
   AllTrue(xs);
 }
 
-lemma openTab_ensures(s: Browser, kind: Kind)
+lemma openTab_ensures(s: Browser, kind: app__browser__shared_Kind)
   ensures (inv(s) ==> canOpenTab(s, kind) ==> alwaysTabsAreBounded(openTab(s, kind)))
   ensures (inv(s) ==> canOpenTab(s, kind) ==> alwaysEveryNativeTabHasAnOwner(openTab(s, kind)))
   ensures (inv(s) ==> canOpenTab(s, kind) ==> alwaysTabNumbersAreNeverReused(openTab(s, kind)))

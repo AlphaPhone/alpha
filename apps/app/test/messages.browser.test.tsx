@@ -23,7 +23,7 @@ async function messagesFromHome(world: ReturnType<typeof scene>) {
   return alpha;
 }
 
-it("Opens message actions while held and toggles them by tap (spec/app/messages/index.md, \"Story: Act on a message\")", async () => {
+it('Opens message actions while held and toggles them by tap (spec/app/messages/index.md, "Story: Act on a message")', async () => {
   await page.viewport(390, 844);
   const world = { ...scene(), phone: true, image: true };
   const alpha = await messagesFromHome(world);

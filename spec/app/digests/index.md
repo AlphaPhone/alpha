@@ -114,11 +114,13 @@ pure def backgroundAnswered(d: Digests, id: int, applied: bool): Digests =
 
 ### A switch shows what the platform took, and one whose answer was lost is shown as not confirmed
 
+Discovered by the proof: no background switch attempt is in flight while no owner is signed in.
+
 ```quint
 pure def switchHonest(s: Switch): bool = s.attempt.outcome != A::Recorded and s.attempt.id >= 0
 
 pure def alwaysSwitchAndOwnerStayValid(d: Digests): bool =
-  d.owner >= 0 and (d.owner == 0 implies (not(d.open) and not(d.background.on))) and switchHonest(d.background)
+  d.owner >= 0 and (d.owner == 0 implies (not(d.open) and not(d.background.on) and d.background.attempt.outcome != A::Sent)) and switchHonest(d.background)
 
 pure def stepASwitchMovesOnlyByThePlatformsAnswer(before: Digests, via: str, after: Digests): bool =
   after.background.on != before.background.on implies (via == "backgroundAnswered" or via == "ownerChanged" or via == "nativeChecksRead")

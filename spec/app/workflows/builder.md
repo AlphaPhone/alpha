@@ -228,6 +228,12 @@ pure def sometimesCalendarsAreRefused(b: Builder): bool = b.access.grant == P::D
 pure def sometimesCalendarsAreLimited(b: Builder): bool = b.access.grant == P::Limited and b.choices.status == R::Loaded
 
 pure def sometimesNotesAreChosen(b: Builder): bool = b.steps.some(s => s.op == T::SelectedNotes and s.items >= 1)
+
+pure val eval_witness_sometimesNotesAreChosen = (
+  ("ownerChanged", 1), ("openBuilder", 0, 0, false),
+  ("listChoices", T::SelectedNotes), ("choicesListed", 1, true),
+  ("addStep", T::SelectedNotes, 0, 0, 1, T::FromRunDay, 0)
+)
 ```
 
 ## Story: Choose when a workflow runs

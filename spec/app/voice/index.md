@@ -749,7 +749,8 @@ while the editor is empty and no other send is in hand. An unsent draft
 keeps its own slot. Typed and spoken turns take the same exclusive posting
 place while either may still reach the agent. The recorded user and reply
 rows appear under the identities the agent confirms, on the latest page
-of that conversation. Opening older history keeps its place.
+of that conversation. Opening older history keeps its place. Discovered
+by the proof: any turn or active talk also belongs to a session.
 
 ```quint
 pure def talkCreatesBlankConversation(
@@ -766,7 +767,7 @@ pure def lawTalkRespectsSelectedChatAndExclusivePostSlot(
     and (sendInFlight implies not(talkTurnCanPost(sendInFlight)))
 
 pure def alwaysSentTurnsBelongToASession(v: Voice): bool =
-  v.sent > 0 implies v.session > 0
+  (v.sent > 0 or v.turn > 0 or talking(v)) implies v.session > 0
 ```
 
 ### What was heard but not sent is never counted as sent
