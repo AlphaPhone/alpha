@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/account/change@1",
   "spec": "spec/app/account/change.md",
-  "shape": "f8c41e006987a05a",
+  "shape": "909339ddfa0b7be6",
   "sealed": {
-    "shape": "f8c41e006987a05a",
+    "shape": "909339ddfa0b7be6",
     "state": "fc33d5c2b41a6d21"
   },
   "state": {

@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/inbox/marking@1",
   "spec": "spec/app/inbox/marking.md",
-  "shape": "7365ede35b8baaba",
+  "shape": "b7bf8279c7205fe9",
   "sealed": {
-    "shape": "7365ede35b8baaba",
+    "shape": "b7bf8279c7205fe9",
     "state": "2685479df6d75231"
   },
   "state": {

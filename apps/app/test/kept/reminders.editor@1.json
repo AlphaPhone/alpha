@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/reminders/editor@1",
   "spec": "spec/app/reminders/editor.md",
-  "shape": "c0ac9eeb6f28c94b",
+  "shape": "2fc0db9ba9ac415d",
   "sealed": {
-    "shape": "c0ac9eeb6f28c94b",
+    "shape": "2fc0db9ba9ac415d",
     "state": "37867e0f6108f0a4"
   },
   "state": {

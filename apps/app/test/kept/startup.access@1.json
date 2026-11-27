@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/startup/access@1",
   "spec": "spec/app/startup/access.md",
-  "shape": "0333796f4d1b3df9",
+  "shape": "f0402988af49b9d0",
   "sealed": {
-    "shape": "0333796f4d1b3df9",
+    "shape": "f0402988af49b9d0",
     "state": "bd5725054c4cddf9"
   },
   "state": {

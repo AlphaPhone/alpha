@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/notes/microphone@1",
   "spec": "spec/app/notes/microphone.md",
-  "shape": "bcfeca87c063cd2b",
+  "shape": "1fd7b0a2cbd497df",
   "sealed": {
-    "shape": "bcfeca87c063cd2b",
+    "shape": "1fd7b0a2cbd497df",
     "state": "9c1c8669c1dfe1e6"
   },
   "state": {

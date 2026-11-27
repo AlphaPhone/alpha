@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/photos/viewer@1",
   "spec": "spec/app/photos/viewer.md",
-  "shape": "be0efdcaf2909c83",
+  "shape": "7e144c86ddbc9a90",
   "sealed": {
-    "shape": "be0efdcaf2909c83",
+    "shape": "7e144c86ddbc9a90",
     "state": "74ebfdcdc50f39b6"
   },
   "state": {

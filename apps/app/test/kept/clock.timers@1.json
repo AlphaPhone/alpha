@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/clock/timers@1",
   "spec": "spec/app/clock/timers.md",
-  "shape": "c373c3a5f092efaf",
+  "shape": "8233a0d5bd24b038",
   "sealed": {
-    "shape": "c373c3a5f092efaf",
+    "shape": "8233a0d5bd24b038",
     "state": "1e1d6177e13d3d3e"
   },
   "state": {

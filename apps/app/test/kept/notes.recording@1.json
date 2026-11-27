@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/notes/recording@1",
   "spec": "spec/app/notes/recording.md",
-  "shape": "ec01807347521a70",
+  "shape": "3174ae81467498c1",
   "sealed": {
-    "shape": "ec01807347521a70",
+    "shape": "3174ae81467498c1",
     "state": "952b32e7d9fe9b46"
   },
   "state": {

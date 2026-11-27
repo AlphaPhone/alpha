@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/clock/alarms@1",
   "spec": "spec/app/clock/alarms.md",
-  "shape": "193719e91c48cdd5",
+  "shape": "000a74939de47238",
   "sealed": {
-    "shape": "193719e91c48cdd5",
+    "shape": "000a74939de47238",
     "state": "c061cfcb1bf71855"
   },
   "state": {

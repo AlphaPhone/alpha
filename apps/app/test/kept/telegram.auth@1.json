@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/telegram/auth@1",
   "spec": "spec/app/telegram/auth.md",
-  "shape": "1059c8d66a8cdbaf",
+  "shape": "b3de1f54742b5b4c",
   "sealed": {
-    "shape": "1059c8d66a8cdbaf",
+    "shape": "b3de1f54742b5b4c",
     "state": "3ff61a9cfe60ef17"
   },
   "state": {

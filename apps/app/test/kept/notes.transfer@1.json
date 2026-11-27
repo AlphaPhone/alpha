@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/notes/transfer@1",
   "spec": "spec/app/notes/transfer.md",
-  "shape": "aa36202eba37ec10",
+  "shape": "633e2a77c8bbbc26",
   "sealed": {
-    "shape": "aa36202eba37ec10",
+    "shape": "633e2a77c8bbbc26",
     "state": "531e006fcbfdc95a"
   },
   "state": {

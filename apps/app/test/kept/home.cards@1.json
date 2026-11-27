@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/home/cards@1",
   "spec": "spec/app/home/cards.md",
-  "shape": "cac25f1d2c9a6024",
+  "shape": "0c8d48be11e0d9ab",
   "sealed": {
-    "shape": "cac25f1d2c9a6024",
+    "shape": "0c8d48be11e0d9ab",
     "state": "5e372ee0e2114c54"
   },
   "state": {

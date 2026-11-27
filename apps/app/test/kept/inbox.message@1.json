@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/inbox/message@1",
   "spec": "spec/app/inbox/message.md",
-  "shape": "529e2d609ca13743",
+  "shape": "c432927bbd9e324a",
   "sealed": {
-    "shape": "529e2d609ca13743",
+    "shape": "c432927bbd9e324a",
     "state": "5a3a120c39519033"
   },
   "state": {

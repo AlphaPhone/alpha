@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/calendar/editor@1",
   "spec": "spec/app/calendar/editor.md",
-  "shape": "bdd3af9ee5bb0e67",
+  "shape": "52cffc13fbeb7cab",
   "sealed": {
-    "shape": "bdd3af9ee5bb0e67",
+    "shape": "52cffc13fbeb7cab",
     "state": "2c2a81f070dc03bc"
   },
   "state": {

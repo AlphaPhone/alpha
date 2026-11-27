@@ -1,9 +1,9 @@
 {
   "key": "alpha/app/calendar/agent@1",
   "spec": "spec/app/calendar/agent.md",
-  "shape": "865aab989f1d2679",
+  "shape": "8c8313395f7e5f09",
   "sealed": {
-    "shape": "865aab989f1d2679",
+    "shape": "8c8313395f7e5f09",
     "state": "b07e0cef8f8870e4"
   },
   "state": {
