@@ -4,14 +4,14 @@
   "shape": "04646a632c0e73e9",
   "sealed": {
     "shape": "04646a632c0e73e9",
-    "state": "90436ec64c235c8b"
+    "state": "080bee2259fd09f3"
   },
   "state": {
     "owner": 1,
     "asked": 0,
     "askedReach": "OneEvent",
     "askedRevision": 0,
-    "waiting": 42,
+    "waiting": 4294967338,
     "reach": "FromThisOn",
     "revision": 5,
     "undo": {
@@ -40,6 +40,17 @@
     "dropped",
     "failed"
   ],
+  "beside": {
+    "alpha.calendar.numbers": {
+      "last": 4294967338,
+      "numbers": [
+        [
+          "Phone:p42",
+          4294967338
+        ]
+      ]
+    }
+  },
   "earlier": [
     {
       "from": "0df1b3a3a3",
@@ -60,6 +71,29 @@
         "hiding": 0,
         "dropped": 0,
         "failed": 0
+      },
+      "reads": {
+        "owner": 1,
+        "asked": 0,
+        "askedReach": "OneEvent",
+        "askedRevision": 0,
+        "waiting": 0,
+        "reach": "FromThisOn",
+        "revision": 5,
+        "undo": {
+          "holding": "Undone",
+          "until": 1797592000000
+        },
+        "notice": false,
+        "scale": 100,
+        "paused": false,
+        "sending": 0,
+        "sendingReach": "OneEvent",
+        "hiding": 0,
+        "hidingReach": "OneEvent",
+        "dropped": 0,
+        "failed": 0,
+        "changed": false
       }
     },
     {
@@ -83,6 +117,29 @@
         "hidingReach": "OneEvent",
         "dropped": 0,
         "failed": 0
+      },
+      "reads": {
+        "owner": 1,
+        "asked": 0,
+        "askedReach": "OneEvent",
+        "askedRevision": 0,
+        "waiting": 0,
+        "reach": "FromThisOn",
+        "revision": 5,
+        "undo": {
+          "holding": "Undone",
+          "until": 1797592000000
+        },
+        "notice": false,
+        "scale": 100,
+        "paused": false,
+        "sending": 0,
+        "sendingReach": "OneEvent",
+        "hiding": 0,
+        "hidingReach": "OneEvent",
+        "dropped": 0,
+        "failed": 0,
+        "changed": false
       }
     }
   ]

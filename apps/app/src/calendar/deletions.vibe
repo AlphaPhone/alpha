@@ -180,6 +180,16 @@ const reconciled = started(effect {
   })
 }, "reconciling hidden Calendar deletions after reads")
 
+// spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"
+/** A paused deletion whose number names no event Calendar kept a number for, as one kept before it kept numbers, is kept unsent as Keep it does. */
+const unnamed = started(effect {
+  const held = try Held.Machine
+  const shown = try Shown
+  try Stream.runForEach(held.changes, effect (state) => {
+    if (state.paused && state.waiting !== 0 && !shown.known(state.waiting)) try contained(held.send({ type: "undoShown" }), "keeping unsent a deletion whose event is unknown")
+  })
+}, "keeping unsent the deletions Calendar cannot name")
+
 // spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
 /** Deletions kept before the reach of the one sent and the one hidden were held apart: read with each at a fresh machine's. */
 function storedDeletions(key: string, start = Held.initial) {
@@ -189,4 +199,4 @@ function storedDeletions(key: string, start = Held.initial) {
 
 // spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"
 /** Calendar's deletions: kept on the phone with their Undo window across a restart, which pauses one still waiting, and released to the editor. */
-export const deletions = together(deletionMeta, reacting({ ...Held, stored: storedDeletions }, { keep: 1, open: [{ type: "restart" }], carry, timers }), left, scaled, notices, reconciled)
+export const deletions = together(deletionMeta, reacting({ ...Held, stored: storedDeletions }, { keep: 1, open: [{ type: "restart" }], carry, timers }), left, scaled, notices, reconciled, unnamed)

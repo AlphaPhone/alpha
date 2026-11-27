@@ -844,6 +844,81 @@ describe("on a phone", () => {
     expect(world.calendar.phoneEvents.map((event) => event.title)).not.toContain("Gym");
   });
 
+  it("A deletion a restart paused is for the event the owner confirmed, though the phone's calendar gained events before it (spec/app/calendar/deletions.md, \"A restart pauses a deletion still in its window; the owner sends it or keeps the event\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const first = await open(world, only("view:Calendar", "notice"));
+    const before = calendar.runtime(first.alpha);
+    await openCalendar(first.alpha);
+    await until(first.alpha, before, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    await tap("Gym");
+    await until(first.alpha, before, View, (s) => s.open !== 0);
+    await chooseEventAction("Delete");
+    await until(first.alpha, before, Held, (d) => d.asked !== 0);
+    await press("Yes");
+    await until(first.alpha, before, Held, (d) => d.waiting !== 0 && d.notice);
+    await first.close();
+
+    world.calendar.phoneEvents.unshift(
+      { id: "p2", calendarId: "local", title: "Piano", begin: world.at(0, 16), end: world.at(0, 17), allDay: false, recurring: false },
+      { id: "p3", calendarId: "local", title: "Walk", begin: world.at(0, 17), end: world.at(0, 18), allDay: false, recurring: false },
+    );
+    const second = await open(world, only("view:Calendar", "notice"));
+    const { alpha } = second;
+    const runtime = calendar.runtime(alpha);
+    await until(alpha, runtime, View, (s) => s.front && s.phoneRows === 3 && s.google.status === "Loaded");
+    await until(alpha, runtime, Held, (d) => d.paused);
+    expect(document.body.textContent).toContain("Alpha restarted before deleting Gym.");
+    vi.useFakeTimers({ toFake: ["performance"] });
+    await press("Delete");
+    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Sent");
+    await drawn(() => {});
+    vi.advanceTimersByTime(20_000);
+    await later(alpha, 10_000);
+    vi.useRealTimers();
+    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Confirmed");
+    await until(alpha, runtime, Held, (d) => d.sending === 0 && d.waiting === 0 && d.undo.holding === "Released");
+    expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Piano", "Walk"]);
+
+    // spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event": a deletion kept by a build that kept no numbers names no event, so it is kept unsent and Piano stays.
+    await tap("Piano");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await chooseEventAction("Delete");
+    await until(alpha, runtime, Held, (d) => d.asked !== 0);
+    await press("Yes");
+    await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    await second.close();
+    const kept = "alpha/app/calendar/deletions@1";
+    localStorage.setItem(kept, JSON.stringify({ ...JSON.parse(localStorage.getItem(kept) ?? "{}"), waiting: 1 }));
+    localStorage.removeItem("alpha.calendar.numbers");
+    const upgraded = await open(world, only("view:Calendar", "notice"));
+    const after = calendar.runtime(upgraded.alpha);
+    await until(upgraded.alpha, after, View, (s) => s.front && s.phoneRows === 2 && s.google.status === "Loaded");
+    await until(upgraded.alpha, after, Held, (d) => d.waiting === 0 && d.undo.holding === "Undone" && !d.paused);
+    expect([document.body.textContent?.includes("Alpha restarted before deleting"), Boolean(button(/^Piano/)), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([false, true, ["Piano", "Walk"]]);
+
+    // spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged": Walk changed on the phone after the owner confirmed its deletion, so it is not deleted.
+    await tap("Walk");
+    await until(upgraded.alpha, after, View, (s) => s.open !== 0);
+    await chooseEventAction("Delete");
+    await until(upgraded.alpha, after, Held, (d) => d.asked !== 0);
+    await press("Yes");
+    await until(upgraded.alpha, after, Held, (d) => d.waiting !== 0 && d.notice);
+    const walk = world.calendar.phoneEvents.find((event) => event.title === "Walk");
+    if (walk) walk.title = "Walk the dog";
+    await after.runPromise(View.use((view) => view.send({ type: "refresh" })));
+    await until(upgraded.alpha, after, View, (s) => s.phone.status === "Loaded");
+    vi.useFakeTimers({ toFake: ["performance"] });
+    await later(upgraded.alpha, 6_000);
+    await later(upgraded.alpha, 10_000);
+    await drawn(() => {});
+    vi.advanceTimersByTime(20_000);
+    await later(upgraded.alpha, 10_000);
+    vi.useRealTimers();
+    await until(upgraded.alpha, after, Held, (d) => d.sending === 0 && d.failed !== 0 && d.changed);
+    expect([Boolean(button(/^Walk the dog/)), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([true, ["Piano", "Walk the dog"]]);
+  });
+
   it("Link a Google calendar I can write to, and be told it is synced only when it is (spec/app/calendar/link.md, \"Story: Link a Google calendar I can write to, and be told it is synced only when it is\"; spec/app/calendar/link.md, \"Story: Disconnect Google from Calendar without leaving sync running\")", async () => {
     const world = morning(true);
     world.calendar.granted = true;

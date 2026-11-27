@@ -130,6 +130,8 @@ export interface ShownStore {
   readonly restore: (kept: ReadonlyArray<readonly [string, string, number]>) => void;
   /** The number an event of `source` keyed `key` has, or is given now. @throws {never} */
   readonly number: (source: Source, key: string) => number;
+  /** Whether `id` is a number this store gave an event, or took back from before a restart, and still holds. @throws {never} */
+  readonly known: (id: number) => boolean;
   /** The event numbered `id` as it was last read, even where the window read since no longer holds it. @throws {never} */
   readonly lastSeen: (id: number) => Row | undefined;
   /** The event numbered `id`, wherever it was last read. @throws {never} */
@@ -144,14 +146,33 @@ export interface ShownStore {
   readonly reset: () => void;
 }
 
+/**
+ * The numbers events were given, kept on the phone so that an event keeps its number across a restart and no other
+ * event is given it: the last number given, and each event's `source:key` with its number.
+ */
+export interface KeptNumbers {
+  readonly last: number;
+  readonly numbers: ReadonlyArray<readonly [string, number]>;
+}
+
+/** Where numbering starts on a phone that kept no numbers: past any number a build that kept none gave in one run. */
+const unkeptFloor = 2 ** 32;
+
+/** What numbering goes on from where the kept numbers can no longer be read: past any number given before, and holding none. */
+export const unreadableNumbers: KeptNumbers = { last: 2 ** 52, numbers: [] };
+
+/** How far numbering moves on at each start past the last number kept, so a number given after the last one kept is never given again. */
+const startGap = 2 ** 20;
+
 /** The calendar eliza lists as its own, its resident calendar, where it writes a new event (plugin-calendar providers.vibe `residentCalendarId`, host.vibe `writeTarget`). */
 const ownCalendarId = "primary";
 
 let activeStore: ShownStore | undefined;
 let fallbackStore: ShownStore | undefined;
 
-function makeShownStore(onReset?: () => void): ShownStore {
-  const numbers = new Map<string, number>();
+function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
+  const numbers = new Map<string, number>(kept?.numbers ?? []);
+  const given = new Set(numbers.values());
   const calendars = new Map<string, number>();
   const seen = new Map<string, { readonly content: string; readonly revision: number }>();
   const windows = new Map<Source, ReadonlyArray<Row>>();
@@ -160,8 +181,13 @@ function makeShownStore(onReset?: () => void): ShownStore {
   const names = new Map<string, string>();
   let ownName = "";
   const version = createShelf(0);
-  let nextNumber = 0;
+  let nextNumber = keepNumbers === undefined ? 0 : kept === undefined ? unkeptFloor : kept.last + startGap;
   let present = false;
+
+  /** @throws {never} */
+  function numbersChanged(): void {
+    keepNumbers?.({ last: nextNumber, numbers: [...numbers] });
+  }
 
   /** @throws {never} */
   function numbered(source: Source, key: string): number {
@@ -170,6 +196,8 @@ function makeShownStore(onReset?: () => void): ShownStore {
     if (known !== undefined) return known;
     const made = ++nextNumber;
     numbers.set(name, made);
+    given.add(made);
+    numbersChanged();
     return made;
   }
 
@@ -254,7 +282,11 @@ function makeShownStore(onReset?: () => void): ShownStore {
       cut.delete(source);
       const prefix = `${source}:`;
       for (const [id, row] of [...last]) if (row.source === source) last.delete(id);
-      for (const key of [...numbers.keys()]) if (key.startsWith(prefix)) numbers.delete(key);
+      for (const [key, id] of [...numbers]) if (key.startsWith(prefix)) {
+        numbers.delete(key);
+        given.delete(id);
+      }
+      numbersChanged();
       for (const key of [...seen.keys()]) if (key.startsWith(prefix)) seen.delete(key);
       if (source === "Phone") calendars.clear();
       told();
@@ -271,6 +303,7 @@ function makeShownStore(onReset?: () => void): ShownStore {
       for (const [name, content, revision] of kept) if (!seen.has(name)) seen.set(name, { content, revision });
     },
     number: (source, key) => numbered(source, key),
+    known: (id) => given.has(id),
     lastSeen: (id) => last.get(id),
     find(id) {
       for (const rows of windows.values()) {
@@ -293,6 +326,7 @@ function makeShownStore(onReset?: () => void): ShownStore {
       names.clear();
       ownName = "";
       numbers.clear();
+      given.clear();
       calendars.clear();
       seen.clear();
       windows.clear();
@@ -304,6 +338,7 @@ function makeShownStore(onReset?: () => void): ShownStore {
       onReset?.();
     },
   };
+  numbersChanged();
   return store;
 }
 
@@ -313,11 +348,14 @@ function currentStore(): ShownStore {
   return fallbackStore;
 }
 
-/** Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. @throws {never} */
-export function createShownStore(): ShownStore {
+/**
+ * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. Given
+ * `keepNumbers`, it numbers events on from `kept`, what an earlier run kept, and hands it each change to keep. @throws {never}
+ */
+export function createShownStore(kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
   const store = makeShownStore(() => {
     if (activeStore === store) activeStore = undefined;
-  });
+  }, kept, keepNumbers);
   activeStore = store;
   return store;
 }
@@ -339,6 +377,7 @@ export const shown: ShownStore = {
   revisions: () => currentStore().revisions(),
   restore: (kept) => currentStore().restore(kept),
   number: (source, key) => currentStore().number(source, key),
+  known: (id) => currentStore().known(id),
   lastSeen: (id) => currentStore().lastSeen(id),
   find: (id) => currentStore().find(id),
   listed: (calendars) => currentStore().listed(calendars),

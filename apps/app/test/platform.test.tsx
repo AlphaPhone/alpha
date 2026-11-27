@@ -368,8 +368,9 @@ it("Keep my phone's state across restarts: a kept value Alpha can no longer read
 /**
  * One durable record (`reacting(…, { keep })`) and every shape it was kept in on develop: `state` is what today's build
  * writes under `key`, `spec` the spec that declares its machine, `shape` the fingerprint of today's decode, `sealed` the
- * shape and the fingerprint of the `state` last written, `kept` the paths of the owner's data a restart keeps, and
- * `earlier` each earlier shape, as a build of that time wrote it.
+ * shape and the fingerprint of the `state` last written, `kept` the paths of the owner's data a restart keeps, `beside`
+ * what today's build keeps with it under keys of their own, and `earlier` each earlier shape, as a build of that time
+ * wrote it, with `reads`, the state today's build reads it as, where that build kept something today's cannot trust.
  */
 interface KeptRecord {
   readonly key: string;
@@ -379,7 +380,8 @@ interface KeptRecord {
   readonly state: Readonly<Record<string, unknown>>;
   readonly kept?: readonly string[];
   readonly memoryOnly?: readonly string[];
-  readonly earlier?: readonly { readonly from: string; readonly until: string; readonly state: Readonly<Record<string, unknown>> }[];
+  readonly beside?: Readonly<Record<string, unknown>>;
+  readonly earlier?: readonly { readonly from: string; readonly until: string; readonly state: Readonly<Record<string, unknown>>; readonly reads?: Readonly<Record<string, unknown>> }[];
 }
 /** A runtime of Alpha's, as far as reading a machine needs it. */
 interface Running {
@@ -518,7 +520,7 @@ async function keptOver(stored: ReadonlyMap<string, unknown>) {
 // spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
 it("Keep my phone's state across restarts: every shape a durable record was ever kept in is read again with the owner's data, and a value of a wrong kind is still set aside (spec/app/platform/index.md, \"A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it\")", async () => {
   const problems: string[] = [];
-  const today = await keptOver(new Map(keptRecords.map(({ key, state }) => [key, state])));
+  const today = await keptOver(new Map(keptRecords.flatMap(({ key, state, beside = {} }) => [[key, state] as const, ...Object.entries(beside)])));
   for (const record of keptRecords) {
     const { parseState, initial } = await machineOf(record.key);
     const shape = shapeOf(record.spec);
@@ -538,12 +540,15 @@ it("Keep my phone's state across restarts: every shape a durable record was ever
   const rounds = Math.max(...keptRecords.map(({ earlier = [] }) => earlier.length));
   for (let round = 0; round < rounds; round++) {
     const earlier = keptRecords.flatMap(({ key, state, kept = [], earlier: shapes = [] }) => (shapes[round] ? [{ key, today: state, kept, ...shapes[round] }] : []));
-    const restarted = await keptOver(new Map(keptRecords.map(({ key, state, earlier: shapes = [] }) => [key, shapes[round]?.state ?? state])));
+    const restarted = await keptOver(new Map(keptRecords.flatMap(({ key, state, beside = {}, earlier: shapes = [] }) => {
+      const kept = shapes[round]?.state;
+      return kept === undefined ? [[key, state] as const, ...Object.entries(beside)] : [[key, kept] as const];
+    })));
     for (const one of earlier) {
       const shape = `${one.key} as kept from ${one.from} until ${one.until}`;
       if (restarted.held.has(`${one.key}.unreadable`)) problems.push(`${shape}: set aside`);
-      else if (JSON.stringify(restarted.states.get(one.key)) !== JSON.stringify(today.states.get(one.key))) problems.push(`${shape}: read as ${JSON.stringify(restarted.states.get(one.key))}, today's shape as ${JSON.stringify(today.states.get(one.key))}`);
-      for (const name of one.kept) if (JSON.stringify(valueAt(restarted.states.get(one.key), name)) !== JSON.stringify(valueAt(one.today, name))) problems.push(`${shape}: ${name} was not kept`);
+      else if (JSON.stringify(restarted.states.get(one.key)) !== JSON.stringify(one.reads ?? today.states.get(one.key))) problems.push(`${shape}: read as ${JSON.stringify(restarted.states.get(one.key))}, today's shape as ${JSON.stringify(one.reads ?? today.states.get(one.key))}`);
+      for (const name of one.kept) if (JSON.stringify(valueAt(restarted.states.get(one.key), name)) !== JSON.stringify(valueAt(one.reads ?? one.today, name))) problems.push(`${shape}: ${name} was not kept`);
     }
   }
 
