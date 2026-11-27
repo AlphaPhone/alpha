@@ -260,6 +260,7 @@ pure def validEntry(e: AlertEntry): bool =
     and (e.phase == Ringing implies (e.firedAt >= e.dueAt and not(e.completed)))
     and (e.phase == Snoozed implies (e.snoozedUntil > e.firedAt and e.dueAt == e.snoozedUntil and not(e.completed)))
     and (e.phase == Scheduled implies not(e.completed))
+    and (e.requestedSnooze > 0 implies e.requestedSnooze > e.firedAt)
 
 pure def alwaysAlertsWellFormed(s: Alerts): bool =
   s.nextAttempt >= 1
