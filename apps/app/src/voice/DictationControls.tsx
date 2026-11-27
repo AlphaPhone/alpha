@@ -62,7 +62,7 @@ export function DictationControls({ runtime, onKeyboard, playback }: {
       : {
         label: recorder.preparation === "Preparing" ? "Preparing on-device speech"
           : recorder.preparation === "Unavailable" ? "On-device speech unavailable" : "Start recording",
-        icon: Mic, event: start, enabled: can(start), unseen: recorder.preparation === "Preparing",
+        icon: Mic, event: start, enabled: can(start), unseen: recorder.preparation === "Preparing" || recorder.preparation === "Unavailable",
       },
     Starting: { label: "Starting microphone", icon: Mic, event: start, enabled: false, unseen: true },
     Recording: { label: "Stop recording", icon: VoiceStopIcon, event: stop, enabled: can(stop) },
