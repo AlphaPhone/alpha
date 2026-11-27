@@ -864,6 +864,14 @@ describe("on a phone", () => {
     await deleteOpenEvent(alpha, runtime, action);
   }
 
+  /** Open Alpha again on `world` with Calendar in front, once `ready` holds on its view. */
+  async function startAgain(world: ReturnType<typeof morning>, ready: (state: CalendarView) => boolean) {
+    const started = await open(world, only("view:Calendar", "notice"));
+    const runtime = calendar.runtime(started.alpha);
+    await until(started.alpha, runtime, View, (s) => s.front && ready(s));
+    return { ...started, runtime };
+  }
+
   async function reopenCalendar(world: ReturnType<typeof morning>, pausedTitle?: string) {
     const reopened = await open(world, only("view:Calendar", "notice"));
     const runtime = calendar.runtime(reopened.alpha);
@@ -1014,9 +1022,8 @@ describe("on a phone", () => {
     const numbers = localStorage.getItem("alpha.calendar.numbers");
 
     const failing = failNumbersRead(world);
-    const second = await open(world, only("view:Calendar", "notice"));
-    const unread = calendar.runtime(second.alpha);
-    await until(second.alpha, unread, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    const second = await startAgain(world, (s) => s.phoneRows === 1 && s.google.status === "Loaded");
+    const unread = second.runtime;
     await later(second.alpha, 100);
     failing.mockRestore();
     const held = await unread.runPromise(Held.use((d) => d.get()));
@@ -1024,10 +1031,8 @@ describe("on a phone", () => {
     await second.close();
 
     asleep(world, 60_000);
-    const third = await open(world, only("view:Calendar", "notice"));
-    const runtime = calendar.runtime(third.alpha);
-    await until(third.alpha, runtime, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
-    await until(third.alpha, runtime, Held, (d) => d.paused && d.waiting === gym);
+    const third = await startAgain(world, (s) => s.phoneRows === 1 && s.google.status === "Loaded");
+    await until(third.alpha, third.runtime, Held, (d) => d.paused && d.waiting === gym);
     expect(document.body.textContent).toContain("Alpha restarted before deleting Gym.");
   });
 
@@ -1046,11 +1051,34 @@ describe("on a phone", () => {
     const world = morning(true);
     world.calendar.granted = true;
     const ahead = 2 ** 43;
+    world.now = ahead;
     world.calendar.phoneEvents = ["Gym", "Piano"].map((title, at) => ({ id: `p${at + 1}`, calendarId: "local", title, begin: ahead + (at + 1) * hour, end: ahead + (at + 2) * hour, allDay: false, recurring: false }));
-    localStorage.setItem("alpha.time", String(ahead));
     await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phone.status === "Loaded" && shown.all("Phone").length === 2);
     const ids = shown.all("Phone").map((row) => row.id);
     expect([new Set(ids).size, ids.every((id) => Number.isSafeInteger(id))]).toEqual([2, true]);
+  });
+
+  it(`Past 2109, a start that could not read the kept numbers never gives an event the number a kept deletion names (spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event")`, async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    const ahead = 2 ** 43;
+    world.now = ahead;
+    world.calendar.phoneEvents = [{ id: "p1", calendarId: "local", title: "Gym", begin: ahead + 2 * hour, end: ahead + 3 * hour, allDay: false, recurring: false }];
+    const first = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phone.status === "Loaded" && shown.all("Phone").length === 1);
+    await first.close();
+
+    world.calendar.phoneEvents = [{ id: "p2", calendarId: "local", title: "Walk", begin: ahead + hour, end: ahead + 2 * hour, allDay: false, recurring: false }, ...world.calendar.phoneEvents];
+    const failing = failNumbersRead(world);
+    const second = await startAgain(world, (s) => s.phone.status === "Loaded" && shown.all("Phone").length === 2);
+    await queueDeletion(second.alpha, second.runtime, "Walk");
+    await second.close();
+    failing.mockRestore();
+
+    asleep(world, 60_000);
+    const third = await startAgain(world, (s) => s.phone.status === "Loaded" && shown.all("Phone").length === 2);
+    await later(third.alpha, 100);
+    const held = await third.runtime.runPromise(Held.use((d) => d.get()));
+    expect([held.waiting, held.undo.holding, document.body.textContent?.includes("Alpha restarted before deleting"), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([0, "Undone", false, ["Walk", "Gym"]]);
   });
 
   it(`A doubt whose event went while Alpha was closed is let go by the first read that shows it gone (spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is")`, async () => {

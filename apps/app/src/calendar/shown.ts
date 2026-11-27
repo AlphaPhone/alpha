@@ -188,6 +188,18 @@ export function exactNumbers(read: KeptNumbers): KeptNumbers | undefined {
 }
 
 /**
+ * What a start at `now` that could not read the kept numbers numbers from, keeping none: `timeFloor`, and past 2109,
+ * where every start that can read them goes afresh from the floor, a place of its own above the floor's, a thousand and
+ * twenty-four numbers past an earlier such start for each millisecond between them, so that no event it numbers is given
+ * a number a record made before or after it names.
+ * @throws {never}
+ */
+export function unreadAt(now: number): KeptNumbers {
+  const at = timeFloor(now);
+  return { last: at === restartFloor ? ceiling + (Math.floor(now) % 2 ** 29) * 2 ** 10 : at, numbers: [] };
+}
+
+/**
  * What numbering starts from at `now`, given the numbers `read` kept before, if any: on from them and from `timeFloor`;
  * where that would pass the `ceiling`, afresh from the floor, holding none of them, whose numbers then name no event.
  * @throws {never}
