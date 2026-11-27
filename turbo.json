@@ -484,7 +484,7 @@
       "outputs": []
     },
     "//#analyze": {
-      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
+      "dependsOn": ["//#gen", "@repo/cloud#build", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen", "vibestack-studio#gen"],
       "inputs": [
         "apps/**",
         "packages/**",

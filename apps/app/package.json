@@ -13,9 +13,9 @@
     "eliza": "eliza-harness",
     "eliza:page": "node test/eliza/page.ts",
     "aosp": "node scripts/aosp.ts",
-    "licences": "node ../../vibestack/spec.ts tasks @repo/eliza-harness#build && node scripts/licences.ts",
+    "licences": "(cd ../.. && node vibestack/spec.ts tasks @repo/eliza-harness#build) && node scripts/licences.ts",
     "release": "node scripts/release.ts",
-    "android": "node ../../vibestack/spec.ts tasks @repo/cloud#build && node scripts/android.ts"
+    "android": "(cd ../.. && node vibestack/spec.ts tasks @repo/cloud#build) && node scripts/android.ts"
   },
   "dependencies": {
     "@capacitor/android": "8.5.2",
