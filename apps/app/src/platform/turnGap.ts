@@ -44,12 +44,12 @@ export class TurnGap {
     if (this.#held === "") return;
     this.#timer = this.clock.set(() => {
       this.#timer = undefined;
-      this.flush();
+      this.#sendHeld();
     }, this.gapMs);
   }
 
-  /** Send what is held now, once. @throws {never} */
-  flush(): void {
+  /** Send what is held once the gap has passed. @throws {never} */
+  #sendHeld(): void {
     this.#stopTimer();
     if (this.#done || this.#held === "") return;
     const text = this.#held;

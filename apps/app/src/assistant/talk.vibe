@@ -3,7 +3,7 @@ import type { ClientMessageId, ConversationRecord } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import type { Binding } from "../../gen/app__assistant__composer.effect.vibe"
 import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assistant__attachments.effect.vibe"
-import type { MediaCard } from "./media-review.vibe"
+import type { MediaCard, MediaNote } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
 import type { Sighting } from "../platform/location.vibe"
@@ -135,7 +135,8 @@ export interface Seen {
   readonly preview: { readonly ticket: number; readonly file: Attached } | undefined
   readonly recordingSummary: RecordingSummary | undefined
   readonly media: ReadonlyArray<MediaCard>
-  readonly mediaNote: { readonly conversation: number; readonly text: string } | undefined
+  /** How each decided phone step ended: those that stand under the reply that offered them, then the latest of the others. */
+  readonly mediaNotes: ReadonlyArray<MediaNote>
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
   readonly saved: string
   /** The hits of each search, by the ticket that asked from the first hit. */
@@ -260,7 +261,7 @@ export const talk = Layer.effect(Talk, effect {
   let previewOrigin: { readonly preview: NonNullable<Seen["preview"]>; readonly conversation: number; readonly id: string } | undefined
   let restoredSentId = ""
   let seen: Seen = {
-    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNote: undefined, saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNotes: [], saved: "", hits: [],
     titles: new Map(),
   }
   const keep = () => {
@@ -453,7 +454,7 @@ export const talk = Layer.effect(Talk, effect {
     board.change({
       pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "",
       files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined,
-      hits: [], recordingSummary: undefined, media: [], mediaNote: undefined, titles: new Map(records.map((one, at) => [at + 1, one.title])),
+      hits: [], recordingSummary: undefined, media: [], mediaNotes: [], titles: new Map(records.map((one, at) => [at + 1, one.title])),
     })
     return key !== undefined && preceding === key && remembered.length > 0
   }
