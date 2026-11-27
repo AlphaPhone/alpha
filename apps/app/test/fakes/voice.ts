@@ -48,6 +48,8 @@ export interface VoiceScene {
   readonly relayWarmups: string[];
   relayWarmupHangs: boolean;
   onDevice: boolean;
+  /** Whether the phone has the Cloud speech plugin; with neither it and `onDevice`, speech is unavailable. */
+  cloudSpeech: boolean;
   credentialId: string;
   organizationId: string;
   streamTiming: unknown;
@@ -102,6 +104,7 @@ export function voiceScene(): VoiceScene {
     relayWarmups: [],
     relayWarmupHangs: false,
     onDevice: true,
+    cloudSpeech: true,
     credentialId: "cred-1",
     organizationId: "org-1",
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },

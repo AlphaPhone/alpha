@@ -115,7 +115,6 @@ type Effect =
   | SetSpeakerOutput({ session: int, speakerTicket: int, muted: bool })
   | Hush({ turn: int })
   | Shut({ session: int, keyboard: bool })
-  | SayCallEnded
   | Navigate({ session: int, turn: int, place: int, sourceRoute: int })
   | CheckDictation({ ticket: int })
   | Record({ ticket: int })
@@ -212,9 +211,8 @@ pure def prewarm(v: Voice, now: int): Change =
 
 pure def canReturned(v: Voice): bool = (quiet(v) and v.warmed) or v.callNotice != NoCallNotice
 
-pure def returned(v: Voice): Change =
-  { state: { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice },
-    out: if (v.callNotice == CallNoticeOnReturn) List(SayCallEnded) else List() }
+pure def returned(v: Voice): Voice =
+  { ...v, warmed: if (quiet(v)) false else v.warmed, callNotice: NoCallNotice }
 
 pure def stepPrewarmNeverOpensTheMicrophone(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   via == "prewarm" implies (after.mic == before.mic and after.prompting == before.prompting and after.phase == before.phase)
@@ -966,7 +964,9 @@ As in the existing app, a conversation that could not start or went on
 failing shows no words: voice returns to idle at once, and Talk is offered
 again. Talk asked for during a call or while speech is unavailable, from
 Ask Alpha or the communications bar, does nothing and shows no words, and
-speech that cannot be played ends the turn the same way, with no words.
+speech that cannot be played ends the turn the same way, with no words. A
+call state the phone has not told is not a call: as in the Sunday demo
+build, Talk asked for then starts.
 
 ```quint
 pure def alwaysAFailureIsKeptOnlyOnceStopped(v: Voice): bool =
@@ -986,14 +986,15 @@ pure def sometimesDenied(v: Voice): bool = v.phase == Failed and v.failure == D:
 > As the owner, I want a call to end Talk and release the microphone and
 > speaker. After the call, I can choose to start Talk again.
 
-### A phone call ends Talk and Alpha tells the owner once
+### A phone call ends Talk quietly, and only the owner starts it again
 
 Talk releases its audio and retires its in-flight turn under the normal
-confirmed stop. A call reported by the phone or a matching native speech
-request can identify this stop. If the activity hid during Talk, remember
-whether a call was observed before Alpha showed again and show the notice
-then. A plain app switch clears the pending cause without a notice.
-Only an explicit Talk request starts a new conversation after the call.
+confirmed stop, and shows no words: no toast, popup, banner or status
+line, then or when Alpha shows again. A call reported by the phone or a
+matching native speech request can identify this stop. If the activity
+hid during Talk, remember whether a call was observed until Alpha shows
+again; a plain app switch clears the pending cause the same way. Only an
+explicit Talk request starts a new conversation after the call.
 
 ```quint
 pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
@@ -1001,8 +1002,7 @@ pure def canCallInterrupted(v: Voice, session: int, foreground: bool): bool =
 
 pure def callInterrupted(v: Voice, session: int, foreground: bool): Change =
   val ended = if (talking(v)) shutDown(D::NoFailure, false, v) else { state: v, out: List() }
-  { state: { ...ended.state, callNotice: if (foreground) NoCallNotice else CallNoticeOnReturn },
-    out: ended.out.concat(if (foreground) List(SayCallEnded) else List()) }
+  { state: { ...ended.state, callNotice: if (foreground) NoCallNotice else CallNoticeOnReturn }, out: ended.out }
 
 pure def stepACallStopsTalk(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
   (via == "callInterrupted") implies (not(talking(after)) and
@@ -1373,6 +1373,9 @@ pure def typeTranscript(v: Voice, ticket: int): Voice = { ...v, recorder: D::typ
 
 A messaging bar's dictation fills that bar, never Ask Alpha. The fill names
 its own number, so a late delivery cannot fill the field of a newer recording.
+Dictation asked for on a phone without speech does not start, and a
+transcript that would make the text too long is left out; neither shows
+words.
 In a Messages conversation, stopping a recording puts a successful transcript
 straight into that conversation's editable draft. Leaving the conversation
 before it arrives discards it.

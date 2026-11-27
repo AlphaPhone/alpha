@@ -926,7 +926,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => vi.waitFor(() => expect(world.calendar.writes).toEqual(["approve approval-1", "create ev-camera-setup"]), { timeout: 10_000 }));
   });
 
-  it("ends Talk for a call behind the call screen and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk and Alpha tells the owner once\")", async () => {
+  it("ends Talk for a call behind the call screen, quietly, and waits for the owner to start it again (spec/app/voice/index.md, \"A phone call ends Talk quietly, and only the owner starts it again\")", async () => {
     const world = { ...scene(), phone: true, image: true, signedIn: false };
     const { alpha, area } = await onComposer(world, ...only("notice"));
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
@@ -934,6 +934,8 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");
 
+    const issued = async () => (await alpha.runtime.runPromise(Effect.flatMap(Toasts, (toasts) => toasts.get()))).issued;
+    const before = await issued();
     await seen(false);
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.mic === "Off" && state.callNotice === "AwaitingCallCause");
     world.telephony.live = [{ id: "talk-interrupted", state: "active", connectedAt: world.now }];
@@ -944,11 +946,9 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await drawn(() => world.telephony.report());
     await drawnUntil(alpha, alpha.runtime, Phone, (state) => state.telecom === "NoCall");
     await seen(true);
-    await vi.waitFor(async () => {
-      await drawn(() => undefined);
-      expect(document.body.textContent).toContain("Voice paused for a phone call.");
-    });
-    expect([world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([1, undefined]);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle" && state.callNotice === "NoCallNotice");
+    await drawn(() => undefined);
+    expect([await issued() - before, document.body.textContent?.includes("phone call"), world.voice.startLiveCaptureCalls, world.voice.activeMicSession]).toEqual([0, false, 1, undefined]);
 
     await press("Talk");
     await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Listening" && state.mic === "On");

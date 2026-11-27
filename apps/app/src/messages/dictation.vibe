@@ -1,12 +1,9 @@
 // spec/app/voice/index.md, "Using the transcript fills the field dictation started in, and dictation never sends"
-import { MMS_MAX_BODY } from "@elizaos/os-bridges"
 import * as Composer from "../../gen/app__messages__composer.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
 import { Machine as Phone } from "../../gen/app__phone.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
-import { Said, say } from "../notices/index.vibe"
-import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { Device } from "../platform/index.vibe"
 import { VoiceBridge } from "../platform/index.vibe"
 import { contained, started, together } from "../runtime/index.vibe"
@@ -45,34 +42,22 @@ const messageDictation = started(effect {
 export const voiceArea = together(voicing, voiceWithCalls, messageDictation)
 
 /**
- * Dictate into the bar's message field while `editableHere` holds: each transcript follows what `before` reads and is
- * written with `write`, unless it would make the message too long. Dictation never sends.
+ * Dictate into the bar's message field while `editableHere` holds and the phone has speech: each transcript follows what
+ * `before` reads and is written with `write`, which leaves out one that would make the message too long. Dictation never
+ * sends and shows no words.
  */
-effect function dictateInto<R>(editableHere: boolean!!R, before: string!!R, write: (body: string) => boolean!!R, what: string): void!!(R | Voice.Machine | VoiceWords | VoiceBridge | Toasts | Said) {
-  if (!(try editableHere)) return
-  if (!(try (try VoiceBridge).available())) {
-    try say("Dictation is unavailable. You can still type your message.", true)
-    return
-  }
-  const toasts = try Toasts
-  const said = try Said
+effect function dictateInto<R>(editableHere: boolean!!R, before: string!!R, write: (body: string) => boolean!!R, what: string): void!!(R | Voice.Machine | VoiceWords | VoiceBridge) {
+  if (!(try editableHere) || !(try (try VoiceBridge).available())) return
   const opened = try openDictation("MessagesBar", effect (words: string) => {
     if (!(try editableHere)) return
     const was = try before
-    const body = was.trim() === "" ? words : `${was.trimEnd()} ${words}`
-    if (body.length > MMS_MAX_BODY) {
-      try (say("That transcription would make the message too long", true)
-        |> Effect.provideService(%, Toasts, toasts)
-        |> Effect.provideService(%, Said, said))
-      return
-    }
-    try write(body)
+    try write(was.trim() === "" ? words : `${was.trimEnd()} ${words}`)
   })
   if (opened) try contained((try Voice.Machine).send({ type: "startRecording" }), what)
 }
 
 /** Start dictating to the conversation that owns the visible person input. */
-export effect function dictateMessage(thread: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts | Toasts | Said) {
+export effect function dictateMessage(thread: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts) {
   const messages = try Messages.Machine
   const composer = try Composer.Machine
   const phone = try Phone
@@ -94,7 +79,7 @@ export effect function dictateMessage(thread: number): void!!(Composer.Machine |
 }
 
 /** Start dictating to the New draft even before choosing To. A late transcript cannot move to another visit or draft revision. */
-export effect function dictateNewMessage(visit: number, revision: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts | Toasts | Said | Conversations) {
+export effect function dictateNewMessage(visit: number, revision: number): void!!(Composer.Machine | Messages.Machine | Phone | Shell | Voice.Machine | VoiceWords | VoiceBridge | Device | Drafts | Conversations) {
   const messages = try Messages.Machine
   const composer = try Composer.Machine
   const phone = try Phone
