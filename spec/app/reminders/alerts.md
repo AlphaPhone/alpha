@@ -68,8 +68,8 @@ pure val nowValues = Set(50, 100, 200)
 pure val untilValues = Set(200, 300)
 pure val revisionValues = Set(1, 2)
 pure val itemRevisionValues = Set(1, 2)
-pure val expectedRevisionValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-pure val attemptIdValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+pure val expectedRevisionValues = 1.to(20)
+pure val attemptIdValues = 1.to(20)
 ```
 
 ### Scheduling arms a reminder for its due time (including already-due overdue reminders) and replaces any earlier schedule for that reminder
