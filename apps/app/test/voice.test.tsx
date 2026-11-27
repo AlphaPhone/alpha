@@ -30,6 +30,7 @@ import assistant from "../src/assistant/index.tsx";
 import files from "../src/files/index.tsx";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, closeAll, drawn, fill, later, only, open, press, seen, underAct, until as drawnUntil } from "./alpha.tsx";
+import { untoldStep } from "./fakes/ask.ts";
 import { publish } from "./fakes/platform.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { prepared } from "./fakes/notes.ts";
@@ -396,6 +397,46 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
       ready.resolve();
       done.resolve();
     }
+  });
+
+  // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+  it("says nothing of a step the agent marked untold, never the provisional text it settled away from, and ends quietly while the chat shows the step's notice", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    world.ask.nextReplyChunks = ["Your table ", "is booked."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextReplySettledAs = "";
+    world.ask.nextActions = () => [untoldStep("BOOK_TABLE")];
+    const runtime = await startListening(world);
+    speakUtterance(world, "Book a table at Nopa");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 1 && s.turn === 2);
+    expect([world.voice.spoken, world.ask.kept.get("c1")?.messages.at(-1)]).toEqual([[], { id: "m1a", role: "assistant", text: "", untold: ["BOOK_TABLE"] }]);
+    const bubbles = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.textContent ?? "");
+    await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(["Book a table at Nopa", "Book table did not complete"])));
+    expect(document.body.textContent?.includes("booked")).toBe(false);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped spoken turn answers the stored reply's text alone, so the chat takes its untold step from its history row.
+    world.ask.nextDropsWith = { text: "", untold: ["HOLD_SEAT"] };
+    speakUtterance(world, "Hold me a seat");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(world.voice.spoken).toEqual([]);
+    await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(["Book a table at Nopa", "Book table did not complete", "Hold me a seat", "Hold seat did not complete"])));
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a spoken reply streamed with words that marks nothing makes no read of its history row.
+    const held = ["Book a table at Nopa", "Book table did not complete", "Hold me a seat", "Hold seat did not complete"];
+    const plainReads = world.ask.pageReads;
+    world.ask.nextReplyChunks = ["Nopa opens at five."];
+    speakUtterance(world, "When does Nopa open");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 3 && s.turn === 4);
+    const opens = [...held, "When does Nopa open", "Nopa opens at five."];
+    await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(opens)));
+    expect([world.voice.spoken.map((one) => one.text), world.ask.pageReads]).toEqual([["Nopa opens at five."], plainReads]);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped spoken turn whose stored reply has words answers those words alone; Talk speaks the words and nothing of the notice, which the chat takes from the reply's history row.
+    world.ask.nextDropsWith = { text: "Here are two cafes near Nopa.", untold: ["BOOK_TABLE"] };
+    speakUtterance(world, "Book Nopa and find cafes");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 4 && s.turn === 5);
+    await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual([...opens, "Book Nopa and find cafes", "Here are two cafes near Nopa.Book table did not complete"])));
+    expect(world.voice.spoken.map((one) => one.text)).toEqual(["Nopa opens at five.", "Here are two cafes near Nopa."]);
   });
 
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"

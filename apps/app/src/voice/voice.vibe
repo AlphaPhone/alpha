@@ -54,7 +54,7 @@ export interface SpokenChatLease {
   readonly current: boolean!!
   readonly verified: boolean!!
   readonly retired: Stream.Stream<void>
-  settle(result: Extract<TurnResult, { kind: "Replied" }>, spoken: string): void!!
+  settle(result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, resent: boolean): void!!
 }
 
 export type SpokenChatContext = Agent | VoiceWords | Voice.Machine | Shell.Machine | Conversation | Chats | Phone | Views | Talk | MediaReview
@@ -780,7 +780,7 @@ effect function postVoiceTurn({ session, turn, queue, lease, spoken }: VoicePost
     memory.lastReply = ""
     return { type: "refusedForFunds", session, turn }
   }
-  if (result?.kind === "Replied") try lease.settle(result, spoken)
+  if (result?.kind === "Replied") try lease.settle(result, spoken, !streamed)
   memory.retireSaid(session, turn)
   let filesReport: string | undefined
   let filesRan = false

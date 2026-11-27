@@ -37,6 +37,9 @@ Proprietary fonts are outside the open-source policy. The Denton typeface is rec
 
 - Production npm packages resolved from `apps/app` and workspace dependencies (`pnpm-lock.yaml`),
   with licence files read from `node_modules`.
+  Optional esbuild, Vite, Rolldown and Lightning CSS packages restricted to macOS, Linux or
+  Windows are build-host inputs. The inventory still includes the parent packages and portable
+  optional packages.
 - `.eliza/LICENSE` at the commit pinned by `eliza.lock.json` (read only).
 - `tesseract-core/`: licence copies for the libraries statically linked into the
   `tesseract.js-core` WebAssembly cores in `public/ocr/` (Tesseract, Leptonica, libjpeg, libpng,

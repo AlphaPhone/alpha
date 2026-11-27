@@ -17,6 +17,8 @@ export interface AskScene {
   pagesDown: boolean;
   /** The agent lists its conversations but answers every read of their messages 404, as a mismatched store or a proxy does. */
   pagesMissing: boolean;
+  /** How many of the next reads of the messages around one message the agent fails with a 503, as a read that drops does. */
+  aroundDown?: number;
   /** How many reads of a conversation's messages, and of the list of conversations, the agent was asked. */
   pageReads: number;
   listReads: number;
@@ -39,6 +41,12 @@ export interface AskScene {
   nextReplyProvisional?: boolean;
   /** After the next reply's chunks, the agent writes their whole text once without the provisional mark, as eliza writes the reply it decided before storing it. */
   nextReplySettled?: boolean;
+  /** After the next reply's provisional chunks, the agent settles on this text instead and stores it, as eliza settles a reply whose failed step it marked untold. */
+  nextReplySettledAs?: string;
+  /** The next streamed reply is stored with this text and these untold steps, then drops before its terminal frame; the resend without streaming under the same key answers the stored reply's text alone, with no action results, as eliza's agent replays a reply it already stored (agent-host conversation turns, `HeldAnswered`). */
+  nextDropsWith?: { readonly text: string; readonly untold: readonly string[] };
+  /** The reply the agent stored for a dropped stream, which it replays to the resend under the dropped message's key. */
+  resend?: { readonly text: string; readonly clientMessageId?: string };
   /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
@@ -71,7 +79,7 @@ export interface AskScene {
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
-  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; abortCause?: string; cloudCode?: string }[];
+  readonly messages: { id: string; role: "user" | "assistant"; text: string; failureKind?: string; abortCause?: string; cloudCode?: string; untold?: string[]; clientMessageId?: string }[];
 }
 
 export function askScene(): AskScene {
@@ -117,9 +125,17 @@ const encoder = new TextEncoder();
 const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
 const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
+/** A failed step's action result that eliza marked untold, as its agent lists it on the reply (eliza agent-host conversation planning). */
+export const untoldStep = (action: string) => ({ action, data: { actionName: action, untold: true } });
+/** The actions of the steps a reply marks untold, which eliza stores on its history row as `untold`. */
+const untoldOf = (actions: readonly unknown[]) => actions.flatMap((one) => {
+  const { action, data } = one as { action?: unknown; data?: unknown };
+  return typeof action === "string" && typeof data === "object" && data !== null && (data as { untold?: unknown }).untold === true ? [action] : [];
+});
 
-function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void, metadata: unknown, capabilities: readonly string[]): Response {
+function reply(scene: AskScene, room: string, text: string, keep: (said: string, untold: readonly string[]) => void, metadata: unknown, capabilities: readonly string[]): Response {
   const custom = scene.nextReplyChunks;
+  const settledAs = scene.nextReplySettledAs;
   const provisional = scene.nextReplyProvisional;
   const settles = scene.nextReplySettled === true;
   const actions = scene.nextActions?.(metadata, capabilities) ?? [];
@@ -131,6 +147,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
   scene.nextReplyChunks = undefined;
   scene.nextReplyProvisional = undefined;
   scene.nextReplySettled = undefined;
+  scene.nextReplySettledAs = undefined;
   scene.nextActions = undefined;
   scene.holdDoneAfterReady = undefined;
   scene.holdReady = undefined;
@@ -160,9 +177,9 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         }
         if (custom !== undefined && custom.length > 0) {
           for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
-          const full = custom.join("");
-          if (settles) controller.enqueue(frame({ type: "token", fullText: full }));
-          keep(full);
+          const full = settledAs ?? custom.join("");
+          if (settles || settledAs !== undefined) controller.enqueue(frame({ type: "token", fullText: full }));
+          keep(full, untoldOf(actions));
           if (holdDone !== undefined) {
             const announce = () => {
               if (cancelled) return;
@@ -183,7 +200,7 @@ function reply(scene: AskScene, room: string, text: string, keep: (said: string)
         }
         controller.enqueue(frame({ type: "token", text: "You said: " }));
         controller.enqueue(frame({ type: "token", text }));
-        keep(`You said: ${text}`);
+        keep(`You said: ${text}`, []);
         controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
         controller.close();
       };
@@ -232,6 +249,10 @@ export function askRoutes(scene: AskScene): Route[] {
         if (one === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
         const messages = one.messages.map((message, at) => ({ ...message, timestamp: at + 1 }));
         const around = url.searchParams.get("around");
+        if (around !== null && (scene.aroundDown ?? 0) > 0) {
+          scene.aroundDown = (scene.aroundDown ?? 0) - 1;
+          return Response.json({ error: "starting" }, { status: 503 });
+        }
         if (around !== null) {
           const pivot = messages.findIndex((message) => message.id === around);
           return pivot < 0 ? Response.json({ error: "unknown_message" }, { status: 404 })
@@ -276,15 +297,32 @@ export function askRoutes(scene: AskScene): Route[] {
       const conversationId = decodeURIComponent(found[1] ?? "");
       const kept = scene.kept.get(conversationId);
       if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
-      const keep = (role: "user" | "assistant", text: string) => void kept.messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
+      const keep = (role: "user" | "assistant", text: string, untold: readonly string[] = []) =>
+        void kept.messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text, ...(untold.length === 0 ? {} : { untold: [...untold] }) });
       return request.json().then((body: { text: string; metadata?: unknown; channelType?: unknown; images?: readonly unknown[]; clientMessageId?: string }) => {
         scene.metadata?.push(body.metadata);
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
         if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
+        const resent = found[2] === undefined && body.clientMessageId !== undefined && scene.resend?.clientMessageId === body.clientMessageId
+          ? scene.resend : undefined;
+        if (resent !== undefined) {
+          scene.resend = undefined;
+          return Response.json({ ...named(scene.said.length), fullText: resent.text, text: resent.text });
+        }
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (found[2] !== undefined && scene.nextDropsWith !== undefined) {
+          const dropped = scene.nextDropsWith;
+          scene.nextDropsWith = undefined;
+          keep("assistant", dropped.text, dropped.untold);
+          scene.resend = { text: dropped.text, clientMessageId: body.clientMessageId };
+          return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+            controller.enqueue(frame({ type: "status", activity: "thinking" }));
+            controller.close();
+          } }), { headers: { "content-type": "text/event-stream" } });
+        }
         if (found[2] === undefined) {
           const text = `You said: ${body.text}`;
           keep("assistant", text);
@@ -292,7 +330,7 @@ export function askRoutes(scene: AskScene): Route[] {
         }
         if (scene.refusal !== undefined) kept.messages.push({ id: `m${scene.said.length}a`, role: "assistant", text: "", failureKind: scene.refusal.failureKind, ...(scene.refusal.cloudCode === undefined ? {} : { cloudCode: scene.refusal.cloudCode }) });
         const capabilities = request.headers.get("x-eliza-device-capabilities")?.split(",").filter((name) => name !== "") ?? [];
-        return reply(scene, kept.roomId, body.text, (said) => keep("assistant", said), body.metadata, capabilities);
+        return reply(scene, kept.roomId, body.text, (said, untold) => keep("assistant", said, untold), body.metadata, capabilities);
       });
     },
     (request, url) => {
