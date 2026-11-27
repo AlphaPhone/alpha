@@ -4,21 +4,21 @@
   "shape": "04646a632c0e73e9",
   "sealed": {
     "shape": "04646a632c0e73e9",
-    "state": "a649efc44be73253"
+    "state": "90436ec64c235c8b"
   },
   "state": {
     "owner": 1,
     "asked": 0,
     "askedReach": "OneEvent",
     "askedRevision": 0,
-    "waiting": 0,
-    "reach": "OneEvent",
-    "revision": 3,
+    "waiting": 42,
+    "reach": "FromThisOn",
+    "revision": 5,
     "undo": {
-      "holding": "Free",
-      "until": 0
+      "holding": "Held",
+      "until": 1797592000000
     },
-    "notice": false,
+    "notice": true,
     "scale": 100,
     "paused": false,
     "sending": 0,
@@ -34,6 +34,7 @@
     "waiting",
     "reach",
     "revision",
+    "undo",
     "hiding",
     "hidingReach",
     "dropped",
@@ -45,14 +46,14 @@
       "until": "cd12a00869 (#1827)",
       "state": {
         "owner": 1,
-        "waiting": 0,
-        "reach": "OneEvent",
-        "revision": 3,
+        "waiting": 42,
+        "reach": "FromThisOn",
+        "revision": 5,
         "undo": {
-          "holding": "Free",
-          "until": 0
+          "holding": "Held",
+          "until": 1797592000000
         },
-        "notice": false,
+        "notice": true,
         "scale": 100,
         "paused": false,
         "sending": 0,
@@ -66,14 +67,14 @@
       "until": "897db85aa1",
       "state": {
         "owner": 1,
-        "waiting": 0,
-        "reach": "OneEvent",
-        "revision": 3,
+        "waiting": 42,
+        "reach": "FromThisOn",
+        "revision": 5,
         "undo": {
-          "holding": "Free",
-          "until": 0
+          "holding": "Held",
+          "until": 1797592000000
         },
-        "notice": false,
+        "notice": true,
         "scale": 100,
         "paused": false,
         "sending": 0,
