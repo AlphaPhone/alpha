@@ -260,12 +260,15 @@ public final class AlphaPlatformBrokerService extends Service {
                 }
                 if (account != null) {
                     JSONObject accountObj = new JSONObject()
-                        .put("id", account.id())
-                        .put("email", account.email())
-                        .put("name", account.name());
+                        .put("signedIn", active != null)
+                        .put("userId", account.userId())
+                        .put("organizationId", account.organizationId());
+                    if (active != null) {
+                        accountObj.put("credentialId", active.credentialId());
+                    }
                     out.put("account", accountObj);
                 } else {
-                    out.put("account", JSONObject.NULL);
+                    out.put("account", new JSONObject().put("signedIn", false));
                 }
             } catch (JSONException impossible) {
                 throw new IllegalStateException(impossible);

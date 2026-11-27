@@ -25,7 +25,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,7 +48,7 @@ public final class AlphaAgentBrokerService extends Service {
             if (binder == null || deathRecipient == null) return;
             try {
                 binder.unlinkToDeath(deathRecipient, 0);
-            } catch (NoSuchElementException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
     }

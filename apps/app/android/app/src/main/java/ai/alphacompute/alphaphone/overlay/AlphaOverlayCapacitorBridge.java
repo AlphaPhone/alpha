@@ -592,12 +592,16 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
                     .put("signedIn", active != null);
                 if (active != null) out.put("credentialId", active.credentialId());
                 if (account != null) {
-                    out.put("account", new JSONObject()
-                        .put("id", account.id())
-                        .put("email", account.email())
-                        .put("name", account.name()));
+                    JSONObject accountObj = new JSONObject()
+                        .put("signedIn", active != null)
+                        .put("userId", account.userId())
+                        .put("organizationId", account.organizationId());
+                    if (active != null) {
+                        accountObj.put("credentialId", active.credentialId());
+                    }
+                    out.put("account", accountObj);
                 } else {
-                    out.put("account", JSONObject.NULL);
+                    out.put("account", new JSONObject().put("signedIn", false));
                 }
             } catch (JSONException ignored) {
             }

@@ -12,7 +12,6 @@ import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -66,7 +65,7 @@ public final class AlphaContextRegistryService extends Service {
             if (token == null || deathRecipient == null) return;
             try {
                 token.unlinkToDeath(deathRecipient, 0);
-            } catch (NoSuchElementException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
     }

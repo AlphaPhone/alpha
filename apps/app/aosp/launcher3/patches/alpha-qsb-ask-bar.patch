@@ -38,7 +38,7 @@
 +                try {
 +                    searchManager.launchAssist(assistArgs);
 +                    return;
-+                } catch (SecurityException | RuntimeException ignored) {
++                } catch (RuntimeException ignored) {
 +                }
 +            }
 +            String targetPackage = context.getString(R.string.alpha_qsb_target_package);

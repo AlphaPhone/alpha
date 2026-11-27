@@ -1,7 +1,6 @@
 package ai.alphacompute.alphaphone.overlay;
 
 import ai.alphacompute.alphaphone.MainActivity;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
@@ -42,7 +41,7 @@ public final class AlphaVoiceInteractionService extends VoiceInteractionService 
                     VoiceInteractionSession.SHOW_WITH_ASSIST | VoiceInteractionSession.SHOW_WITH_SCREENSHOT
                 );
                 return true;
-            } catch (SecurityException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
         if (context == null) return false;
@@ -53,7 +52,7 @@ public final class AlphaVoiceInteractionService extends VoiceInteractionService 
         try {
             context.startActivity(fallback);
             return true;
-        } catch (SecurityException | ActivityNotFoundException | RuntimeException unavailable) {
+        } catch (RuntimeException unavailable) {
             return false;
         }
     }
