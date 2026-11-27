@@ -43,8 +43,8 @@ export const voiceArea = together(voicing, voiceWithCalls, messageDictation)
 
 /**
  * Dictate into the bar's message field while `editableHere` holds and the phone has speech: each transcript follows what
- * `before` reads and is written with `write`, which leaves out one that would make the message too long. Dictation never
- * sends and shows no words.
+ * `before` reads and is written whole with `write` (Send stays blocked if the draft exceeds the message limit). Dictation
+ * never sends and shows no words.
  */
 effect function dictateInto<R>(editableHere: boolean!!R, before: string!!R, write: (body: string) => boolean!!R, what: string): void!!(R | Voice.Machine | VoiceWords | VoiceBridge) {
   if (!(try editableHere) || !(try (try VoiceBridge).available())) return
