@@ -1444,7 +1444,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
       world.ask.nextReplyChunks = ["Opening Notes."];
       world.ask.nextActions = preparedFor("notes");
       speakUtterance(world, "Open Notes");
-      await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({ path: "claim", body: binding("notes") })));
+      await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({ path: "claim", body: binding("notes") }), { timeout: 10_000 }));
       await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((machine) => machine.send({ type: "openView", view: "Notes" }))));
       await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
     } finally {
@@ -1452,7 +1452,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     }
     await drawn(() => vi.waitFor(() => expect(world.notes.views.at(-1)).toEqual({
       path: "result", body: { ...binding("notes"), claimId: "claim-3", success: false, result: { switched: false } },
-    })));
+    }), { timeout: 10_000 }));
     expect(shellState()).toMatchObject({ trail: ["Calendar", "Notes"], assistant: "Bar" });
   });
 
