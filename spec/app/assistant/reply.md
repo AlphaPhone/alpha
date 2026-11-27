@@ -292,7 +292,12 @@ order, its own notice that the step did not complete, in the conversation
 under that reply, as a failed reply's notice is drawn, and never beside
 the composer: live from the reply's action results, on the reply's body
 and on its last frame alike, and read again from its history row, the
-same way. A reply whose text is empty and that marks a step is answered:
+same way. A resend of a turn whose reply the agent already stored
+answers with that reply's words alone and no action results, so when a
+reply answers no words, no failure and no marked step, Alpha takes its
+untold steps from the reply's history row, typed or spoken. The notices
+of a reply being written go when its text goes: when another message is
+sent and when another chat is shown. A reply whose text is empty and that marks a step is answered:
 its bubble is those notices, never an empty bubble, a failed reply or one
 that did not finish. A reply whose text is empty and that marks nothing
 is declined as before. The settled empty text replaces any provisional

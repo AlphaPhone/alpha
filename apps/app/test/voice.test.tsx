@@ -413,6 +413,13 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
     const bubbles = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.textContent ?? "");
     await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(["Book a table at Nopa", "Book table did not complete"])));
     expect(document.body.textContent?.includes("booked")).toBe(false);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped spoken turn answers the stored reply's text alone, so the chat takes its untold step from its history row.
+    world.ask.nextDropsWith = { text: "", untold: ["HOLD_SEAT"] };
+    speakUtterance(world, "Hold me a seat");
+    await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.sent === 2 && s.turn === 3);
+    expect(world.voice.spoken).toEqual([]);
+    await drawn(() => vi.waitFor(() => expect(bubbles()).toEqual(["Book a table at Nopa", "Book table did not complete", "Hold me a seat", "Hold seat did not complete"])));
   });
 
   // spec/app/assistant/reply.md, "A spoken acknowledgment starts at once; a reply ready before it is audible drops it, and an audible one finishes before the reply, within 2.5 s"

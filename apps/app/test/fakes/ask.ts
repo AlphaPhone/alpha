@@ -41,10 +41,10 @@ export interface AskScene {
   nextReplySettled?: boolean;
   /** After the next reply's provisional chunks, the agent settles on this text instead and stores it, as eliza settles a reply whose failed step it marked untold. */
   nextReplySettledAs?: string;
-  /** The next streamed reply drops before its terminal frame, and the resend without streaming under the same key answers with this reply, as eliza's agent replays the reply it stored. */
-  nextDropsWith?: { readonly text: string; readonly actionResults: readonly unknown[] };
-  /** The reply the agent replays to the resend of a dropped stream. */
-  resend?: { readonly text: string; readonly actionResults: readonly unknown[] };
+  /** The next streamed reply is stored with this text and these untold steps, then drops before its terminal frame; the resend without streaming under the same key answers the stored reply's text alone, with no action results, as eliza's agent replays a reply it already stored (agent-host conversation turns, `HeldAnswered`). */
+  nextDropsWith?: { readonly text: string; readonly untold: readonly string[] };
+  /** The reply the agent stored for a dropped stream, which it replays to the resend under the dropped message's key. */
+  resend?: { readonly text: string; readonly clientMessageId?: string };
   /** The actions the next reply says it ran, made from the turn's metadata and the device capabilities the turn declared, as eliza's agent lists them on its done frame. */
   nextActions?: (metadata: unknown, capabilities: readonly string[]) => readonly unknown[];
   /** When set, emits a `reply_ready` frame before `done` and awaits this promise before emitting `done`. */
@@ -298,19 +298,20 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.spokenFiles?.push({ channel: body.channelType, images: body.images });
         if (body.text !== body.text.trim()) return Response.json({ error: "invalid_message" }, { status: 400 });
         if (scene.knowsNoActionMode === true && JSON.stringify(body.metadata ?? {}).includes('"agentActionMode"')) return Response.json({ error: "VOICE_UI_CONTEXT_INVALID" }, { status: 400 });
-        const resent = found[2] === undefined && body.clientMessageId !== undefined && kept.messages.at(-1)?.clientMessageId === body.clientMessageId
+        const resent = found[2] === undefined && body.clientMessageId !== undefined && scene.resend?.clientMessageId === body.clientMessageId
           ? scene.resend : undefined;
         if (resent !== undefined) {
           scene.resend = undefined;
-          keep("assistant", resent.text, untoldOf(resent.actionResults));
-          return Response.json({ ...named(scene.said.length), text: resent.text, actionResults: resent.actionResults });
+          return Response.json({ ...named(scene.said.length), fullText: resent.text, text: resent.text });
         }
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
         if (found[2] !== undefined && scene.nextDropsWith !== undefined) {
-          scene.resend = scene.nextDropsWith;
+          const dropped = scene.nextDropsWith;
           scene.nextDropsWith = undefined;
+          keep("assistant", dropped.text, dropped.untold);
+          scene.resend = { text: dropped.text, clientMessageId: body.clientMessageId };
           return new Response(new ReadableStream<Uint8Array>({ start(controller) {
             controller.enqueue(frame({ type: "status", activity: "thinking" }));
             controller.close();

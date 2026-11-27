@@ -537,7 +537,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const booked = ["Book a table at Nopa", "Book table did not complete"];
     await vi.waitFor(() => expect(bubbles()).toEqual(booked));
 
-    world.ask.nextDropsWith = { text: "", actionResults: [untoldStep("HOLD_SEAT")] };
+    world.ask.nextDropsWith = { text: "", untold: ["HOLD_SEAT"] };
     await ask("Hold me a seat");
     const held = [...booked, "Hold me a seat", "Hold seat did not complete"];
     await vi.waitFor(() => expect(bubbles()).toEqual(held));
@@ -555,6 +555,47 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Chats, (s) => s.page.ticket > before.page.ticket && s.page.status === "Loaded");
     await vi.waitFor(() => expect([world.ask.pageReads > reads, bubbles()]).toEqual([true, [...held, "Say nothing"]]));
     expect(["booked", "Hmm", "did not finish", "Reply failed", "Agent error"].filter((words) => document.body.textContent?.includes(words))).toEqual([]);
+
+    const asked = "I asked for a table.Book table did not complete";
+    const stopAfterNotice = async (text: string) => {
+      const held = Promise.withResolvers<void>();
+      world.ask.nextReplyChunks = ["I asked ", "for a table."];
+      world.ask.nextReplyProvisional = true;
+      world.ask.nextReplySettledAs = "I asked for a table.";
+      world.ask.nextActions = () => [untoldStep("BOOK_TABLE")];
+      world.ask.holdDoneAfterReady = held.promise;
+      try {
+        await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+        await ask(text);
+        await vi.waitFor(() => expect(writingReply()).toBe(asked));
+        await press("Stop reply");
+        await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+      } finally {
+        held.resolve();
+      }
+      expect(writingReply()).toBe(asked);
+    };
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a reply stopped after its notice keeps it, and the next message's reply starts without it.
+    await stopAfterNotice("Book it again");
+    world.ask.stalled = true;
+    world.ask.nextReplyChunks = ["Thinking"];
+    world.ask.nextReplyProvisional = true;
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    await ask("Try once more");
+    await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+    expect(writingReply()).toBeUndefined();
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+    world.ask.stalled = false;
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": another chat shows without the notice of a reply written in this one.
+    await stopAfterNotice("Book it once more");
+    const left = (await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.get()))).chosen;
+    await chatsList(alpha);
+    await press("New conversation");
+    await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.chosen !== left && s.page.status === "Loaded");
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation !== left);
+    await vi.waitFor(() => expect(writingReply()).toBeUndefined());
   });
 
   // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"

@@ -183,12 +183,22 @@ function untoldOf(untold: readonly string[] | undefined): Pick<Line, "untold"> {
   return untold === undefined || untold.length === 0 ? {} : { untold }
 }
 
+// spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+/** The steps a reply marks untold: those its action results mark, or, for a reply with no words, failure or marked step, as eliza answers the resend of a reply it already stored, those its history row names. */
+effect function untoldReplied(conversationId: string, reply: TurnReply): readonly string[]!!Agent {
+  const marked = untoldSteps(reply.actionResults)
+  if (marked.length > 0 || reply.text !== "" || reply.failureKind !== undefined || reply.messageId === "") return marked
+  const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
+  const read = ask(Agent, HttpClientRequest.get(path, { urlParams: { around: reply.messageId } }), page()) catch () => undefined
+  return read?.messages.find((one) => one.id === reply.messageId && one.role === "assistant")?.untold ?? []
+}
+
 // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
-function replied(turn: number, result: TurnResult | undefined): Reply.Event {
+function replied(turn: number, result: TurnResult | undefined, untold: readonly string[]): Reply.Event {
   const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
   if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
   if (result.kind === "Replied") return result.reply.failureKind !== undefined ? failed(result.reply, result.reply.failureKind)
-    : Reply.replyEnding(result.reply.text.length, untoldSteps(result.reply.actionResults).length) === "Declined" ? { type: "decline", turn }
+    : Reply.replyEnding(result.reply.text.length, untold.length) === "Declined" ? { type: "decline", turn }
     : { type: "done", turn, units: result.reply.text.length }
   if (result.kind === "AgentFailed") return isCloudFundsRefusal(result) || result.code === "allowance_exhausted" ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, result.code)
   if (result.kind === "StoppedByOwner") return { type: "stop", turn }
@@ -422,6 +432,7 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
 }
 
 effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, record: ConversationRecord, result: Extract<TurnResult, { kind: "Replied" }>, spoken: string, current: boolean!!): void!!(Agent | Chats.Machine) {
+  const untold = try untoldReplied(record.id, result.reply)
   if (!(try ownsSeat(board, seat)) || !(try current)) return
   const chats = try Chats.Machine
   const live = try chats.get()
@@ -429,12 +440,12 @@ effect function settleSpoken(board: Board, seat: DraftSeat, selected: number, re
   if (live.chosen !== selected || live.around !== 0 || board.draftSeat !== seat
     || bound?.id !== record.id || bound?.roomId !== record.roomId) return
   const page = live.page.ticket
-  const { userMessageId, messageId, text, failureKind, cloudCode, actionResults } = result.reply
+  const { userMessageId, messageId, text, failureKind, cloudCode } = result.reply
   const lines: Line[] = []
   if (userMessageId !== undefined && userMessageId !== "") lines.push({ id: userMessageId, mine: true, text: spoken })
   if (messageId !== "" && messageId !== userMessageId) {
     const failure = failureKind === undefined ? undefined : Reply.readAgain(failures[failureKind] ?? "OtherFailure", cloudCode !== undefined)
-    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }), ...untoldOf(untoldSteps(actionResults)) })
+    lines.push({ id: messageId, mine: false, text, ...(failure === undefined ? {} : { failure }), ...untoldOf(untold) })
   }
   const prior = board.page(page)
   const added = lines.filter((line) => !prior.some((other) => other.id === line.id))
@@ -504,6 +515,7 @@ effect function settleReplied(input: {
   readonly sms: Effect.Success<ReturnType<typeof screenTold>>["sms"]
   readonly transcript: ReturnType<Board["snapshot"]>["transcript"]
   readonly result: Extract<TurnResult, { kind: "Replied" }>
+  readonly untold: readonly string[]
 }): void!!(Views | Agent | Device | KeyValueStore.KeyValueStore | Turns | Chats.Machine | Conversation.Machine | Talk | MediaReview | NoteStore | Time) {
   const { board } = try Talk
   const { streamed } = try Turns
@@ -511,7 +523,7 @@ effect function settleReplied(input: {
   const conversation = try Conversation.Machine
   const views = try Views
   const review = try MediaReview
-  const { ticket, told, context, seat, chosen, conversationId, pageTicket, mine, asked, directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result } = input
+  const { ticket, told, context, seat, chosen, conversationId, pageTicket, mine, asked, directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result, untold } = input
   const prepared = told ? preparedIn(result.reply.actionResults, views.clientId) : undefined
   const page = told ? pageIn(result.reply.actionResults, views.clientId) : undefined
   let continueFiles: Effect.Effect<void> | undefined
@@ -521,7 +533,7 @@ effect function settleReplied(input: {
     board.rename(pageTicket, mine, result.reply.userMessageId)
   }
   board.messageNumber(result.reply.messageId)
-  board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text, ...untoldOf(untoldSteps(result.reply.actionResults)) })
+  board.append(pageTicket, chosen, { id: result.reply.messageId, mine: false, text: result.reply.text, ...untoldOf(untold) })
   const recordingSummary = transcript === undefined || result.reply.failureKind !== undefined
     ? undefined : try offerRecordingSummary({ source: transcript.offered, seat, conversation: chosen,
       conversationId, message: result.reply.messageId }, result.reply.text)
@@ -781,6 +793,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     const first = try sent(asksDirect)
     const directFiles = asksDirect && !resendWithoutMode(first, asksDirect)
     const result = directFiles || !asksDirect ? first : try sent(false)
+    const untold = result?.kind === "Replied" ? try untoldReplied(known.record.id, result.reply) : []
     if (!(try ownsSeat(board, seat))) {
       Queue.offerUnsafe(queue, { type: "lose", ticket })
       Queue.endUnsafe(queue)
@@ -798,7 +811,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
         if (!(try rememberFiles(archive, result.clientMessageId, files))) board.change({ attachmentNotice: "Could not keep the sent attachments on this phone." })
       } else try bindArchiveAuthority(board, currentOwner)
     }
-    const ending = replied(ticket, result)
+    const ending = replied(ticket, result, untold)
     const keepStreamed = ending.type === "stop" || (ending.type === "failed" && !Reply.refusedBeforeOutput(ending.kind))
     board.change({
       ...(keepStreamed ? {} : { reply: "", replyUntold: [] }), label: "",
@@ -823,7 +836,7 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     if (result?.kind === "Replied" && finishing) {
       try settleReplied({
         ticket, told, context, seat, chosen: chats.chosen, conversationId: known.record.id, pageTicket, mine, asked,
-        directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result,
+        directFiles, requestedFiles, outsideOrigin, enrolled, messageTarget, voicemail, sms, transcript, result, untold,
       })
     }
     if (event.type === "refuse") board.drop(pageTicket, mine)
