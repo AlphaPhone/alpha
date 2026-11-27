@@ -23,7 +23,7 @@ import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { untimed } from "../src/runtime/reactor.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
 import { button, chatAction, closeAll, drawn, fill, hardware, later, open, press, seen, typeInto, underAct, until } from "./alpha.tsx";
-import { draftKey } from "./fakes/ask.ts";
+import { draftKey, untoldStep } from "./fakes/ask.ts";
 import { scene } from "./fakes/scene.ts";
 import { textReview } from "./fakes/text-review.ts";
 
@@ -528,6 +528,120 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     }
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "I can't open the Camera for you.".length);
     await vi.waitFor(() => expect(lines()).toEqual(["Open the camera", "I can't open the Camera for you."]));
+  });
+
+  // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+  it("Understand why a reply did not finish: each step the agent marked untold shows Alpha's notice under its reply, from the stored reply's announcement, its last frame, a resend and history, and a reply with no text that marks nothing still leaves no bubble (spec/app/assistant/reply.md, \"Story: Understand why a reply did not finish\")", async () => {
+    const world = { ...scene(), phone };
+    const { alpha, runtime } = await openAssistantWithPreferences(world);
+    const bubbles = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.textContent ?? "");
+    const ask = async (text: string) => {
+      write(text);
+      await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept");
+      await press("Send");
+    };
+    const ready = Promise.withResolvers<void>();
+    const done = Promise.withResolvers<void>();
+    world.ask.nextReplyChunks = ["Your table ", "is booked."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextReplySettledAs = "";
+    world.ask.nextActions = () => [{ action: "CALENDAR", data: { actionName: "CALENDAR" } }, untoldStep("BOOK_TABLE")];
+    world.ask.holdReady = ready.promise;
+    world.ask.holdDoneAfterReady = done.promise;
+    try {
+      await ask("Book a table at Nopa");
+      await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+      // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the stored reply's announcement draws the notice at once, and the provisional text it settled away from never shows.
+      ready.resolve();
+      await vi.waitFor(() => expect(writingReply()).toBe("Book table did not complete"));
+    } finally {
+      ready.resolve();
+      done.resolve();
+    }
+    await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === 0);
+    const booked = ["Book a table at Nopa", "Book table did not complete"];
+    await vi.waitFor(() => expect(bubbles()).toEqual(booked));
+
+    world.ask.nextDropsWith = { text: "", untold: ["HOLD_SEAT"] };
+    await ask("Hold me a seat");
+    const held = [...booked, "Hold me a seat", "Hold seat did not complete"];
+    await vi.waitFor(() => expect(bubbles()).toEqual(held));
+
+    world.ask.nextReplyChunks = ["Hmm."];
+    world.ask.nextReplyProvisional = true;
+    world.ask.nextReplySettledAs = "";
+    await ask("Say nothing");
+    await until(alpha, runtime, Reply, (s) => s.status === "Ignored");
+    await vi.waitFor(() => expect(bubbles()).toEqual([...held, "Say nothing"]));
+
+    const before = await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.get()));
+    const reads = world.ask.pageReads;
+    await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.send({ type: "reread" })));
+    await until(alpha, runtime, Chats, (s) => s.page.ticket > before.page.ticket && s.page.status === "Loaded");
+    await vi.waitFor(() => expect([world.ask.pageReads > reads, bubbles()]).toEqual([true, [...held, "Say nothing"]]));
+    expect(["booked", "Hmm", "did not finish", "Reply failed", "Agent error"].filter((words) => document.body.textContent?.includes(words))).toEqual([]);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a streamed reply that marks nothing makes no read of its history row.
+    const plainReads = world.ask.pageReads;
+    world.ask.nextReplyChunks = ["Nopa opens ", "at five."];
+    await ask("When does Nopa open");
+    const opens = [...held, "Say nothing", "When does Nopa open", "Nopa opens at five."];
+    await vi.waitFor(() => expect(bubbles()).toEqual(opens));
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    expect(world.ask.pageReads).toBe(plainReads);
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": the resend of a dropped turn whose stored reply has words answers those words alone, so the chat shows them and takes the untold step from the reply's history row, read once more when the first read fails.
+    world.ask.nextDropsWith = { text: "Here are two cafes near Nopa.", untold: ["BOOK_TABLE"] };
+    await ask("Book Nopa and find cafes");
+    const cafes = [...opens, "Book Nopa and find cafes", "Here are two cafes near Nopa.Book table did not complete"];
+    await vi.waitFor(() => expect(bubbles()).toEqual(cafes));
+    const retryReads = world.ask.pageReads;
+    world.ask.aroundDown = 1;
+    world.ask.nextDropsWith = { text: "I found one cafe.", untold: ["BOOK_TABLE"] };
+    await ask("Book it and find one more");
+    await vi.waitFor(() => expect(bubbles()).toEqual([...cafes, "Book it and find one more", "I found one cafe.Book table did not complete"]));
+    expect([world.ask.aroundDown, world.ask.pageReads - retryReads]).toEqual([0, 2]);
+
+    const asked = "I asked for a table.Book table did not complete";
+    const stopAfterNotice = async (text: string) => {
+      const held = Promise.withResolvers<void>();
+      world.ask.nextReplyChunks = ["I asked ", "for a table."];
+      world.ask.nextReplyProvisional = true;
+      world.ask.nextReplySettledAs = "I asked for a table.";
+      world.ask.nextActions = () => [untoldStep("BOOK_TABLE")];
+      world.ask.holdDoneAfterReady = held.promise;
+      try {
+        await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+        await ask(text);
+        await vi.waitFor(() => expect(writingReply()).toBe(asked));
+        await press("Stop reply");
+        await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+      } finally {
+        held.resolve();
+      }
+      expect(writingReply()).toBe(asked);
+    };
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": a reply stopped after its notice keeps it, and the next message's reply starts without it.
+    await stopAfterNotice("Book it again");
+    world.ask.stalled = true;
+    world.ask.nextReplyChunks = ["Thinking"];
+    world.ask.nextReplyProvisional = true;
+    await until(alpha, runtime, Composer, (s) => s.slot === "Open" && s.away === "Free" && !s.unsettled);
+    await ask("Try once more");
+    await until(alpha, runtime, Reply, (s) => s.provisional && s.shown === 0);
+    expect(writingReply()).toBeUndefined();
+    await press("Stop reply");
+    await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Stopped" && s.check !== "Aborting" && s.recheck.status !== "Loading");
+    world.ask.stalled = false;
+
+    // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined": another chat shows without the notice of a reply written in this one.
+    await stopAfterNotice("Book it once more");
+    const left = (await runtime.runPromise(Effect.flatMap(Chats, (chats) => chats.get()))).chosen;
+    await chatsList(alpha);
+    await press("New conversation");
+    await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.chosen !== left && s.page.status === "Loaded");
+    await until(alpha, runtime, Composer, (s) => s.binding.conversation !== left);
+    await vi.waitFor(() => expect(writingReply()).toBeUndefined());
   });
 
   // spec/app/assistant/index.md, "Alpha asks the agent to warm up at launch, on return to the foreground, after a sign-in and when Ask Alpha is raised from its bar, only while the agent can answer, and shows nothing of it"

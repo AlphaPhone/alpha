@@ -606,6 +606,13 @@ pure def sometimesASaveStaysUnsureAfterClosing(s: MessageView): bool = s.unsure.
 pure def sometimesAnAttachmentOpened(s: MessageView): bool =
   s.file.outcome == A::Confirmed and s.handling == Opening
 
+pure val eval_witness_sometimesAnAttachmentOpened = (
+  ("open", { account: 1, grant: { read: true, send: false, modify: false } }, 1, 1, false),
+  ("loaded", 1, { account: 1, grant: { read: true, send: false, modify: false } }, true, Fine, 1, 1, 0, 1),
+  ("reviewAttachment", 1, Opening),
+  ("confirmAttachment", { account: 1, grant: { read: true, send: false, modify: false } }),
+  ("attachmentHandled", 1, true, true, 0, false))
+
 pure def sometimesASaveIsCancelledAndOfferedAgain(s: MessageView): bool =
   s.attachment != 0 and s.cancelled != 0
     and ((s.handling == Opening and s.keep.id == s.cancelled and A::canRecord(s.keep))
@@ -622,9 +629,8 @@ pure def sometimesASaveIsCancelledAndOfferedAgain(s: MessageView): bool =
 The shell raises Ask Alpha with it. The assistant area reviews with the
 owner exactly what of it goes to Alpha, sends the revalidated email in
 structured turn context (`metadata.reviewedEmail`) rather than concatenating
-it into the owner's typed request text, refuses one too long to send in
-full or one that changed since, and decides what Alpha may do next with
-[what it may do with mail](./agent.md).
+it into the owner's typed request text, and refuses one too long to send in
+full or one that changed since.
 
 ```quint
 pure def canAskAlpha(s: MessageView): bool = s.body.status == R::Loaded and s.message != 0

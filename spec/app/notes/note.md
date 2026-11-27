@@ -14,9 +14,6 @@ it.
 ### A note is text, a checklist, a voice note or a link
 
 ```quint
-import attempt as A from "../../kit/attempt"
-import read as R from "../../kit/read"
-
 type Kind = Text | Checklist | Voice | Link
 ```
 
@@ -157,40 +154,6 @@ pure def lawNothingOpensOverAnother(by: Actor, req: Request): bool =
     and not(mayOpenNote(false, Agent, { ...req, current: req.turn + 1 }))
 ```
 
-## Story: Stay honest when cut off
-
-> As the owner, I want anything sent outside that a restart or another
-> owner cut off to be reported as unknown, never repeated, and a reading
-> cut off never to answer later.
-
-### An effect still on its way is in flight from being written down until it is answered
-
-```quint
-pure def inFlight(a: A::Attempt): bool = a.outcome == A::Recorded or a.outcome == A::Sent
-```
-
-### An effect sent and cut off before its answer becomes unknown, and is never sent again
-
-A restart or another owner taking the phone cuts it off. One written down
-and not yet sent is the machine's own to carry out or drop.
-
-```quint
-pure def cutOff(a: A::Attempt): A::Attempt = if (a.outcome == A::Sent) A::conclude(a, false, false) else a
-
-pure def lawACutOffEffectIsUnknown(id: int): bool =
-  val a = cutOff({ id: id, outcome: A::Sent })
-  a.outcome == A::Unknown and not(A::canRecord(a)) and not(A::canDispatch(a)) and not(A::canConclude(a, id))
-```
-
-### A reading cut off is dropped, keeps its ticket, and takes no answer
-
-```quint
-pure def dropped(r: R::Read): R::Read = { ...r, status: R::Idle }
-
-pure def lawADroppedReadingTakesNoAnswer(ticket: int, asked: int): bool =
-  not(R::canAnswer(dropped({ status: R::Loading, ticket: ticket }), asked))
-```
-
 ## Story: Review a Calendar draft from a note
 
 > As the owner, I want the saved note I have open to fill in a Calendar
@@ -214,6 +177,14 @@ pure def calendarDraftFromNoteAllowed(
 
 pure def lawExistingCalendarDraftKeepsItsPlace(savedNoteOpen: bool, sameResidentOwner: bool): bool =
   not(calendarDraftFromNoteAllowed(savedNoteOpen, sameResidentOwner, true))
+
+pure def canDraftForCalendar(noteOwner: int, calendarOwner: int, saved: bool, hasOpenDraft: bool): bool =
+  isOwner(noteOwner) and noteOwner == calendarOwner and saved and not(hasOpenDraft)
+
+pure def lawCalendarDraftRespectsOwnerAndOpenDraft(noteOwner: int, calendarOwner: int, saved: bool): bool =
+  not(canDraftForCalendar(noteOwner, calendarOwner, false, false))
+    and not(canDraftForCalendar(noteOwner, calendarOwner, saved, true))
+    and (noteOwner != calendarOwner implies not(canDraftForCalendar(noteOwner, calendarOwner, saved, false)))
 ```
 
 ### A saved Calendar item links back to its note for the current owner and reports edits or deletion

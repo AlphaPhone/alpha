@@ -54,7 +54,7 @@ import { acceptedFiles, acceptedPhotos, attachmentAuthority, previewFile, remove
 import { chip, type MessageActions, useHistorySheets, useMessageRows } from "./history.tsx";
 import { ChatScrim, DragStrip, useSheetFollow } from "./follow.tsx";
 import { holdMessagePress } from "./message-actions.vibe";
-import { ReplyFailure } from "./ReplyFailure.tsx";
+import { ReplyFailure, UntoldSteps } from "./ReplyFailure.tsx";
 import {
   actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
 } from "./recording-summary.vibe";
@@ -118,7 +118,6 @@ function waiting(writing: Writing, files: readonly Attached[], transcriptTitle: 
     ...(editor.mail ? [{ id: "mail", kind: "mail", name: "Mail" } as const] : []),
     ...(editor.transcript && transcriptTitle !== undefined ? [{ id: "transcript", kind: "transcript", name: transcriptTitle } as const] : []),
     ...(editor.shown ? [{ id: "shown", kind: "image", name: "Photo" } as const] : []),
-    ...(editor.question ? [{ id: "question", kind: "transcript", name: "Question" } as const] : []),
   ];
 }
 
@@ -529,9 +528,7 @@ function removeAttachmentById(
   composer: ReturnType<typeof useComposer>,
   mail: MailQuestions.Shape,
 ) {
-  if (id === "question") {
-    if (composer.can({ type: "removeQuestion" })) void composer.send({ type: "removeQuestion" });
-  } else if (id === "transcript") {
+  if (id === "transcript") {
     if (composer.can({ type: "detach", kind: "Transcript" })) void runtime.runPromise(retireTranscript());
   } else if (id === "mail" || id === "shown") {
     const event = { type: "detach", kind: detached[id] } as const;
@@ -612,7 +609,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const onSettings = useCallback(() => {
     if (settingsAction) void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(settingsAction)));
   }, [runtime, settingsAction]);
-  // spec/app/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries": a search card hands Maps its search
+  // spec/app/maps/index.md, "A map card in the conversation opens its place on the phone's map once Maps is on screen, never over navigation": a search card hands Maps its search
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
   const onOpenMaps = useCallback((card: MapsCard, message: number) => {
     setOpened((before) => new Set([...before, message]));
@@ -621,7 +618,7 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
     void runtime.runPromiseExit(Effect.flatMap(ShellMachine, (machine) => machine.send(maps)));
   }, [runtime]);
   const mapsShowing = Boolean(shell.state && showing(shell.state, "Maps"));
-  // spec/app/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
+  // spec/app/maps/index.md, "Story: Let the agent help with Maps"
   const answeredRef = useRef(new Set<string>());
   const canAsk = talking === undefined ? undefined : askable(talking);
   const onChoose = (choice: string, value: string) => {
@@ -658,7 +655,11 @@ function useAssistantTranscript({ runtime, board, seen, conversation, chats, wri
   const replyWords = replyBlocks(seen.reply, true).words;
   const status = turnOf(talking, seen.label, replyWords !== "", writingNow);
   const onOpenLink = messageActions?.openLink;
-  const writingReply = replyWords !== "" ? [{ id: "reply", author: "alpha", text: replyWords, onOpenLink } as const] : [];
+  // spec/app/assistant/reply.md, "Each step the agent marked untold draws Alpha's step notice under its reply, live and read again, and a reply with no text that marks one is answered, never declined"
+  const writingReply = replyWords !== "" || seen.replyUntold.length > 0 ? [{
+    id: "reply", author: "alpha", text: replyWords, onOpenLink,
+    ...(seen.replyUntold.length === 0 ? {} : { children: <UntoldSteps untold={seen.replyUntold} /> }),
+  } as const] : [];
   // spec/app/assistant/reply.md, "A failed reply offers the fix the agent named, and a limit reached shows its live wait, never sending the message again"; spec/app/assistant/reply.md, "Out of funds is refused before any output, is never spoken, and offers only Manage plan"
   const mediaCards = seen.media.filter((card) => !talking.context.sensitive && card.conversation === shown.chosen && card.revision === talking.context.revision).map((card) => ({
     id: `media ${card.id}`, author: "alpha" as const, text: "", children: <DeviceReview runtime={runtime} card={card} />,

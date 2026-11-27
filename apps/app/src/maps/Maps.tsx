@@ -56,7 +56,6 @@ const told: Record<GuideNotice, string> = {
   StoppedFromNotification: "Navigation stopped from the notification.",
   PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
   AccountChanged: "The Maps account changed. Navigation ended.",
-  RerouteKept: "Rerouting needs a precise, up-to-date location. The current route was kept.",
 };
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
@@ -423,19 +422,6 @@ export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | 
           <GuidanceHeader state={state} seen={seen} spot={spot} kept={kept} way={way} />
           <GuidanceFooter screen={screen} state={state} seen={seen} way={way} clockNow={clockNow} />
         </>
-      )}
-
-      {state.question !== "NoQuestion" && state.review.showing && (
-        <div className="pointer-events-none absolute inset-x-3 top-17 z-dialog flex flex-col gap-2 *:pointer-events-auto in-data-[alpha-launcher]:top-28">
-          <MapsStatusCard role="dialog" aria-label={state.question === "ReadPlace" ? "Share this place with your agent" : "Start this route"}
-            text={state.question === "ReadPlace" ? `Your agent asks to read ${placeName || "this place"}.` : `Your agent proposes this route to ${placeName || "this place"}.`}
-            actions={(
-              <>
-                {can({ type: "approve" }) && <MapsPillButton size="lg" onClick={() => void send({ type: "approve" })}>{state.question === "ReadPlace" ? "Share" : "Start"}</MapsPillButton>}
-                {can({ type: "decline" }) && <MapsPillButton tone="fill" size="lg" onClick={() => void send({ type: "decline" })}>Not now</MapsPillButton>}
-              </>
-            )} />
-        </div>
       )}
 
       {said.length > 0 && (

@@ -1,4 +1,4 @@
-// spec/app/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries"; spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation"
+// spec/app/maps/index.md, "A query another app hands to Maps opens as a search, never over navigation"
 
 let pending: string | undefined;
 let opening: string | undefined;

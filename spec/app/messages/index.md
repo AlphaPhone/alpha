@@ -132,8 +132,6 @@ pure def holdsChoices(s: Messages): bool = showingPane(s, Picker) or showingPane
 
 pure def readable(s: Messages): bool = P::allows(s.sms)
 
-pure def idle(r: R::Read): R::Read = { ...r, status: R::Idle }
-
 pure def askThreads(further: bool, s: Messages): Moved =
   val list = R::ask(s.list)
   { state: { ...s, list: list }, out: List(ReadThreads({ ticket: list.ticket, further: further })) }
@@ -148,7 +146,7 @@ pure def show(s: Messages): Moved = askThreads(false, { ...s, front: true, pane:
 ```quint
 pure def cleared(pane: Pane, s: Messages): Messages =
   { ...s, pane: pane, thread: 0, threads: 0, moreThreads: false, shown: blankPage, earlier: false, confirming: false,
-    choices: 0, moreChoices: false, list: idle(s.list), page: idle(s.page), picker: idle(s.picker), offeredPicture: 0,
+    choices: 0, moreChoices: false, list: R::drop(s.list), page: R::drop(s.page), picker: R::drop(s.picker), offeredPicture: 0,
     newDraft: { ...blankNew, visit: s.newDraft.visit } }
 
 pure def canLeave(s: Messages): bool = s.front
@@ -503,8 +501,6 @@ pure def sometimesMarkedReadAsSmsApp(s: Messages): bool = s.smsApp and content(s
 > the messaging app what Alpha cannot show, and delete a message only after
 > I confirm it.
 
-### A tap toggles message actions and a stationary hold opens them
-
 A tap on a message opens or closes its actions. A stationary primary
 press opens the actions while held and releasing it keeps them open.
 Moving to scroll or cancelling the press opens no actions. Following an
@@ -533,7 +529,11 @@ pure def lawStationaryHoldOpensAndReleaseKeepsActions(menuOpen: bool): bool =
 
 Call hands off the current thread and page ticket. Phone opens the keypad
 with the one participant's number and keeps Ask Alpha open at its current
-height. The owner uses Phone's Call control to start a call.
+height. The owner uses Phone's Call control to start a call. The open
+action menu shows “Copied!” for 1.4 seconds after the phone copies the
+selected message; if the phone rejects the write, the menu says “Copy
+failed” and lets the owner try again, and closing the menu or selecting
+another message clears its feedback.
 
 ```quint
 pure def canCopy(s: Messages): bool = showingPane(s, Conversation) and content(s) and not(s.confirming)
@@ -578,7 +578,6 @@ pure def lawClosingOrSwitchingMessageClearsCopyFeedback(
 ): bool =
   (not(menuOpen) or not(sameMessage)) implies copyFeedbackShown(menuOpen, sameMessage, feedback, elapsedMs) == NoCopyFeedback
 ```
-
 ### "Delete message?" is asked over a message that is shown, and Keep closes it
 
 ```quint
@@ -694,8 +693,6 @@ pure def startNewDraft(s: Messages, revision: int, thread: int): Moved =
 
 pure def holdsNewDraft(s: Messages, visit: int): bool = showingPane(s, New) and s.newDraft.visit == visit
 ```
-
-### The current New address names the Messages stage beside Ask Alpha
 
 The stage and its Full strip name the recipients of the open New draft. The
 name is read only for its current validated numbers and while Contacts

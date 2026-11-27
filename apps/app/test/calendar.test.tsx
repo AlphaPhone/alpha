@@ -1118,9 +1118,12 @@ describe("on a phone", () => {
     await file("approval-home", "camera setup", 9, "primary");
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
-    expect(["Eliza Calendar", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
-    expect(button("Approve")).toBeDefined();
-    expect(world.calendar.writes).toEqual([]);
+    expect([
+      askedCard().includes("Eliza Calendar"),
+      askedCard().includes("Agent Calendar"),
+      Boolean(button("Approve")),
+      world.calendar.writes,
+    ]).toEqual([true, false, true, []]);
   });
 
   // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"

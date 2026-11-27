@@ -84,7 +84,7 @@ pure def canClose(t: Transfer): bool =
   t.stage == Writing or t.stage == Opening or t.stage == Reviewing or t.stage == Stale
 
 pure def close(t: Transfer): Transfer =
-  { ...t, stage: Closed, said: Quiet, why: "", opening: { ...t.opening, status: R::Idle }, review: V::dismiss(t.review) }
+  { ...t, stage: Closed, said: Quiet, why: "", opening: R::drop(t.opening), review: V::dismiss(t.review) }
 ```
 
 ### The owner asks for a transfer of an amount written exactly in the asset's own units, to a recipient, once
@@ -238,7 +238,7 @@ pure def reopen(t: Transfer): Transfer =
     asking: if (wasAsking) A::conclude(t.asking, false, false) else t.asking,
     deciding: if (wasDeciding) A::conclude(t.deciding, false, false) else t.deciding,
     spent: if (wasDeciding and t.approving and not(t.spent.includes(t.request))) t.spent.append(t.request) else t.spent,
-    opening: { ...t.opening, status: R::Idle }, review: V::dismiss(t.review),
+    opening: R::drop(t.opening), review: V::dismiss(t.review),
     settled: if (wasAsking or wasDeciding) t.settled + 1 else t.settled }
 
 pure def stepReopenLeavesNothingSent(before: Transfer, via: str, after: Transfer): bool =

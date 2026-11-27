@@ -17,11 +17,6 @@ lemma FrontUpView(s: Notices, workspace: int, channel: int, threadTs: int)
 {
 }
 
-lemma TappedUpView(s: Notices, workspace: int, channel: int, threadTs: int, ts: int)
-  ensures tapped(s, workspace, channel, threadTs, ts).state.up == ProofLib.Filter((p: Posted) => (p.target != Target(workspace, channel, threadTs)), s.up)
-{
-}
-
 lemma workspaceRemoved_ensures(s: Notices, workspace: int)
   ensures (inv(s) ==> canWorkspaceRemoved(s, workspace) ==> alwaysNoticesIsolated(workspaceRemoved(s, workspace).state))
   ensures (inv(s) ==> canWorkspaceRemoved(s, workspace) ==> stepNoNoticeBeforeBaseline(s, "workspaceRemoved", workspaceRemoved(s, workspace).state, workspaceRemoved(s, workspace).out))
@@ -79,22 +74,6 @@ lemma frontChanged_ensures(s: Notices, workspace: int, channel: int, threadTs: i
       forall p | p in after.up ensures p in s.up && p.target != target {
         ProofLib.FilterMember((p: Posted) => (p.target != target), s.up, p);
       }
-    }
-  }
-}
-
-lemma tapped_ensures(s: Notices, workspace: int, channel: int, threadTs: int, ts: int)
-  ensures (inv(s) ==> canTapped(s, workspace, channel, threadTs, ts) ==> alwaysNoticesIsolated(tapped(s, workspace, channel, threadTs, ts).state))
-  ensures (inv(s) ==> canTapped(s, workspace, channel, threadTs, ts) ==> stepNoNoticeBeforeBaseline(s, "tapped", tapped(s, workspace, channel, threadTs, ts).state, tapped(s, workspace, channel, threadTs, ts).out))
-  ensures (inv(s) ==> canTapped(s, workspace, channel, threadTs, ts) ==> stepWorkspaceRevokeWithdrawsOnlyThatWorkspace(s, "tapped", tapped(s, workspace, channel, threadTs, ts).state, tapped(s, workspace, channel, threadTs, ts).out))
-  ensures (inv(s) ==> canTapped(s, workspace, channel, threadTs, ts) ==> stepReadingWithdrawsNotices(s, "tapped", tapped(s, workspace, channel, threadTs, ts).state, tapped(s, workspace, channel, threadTs, ts).out))
-{
-  if inv(s) && canTapped(s, workspace, channel, threadTs, ts) {
-    var target := Target(workspace, channel, threadTs);
-    TappedUpView(s, workspace, channel, threadTs, ts);
-    var after := tapped(s, workspace, channel, threadTs, ts).state;
-    forall p | p in after.up ensures p in s.up {
-      ProofLib.FilterMember((p: Posted) => (p.target != target), s.up, p);
     }
   }
 }

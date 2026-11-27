@@ -23,26 +23,25 @@ is being opened while its read is loading. The draft counts edits and
 saves against the slot's revisions; a write in flight carries a ticket. A
 send is free, being marked in the slot, or asked of the conversation. The
 editor holds the text and what waits to go with it (files, a mail, a
-transcript, the photo showing, a question reviewed in "Ask Alpha about
-this", a quoted message, a message being edited to send again); the message of the send in hand is held apart.
+transcript, the photo showing, a quoted message, a message being edited
+to send again); the message of the send in hand is held apart.
 
 ```quint
 import read as R from "../../kit/read"
 import draft as D from "../../kit/draft"
 import attempt as A from "../../kit/attempt"
-import extend as X from "./extend"
 
 type Slot = Closed | Open | Damaged | Unreadable
 type Away = Free | Marking | Asked
 type Binding = { owner: int, conversation: int }
-type Message = { text: bool, files: int, mail: bool, transcript: bool, shown: bool, question: bool, quote: int, editing: int }
+type Message = { text: bool, files: int, mail: bool, transcript: bool, shown: bool, quote: int, editing: int }
 type Composer = {
   binding: Binding, slot: Slot, read: R::Read, draft: D::Draft, writing: int, failing: bool,
   hold: int, away: Away, marked: bool, unsettled: bool, editor: Message, held: Message,
   offeredAt: int, source: int, clear: A::Attempt, long: bool,
 }
 
-pure val blankMessage: Message = { text: false, files: 0, mail: false, transcript: false, shown: false, question: false, quote: 0, editing: 0 }
+pure val blankMessage: Message = { text: false, files: 0, mail: false, transcript: false, shown: false, quote: 0, editing: 0 }
 
 pure val initial: Composer = {
   binding: { owner: 0, conversation: 0 }, slot: Closed, read: R::unread, draft: D::blank, writing: 0, failing: false,
@@ -75,10 +74,10 @@ pure def written(sending: bool, c: Composer): Moved =
 pure def adopted(d: D::Draft, revision: int): D::Draft = D::takeSaved(D::collide(d, revision))
 
 pure def attachments(m: Message): int =
-  m.files + (if (m.mail) 1 else 0) + (if (m.transcript) 1 else 0) + (if (m.shown) 1 else 0) + (if (m.question) 1 else 0)
+  m.files + (if (m.mail) 1 else 0) + (if (m.transcript) 1 else 0) + (if (m.shown) 1 else 0)
 
 pure def rest(binding: Binding, c: Composer): Composer =
-  { ...initial, binding: binding, hold: c.hold, writing: c.writing, read: X::dropped(c.read), offeredAt: c.offeredAt,
+  { ...initial, binding: binding, hold: c.hold, writing: c.writing, read: R::drop(c.read), offeredAt: c.offeredAt,
     clear: if (c.clear.outcome == A::Sent) A::conclude(c.clear, false, false) else c.clear }
 ```
 
@@ -207,7 +206,7 @@ pure def wrote(c: Composer, ticket: int, result: Wrote, revision: int): Moved =
   val clear = A::dispatch(A::record(A::plan(c.clear.id + 1)))
   val stopped =
     if (result == Collided) { ...c, draft: D::collide(c.draft, revision) }
-    else { ...c, draft: X::failed(c.draft), failing: true }
+    else { ...c, draft: D::interrupt(c.draft), failing: true }
   if (result == Landed and c.away == Marking)
     { state: { ...landed, away: Asked, marked: true }, out: List(Ask({ hold: c.hold, attachments: attachments(c.held) })) }
   else if (result == Landed and c.source > 0)
@@ -230,7 +229,9 @@ pure def retry(c: Composer): Moved = written(false, { ...c, failing: false })
 
 What was saved is read again when the composer opens; attachments, the
 editor and a send in hand are gone. Tickets carry on, so no answer to
-what was asked before is taken after.
+what was asked before is taken after. A composer an earlier build kept
+while its editor and what it held could carry a question is read without
+the question, and with the rest as it was.
 
 ```quint
 pure def reopen(c: Composer): Composer = rest(c.binding, c)
@@ -727,21 +728,6 @@ pure def within(m: Message): bool = 0 <= m.files and m.files <= maxFiles and m.q
 pure def alwaysAttachmentsStayWithinTheirLimits(c: Composer): bool = within(c.editor) and within(c.held) and c.offeredAt >= 0
 ```
 
-### A question reviewed in "Ask Alpha about this" goes with the next send as an attachment, until the owner removes it
-
-The [question](./question.md) review adds it once; it stays when another
-view shows, since the owner added it.
-
-```quint
-pure def canAddQuestion(c: Composer): bool = c.slot == Open and c.away == Free and not(c.editor.question)
-
-pure def addQuestion(c: Composer): Composer = { ...c, editor: { ...c.editor, question: true } }
-
-pure def canRemoveQuestion(c: Composer): bool = c.away == Free and c.editor.question
-
-pure def removeQuestion(c: Composer): Composer = { ...c, editor: { ...c.editor, question: false } }
-```
-
 ### A quoted message goes with the next send, until the owner removes the quote
 
 Only a message of the conversation showing that the agent recorded, and
@@ -809,12 +795,6 @@ pure def sometimesTheFilesAreFull(c: Composer): bool = c.editor.files == maxFile
 
 ```quint
 pure def sometimesAQuoteIsHeld(c: Composer): bool = c.held.quote > 0 and c.away == Asked
-```
-
-### A question can go with a message
-
-```quint
-pure def sometimesAQuestionIsHeld(c: Composer): bool = c.held.question and c.away == Asked
 ```
 
 ### A message can be edited to send again

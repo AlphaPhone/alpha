@@ -69,3 +69,16 @@ pure def lawAConflictIsNotSavedOver(edits: int, base: int, held: int): bool =
   val d = collide(save({ sync: Edited, edits: edits, carried: 0, base: base }), held)
   not(canSave(d)) and not(canLand(d)) and not(canSave(edit(d)))
 ```
+
+### A save that is interrupted returns to edited without losing edits or advancing the revision
+
+```quint
+pure def interrupt(d: Draft): Draft = if (d.sync == Saving) { ...d, sync: Edited } else d
+
+pure def lawAnInterruptedSaveKeepsItsEdits(sync: Sync, edits: int, carried: int, base: int): bool =
+  val d = { sync: sync, edits: edits, carried: carried, base: base }
+  val i = interrupt(d)
+  i.edits == edits and i.base == base
+    and (sync == Saving implies (unsaved(i) and canSave(i) and not(canLand(i))))
+    and (sync != Saving implies i == d)
+```

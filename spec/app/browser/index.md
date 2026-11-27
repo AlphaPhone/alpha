@@ -7,10 +7,10 @@ browser controls site cookies and sign-ins. This spec is the tabs and the
 saved session.
 What one tab does is in the specs beside it:
 
+- [Shared](./shared.md): tab kind shared across Browser specs
 - [Address](./address.md): one tab's page: the address bar, loading, the secure mark, back and forward, and find in page
 - [Library](./library.md): bookmarks and history
-- [Site](./site.md): what a site may use, signing in to it, and a site's data
-- [Downloads](./downloads.md): a file a page offers, from review to Downloads
+- [Site](./site.md): clearing a site's data
 - [Share](./share.md): sharing a page, copying its link and opening it in another browser
 - [Reading](./reading.md): reading a page for Ask Alpha and reading it aloud
 
@@ -32,11 +32,11 @@ the record on the device; the writer carries one copy of it at a time.
 
 ```quint
 import read as R from "../../kit/read"
+import shared.* from "./shared"
 
-type Kind = Normal | Private
 type Layer = Uncovered | Address | Switcher | Menu | Library | ReadingReview
 type Erasing = Kept | Asked | Running
-type Effect = Restore({ ticket: int }) | Create({ tab: int, kind: Kind }) | Close({ tab: int }) | Save({ write: int }) | Erase | Halt({ driven: int })
+type Effect = Restore({ ticket: int }) | Create({ tab: int, kind: Kind }) | Close({ tab: int }) | Save({ write: int }) | Erase
 type Browser = {
   open: Set[int], privates: Set[int], selected: int, issued: int, native: Set[int],
   kept: Set[int], restore: R::Read, hydrated: bool, untouched: bool,
@@ -46,7 +46,6 @@ type Browser = {
 type Step = { state: Browser, out: List[Effect] }
 
 pure def closes(out: List[Effect], tab: int): bool = out.some(e => match e { | Close(c) => c.tab == tab | _ => false })
-pure def halts(out: List[Effect], tab: int): bool = out.some(e => match e { | Halt(h) => h.driven == tab | _ => false })
 
 pure val maxTabs = 8
 
@@ -123,8 +122,7 @@ pure def closeTab(s: Browser, tab: int, instead: int): Step =
     agent: if (s.agent == tab) 0 else s.agent,
     untouched: false, stale: s.stale or not(s.privates.contains(tab)),
   }
-  { state: closed, out: (if (s.native.contains(tab)) List(Close({ tab: tab })) else List())
-      .concat(if (s.agent == tab) List(Halt({ driven: tab })) else List()) }
+  { state: closed, out: if (s.native.contains(tab)) List(Close({ tab: tab })) else List() }
 ```
 
 ### A tab gets its native tab when it is the one shown and loads a page, and loses it if Android cannot make one
@@ -140,7 +138,7 @@ pure def canNativeLost(s: Browser, tab: int): bool = s.native.contains(tab)
 
 pure def nativeLost(s: Browser, tab: int): Step =
   { state: { ...s, native: s.native.exclude(Set(tab)), agent: if (s.agent == tab) 0 else s.agent },
-    out: if (s.agent == tab) List(Halt({ driven: tab })) else List() }
+    out: List() }
 ```
 
 ### A tab a page opens is as private as the page, is shown, and is closed again when eight are open or the tabs are not settled
@@ -465,7 +463,7 @@ pure def erased(s: Browser, ok: bool): Step =
       open: if (stays) s.open.intersect(s.privates) else s.open.intersect(s.privates).union(Set(fresh)), issued: if (stays) s.issued else fresh,
       selected: if (stays) s.selected else fresh,
       native: s.native.intersect(s.privates), untouched: false },
-    out: if (s.agent != 0) List(Halt({ driven: s.agent })) else List(),
+    out: List(),
   }
 ```
 
@@ -515,8 +513,7 @@ pure def agentOpen(s: Browser, secure: bool, userInfo: bool): Step =
 
 ### A page the owner's whole message asked for opens at once, typed or spoken, and any other page waits for the owner's Open
 
-As on Sunday's v119 demo phone, where "Open https://www.alphacompute.ai/ in
-Browser." loaded the site with no card, typed or said in Talk. The phone
+The phone
 runs `browser.open-direct.v1` (eliza's `spec/browser/control.md`): a
 `browser_navigate` step the agent offers as asked by the owner's whole
 message runs at once, after the reply, through the same approvals path and
@@ -529,10 +526,9 @@ Browser's card, as before. While the owner has "Ask before Alpha acts" on,
 or the phone has not read that preference or is still reading or saving it
 (`asksBeforeActing(WebAction)` in [Preferences](../settings/preferences.md)),
 even a page the whole message asked for waits for the owner's Open on its
-card, as v119 asked first for every direct run. So a typed or spoken turn
+card. So a typed or spoken turn
 declares `browser.open-direct.v1` only while such a page would open at
-once, read as the turn is sent, as v119 dropped its direct request while it
-asked first: the agent then keeps the open for review, and its card shows
+once, read as the turn is sent: the agent then keeps the open for review, and its card shows
 in Ask Alpha for a spoken request too, from Files as from any other
 screen. Every page still opens only under the rule above.
 
@@ -547,14 +543,6 @@ pure def lawAskingFirstWaitsForTheOwner(askedWhole: bool, secure: bool, userInfo
   not(pageOpens(askedWhole, true, false, secure, userInfo))
 pure def lawNoPageOpensOutsideHttps(askedWhole: bool, asksFirst: bool, ownerChoseOpen: bool, userInfo: bool): bool =
   not(pageOpens(askedWhole, asksFirst, ownerChoseOpen, false, userInfo))
-```
-
-### "Stop and take over" stops the agent and gives its tab to the owner
-
-```quint
-pure def canTakeOver(s: Browser): bool = s.agent != 0
-
-pure def takeOver(s: Browser): Step = { state: { ...s, agent: 0 }, out: List(Halt({ driven: s.agent })) }
 ```
 
 ### The agent gives its tab up when it is done
@@ -572,12 +560,11 @@ pure def alwaysTheAgentDrivesAnOpenNormalTab(s: Browser): bool =
   s.agent != 0 implies (s.native.contains(s.agent) and not(s.privates.contains(s.agent)))
 ```
 
-### The agent's page never takes the owner's place, and the agent is told whenever its tab is taken away
+### The agent's page never takes the owner's place
 
 ```quint
 pure def stepTheAgentNeverTakesTheOwnersPlace(before: Browser, via: str, after: Browser, out: List[Effect]): bool =
-  (via == "agentOpen" implies after.selected == before.selected) and
-    ((before.agent != 0 and after.agent == 0 and via != "agentDone" and via != "restart") implies halts(out, before.agent))
+  via == "agentOpen" implies after.selected == before.selected
 ```
 
 ### The agent can be driving a tab the owner is not on

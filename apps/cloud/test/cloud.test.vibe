@@ -285,6 +285,11 @@ describe(`Alpha Cloud at its hosted origins (spec/cloud/index.md, "Story: Operat
     } } }
     try holds(() => assert.deepStrictEqual(hostedProfileProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
     const staging = profile.environments.staging
+    try holds(() => assert.deepStrictEqual(hostedProfileProblems({
+      ...profile, environments: { ...profile.environments, staging: {
+        ...staging, speech: { ...staging.speech!, realtimeUrl: "wss://api.cartesia.ai/stt/websocket" },
+      } },
+    }, hosts), ["staging: speech realtimeUrl must be a wss origin without an endpoint path"]))
     const alternatives: ReadonlyArray<typeof staging.mail> = [{ kind: "binding", binding: "OTHER_EMAIL" }, { kind: "https", url: "https://email.example.com/messages", apiKeyEnv: "OTHER_EMAIL_KEY" }]
     try holds(() => assert.deepStrictEqual(alternatives.map((mail) => hostedProfileProblems({
       ...profile, environments: { ...profile.environments, staging: { ...staging, mail } },
@@ -292,10 +297,10 @@ describe(`Alpha Cloud at its hosted origins (spec/cloud/index.md, "Story: Operat
     const colliding = { ...hosts, staging: { ...hosts.staging, appLinkHost: new URL(hosts.production.cloud).hostname } }
     try holds(() => assert.deepStrictEqual(hostedProfileProblems(profile, colliding), [
       "production and staging share an API or App Link hostname",
-      `staging: the profile answers at ${staging.api} for ${staging.web}, and @repo/deployment names ${colliding.staging.cloud} for ${colliding.staging.appLinkHost}`,
+      "staging: the profile's API or web host differs from @repo/deployment",
     ]))
-    const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag)
-    try holds(() => assert.strictEqual(shipped, "CandidateRefused"))
+    const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag === "CandidateRefused" ? failure.message : failure._tag)
+    try holds(() => assert.match(String(shipped), /staging: the profile's API or web host differs from @repo\/deployment/))
   } |> Effect.provide(%, NodeServices.layer))
 })
 

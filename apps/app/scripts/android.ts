@@ -298,7 +298,7 @@ const DEVELOPMENT_TEXT = [
   "10.0.2.2", "127.0.0.1:", "http://localhost:", "ALPHA_FAKES", "/test/fakes/", "/__control/",
   "api-staging.eliza.app", "cloud-staging.eliza.app", "staging.eliza.app", "staging.alphacompute.cc",
   "api-staging.alphaphone.dev", "cloud-staging.alphaphone.dev",
-  "xoxp-alpha-team-owner-initial", "xoxp-design-guild-owner-initial", "tg-sess-initial-owner", "xoxb-",
+  "xoxp-alpha-team-owner-initial", "xoxp-design-guild-owner-initial", "tg-sess-initial-owner",
   "Maya Chen", "Ben Ortiz", "Harbour Cafe", "Harbour Gallery",
 ];
 const TEST_ONLY_PATH = /(?:^|\/)(?:fixtures?(?:[.-][^/]*)?\.(?:js|mjs|css|json)|[^/]+\.meta(?:[.-][^/]*)?\.js|[^/]+\.stories(?:[.-][^/]*)?\.js|storybook-static\/|mockServiceWorker\.js$)/i;
@@ -372,6 +372,7 @@ export function auditBundle(directory: string): string[] {
     if (!TEXT_FILE.test(file)) continue;
     const text = readFileSync(join(directory, file), "utf8");
     for (const marker of DEVELOPMENT_TEXT) if (text.includes(marker)) findings.push(`${file}: ${marker}`);
+    if (/xoxb-[A-Za-z0-9]/.test(text)) findings.push(`${file}: Slack bot token literal`);
   }
   return findings;
 }
@@ -525,23 +526,27 @@ function assertSafeZipEntry(entry: string): void {
   }
 }
 
-function verifyCloudRoutes(name: string, capacitor: Record<string, unknown>): void {
+export function verifyCloudRoutes(name: string, capacitor: Record<string, unknown>): void {
   const cloud = record(record(capacitor.plugins).ElizaCloud);
-  const groups: readonly unknown[] = Array.isArray(cloud.routes) ? (cloud.routes as readonly unknown[]) : [];
-  const routes: readonly unknown[] = groups.flatMap((item) => {
-    const nested = record(item).routes;
-    return Array.isArray(nested) ? (nested as readonly unknown[]) : [item];
-  });
-  if (routes.length === 0) throw new Error(`${name} carries no ElizaCloud.routes table`);
-  for (const item of routes) {
-    const route = record(item);
-    const method = typeof route.method === "string" ? route.method : "";
-    const routePath = typeof route.path === "string" ? route.path : "";
-    if (method === "" || !routePath.startsWith("/")) {
-      throw new Error(`${name} carries a malformed ElizaCloud route: ${JSON.stringify(item)}`);
+  const groups = Array.isArray(cloud.routes) ? cloud.routes : [];
+  if (groups.length === 0) throw new Error(`${name} carries no ElizaCloud.routes table`);
+  for (const item of groups) {
+    const group = record(item);
+    if (!Array.isArray(group.prefixes) || group.prefixes.length === 0 ||
+        group.prefixes.some((prefix) => typeof prefix !== "string" || !prefix.startsWith("/")) ||
+        typeof group.id !== "string" || !Array.isArray(group.routes) || group.routes.length === 0) {
+      throw new Error(`${name} carries a malformed ElizaCloud route group`);
     }
-    if (SIGN_IN_OWNED_PREFIXES.some((prefix) => routePath.startsWith(prefix))) {
-      throw new Error(`${name} puts sign-in-owned route ${routePath} in ElizaCloud.routes`);
+    for (const entry of group.routes) {
+      const route = record(entry);
+      const routePath = route.path;
+      if (typeof route.method !== "string" || route.method === "" ||
+          typeof routePath !== "string" || !routePath.startsWith("/")) {
+        throw new Error(`${name} carries a malformed ElizaCloud route`);
+      }
+      if (SIGN_IN_OWNED_PREFIXES.some((prefix) => routePath === prefix.slice(0, -1) || routePath.startsWith(prefix))) {
+        throw new Error(`${name} puts sign-in-owned route ${routePath} in ElizaCloud.routes`);
+      }
     }
   }
 }

@@ -12,8 +12,6 @@ Maps and comes back to it.
   changes it makes only after the owner approves the card that shows them
 - [Google link](./link.md): the agent's Calendar linked to the owner's
   Google calendar, set up and paused from Calendar's Google row
-- [Sharing](./sharing.md): what a reviewed read of the phone's calendar may
-  tell the agent, and which of its Calendar actions the phone offers
 - [Presentation](./presentation.md): how times, days, replies and the
   calendars hidden are shown
 - [Writing](./writing.md): what a form may set, which events Alpha may change
@@ -22,14 +20,16 @@ Maps and comes back to it.
 - [The agent's actions on the phone](./actions.md): what the agent creates,
   reads, changes or deletes on the phone, only through the owner's card and
   the phone's own review
+- [Reminder reopen](./reminderReopen.md): reopening a completed reminder from
+  Calendar after the owner confirms
 
-Reminders belong to the notices area: Calendar shows them among the events,
-as many as it is told of. Which app is showing, and Back between apps, belong
-to the [shell](../shell/).
+Reminders belong to the [reminders](../reminders/) area: Calendar shows them
+among the events, as many as it is told of. Which app is showing, and Back
+between apps, belong to the [shell](../shell/).
 
-An event and the form rise over the days as Alpha's earlier build drew them,
-and the days stay under them as they were. Before Calendar has its first
-answer, it shows its header, never a blank screen or a spinner.
+An event and the form rise over the days, and the days stay under them as
+they were. Before Calendar has its first answer, it shows its header, never a
+blank screen or a spinner.
 
 ## Story: See my days
 
@@ -371,22 +371,26 @@ pure def lawStaleOrOutOfScopeWorkflowReadReturnsNoData(
 ): bool =
   (not(grantBefore) or not(grantAfter) or not(frontBefore) or not(frontAfter) or not(reviewCurrent) or not(inApprovedScope))
     implies not(workflowPhoneReadAdmitted(grantBefore, grantAfter, frontBefore, frontAfter, reviewCurrent, inApprovedScope))
+
+pure def workflowReadAllowed(granted: bool, inFront: bool, inApprovedRange: bool, selectedCalendar: bool): bool =
+  granted and inFront and inApprovedRange and selectedCalendar
+
+pure def lawWorkflowReadNeedsGrantAndScope(granted: bool, inFront: bool, inApprovedRange: bool, selectedCalendar: bool): bool =
+  workflowReadAllowed(granted, inFront, inApprovedRange, selectedCalendar)
+    implies (granted and inFront and inApprovedRange and selectedCalendar)
 ```
 
 ### Calendar asks for the phone's calendar only while it lacks it, and only once
 
-As live v119 did, Calendar shows no notice asking for it: opening New event
+Calendar shows no notice asking for it: opening New event
 on a phone with calendars of its own asks Android while the agent's
 calendar is not connected, so the event would go to the phone's, and Save
 to the phone's calendar asks too, waits for the answer, and goes out only
 with access. Either asks only while Calendar may still ask; after that,
 Calendar's settings notice, on the days and on a form going to the phone's
 calendar, is the way to grant it, and Save to the phone's calendar waits
-for it. v119's default Agent Calendar never asked at New event; only its
-opt-in Android calendars mode did, where the phone's own calendars are the
-calendar, which here is a phone with no agent's calendar connected. Once
-Android said no, the form going to the phone's calendar says No access, as
-v119 did.
+for it. Once Android said no, the form going to the phone's calendar says
+No access.
 
 ```quint
 pure def canAskAccess(s: Calendar): bool = P::canAsk(s.access)
@@ -771,8 +775,7 @@ month. Empty standalone Search without a connected calendar says Not connected
 with or without a query. The Calendars sheet lists the agent's calendar and the
 phone's, each with its switch. Only a wide screen offers Search, the layouts and
 the Calendars sheet: on a phone, Calendar's header holds the month, Today and New
-event, and the month dialog only its days, as Alpha's build of 22 November drew
-them.
+event, and the month dialog only its days.
 
 ```quint
 pure def canOpenSearch(s: Calendar): bool = s.overlay == NoOverlay and s.open == 0 and s.reminder == 0 and s.front and uncovered(s)

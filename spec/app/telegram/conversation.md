@@ -81,7 +81,7 @@ pure def canSessionChanged(c: Conversation, authenticated: bool): bool = authent
 pure def sessionChanged(c: Conversation, authenticated: bool): Conversation =
   if (authenticated) { ...c, authenticated: true }
   else {
-    ...initial, read: { ...c.read, status: R::Idle },
+    ...initial, read: R::drop(c.read),
     op: if (c.op.outcome == A::Sent) A::conclude(c.op, false, false) else c.op,
   }
 
@@ -101,7 +101,7 @@ pure def canCloseChat(c: Conversation): bool = c.chat > 0 and c.op.outcome != A:
 
 pure def closeChat(c: Conversation): Conversation = {
   ...c, chat: 0, front: false, newestLoaded: false, unread: 0,
-  read: { ...c.read, status: R::Idle }, further: false, pages: 0, cursor: 0, spent: Set(),
+  read: R::drop(c.read), further: false, pages: 0, cursor: 0, spent: Set(),
   replyTo: 0, pendingDeleteMsg: 0, deleteReview: V::unreviewed,
 }
 ```

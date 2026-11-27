@@ -157,10 +157,10 @@ none is left written down and unsent by a restart or another owner.
 
 ```quint
 pure def alwaysOneOperationAtATime(t: Transfer): bool =
-  ((t.job != NoJob) iff (t.pick.status == R::Loading or inFlight(t.writing))) and t.writing.outcome != A::Recorded
+  ((t.job != NoJob) iff (t.pick.status == R::Loading or A::inFlight(t.writing))) and t.writing.outcome != A::Recorded
 
 pure def alwaysAWriteIsAfterItsPicker(t: Transfer): bool =
-  not(t.pick.status == R::Loading and inFlight(t.writing)) and (t.job == Exporting implies (t.note > 0 and t.revision > 0))
+  not(t.pick.status == R::Loading and A::inFlight(t.writing)) and (t.job == Exporting implies (t.note > 0 and t.revision > 0))
     and (t.job == Rescuing implies t.revision == 0)
 ```
 
@@ -182,7 +182,7 @@ pure def stepWrittenOnlyAsAsked(before: Transfer, via: str, after: Transfer, out
 ### A write ends
 
 ```quint
-pure def leadsToAWriteEnds(t: Transfer, later: Transfer): bool = inFlight(t.writing) implies not(inFlight(later.writing))
+pure def leadsToAWriteEnds(t: Transfer, later: Transfer): bool = A::inFlight(t.writing) implies not(A::inFlight(later.writing))
 
 pure val fair_written = "weak"
 ```
@@ -219,7 +219,7 @@ pure def sometimesAnEarlierVisitsReceiptDropped(t: Transfer): bool =
 
 ```quint
 pure def left(t: Transfer): Transfer =
-  val calm = if (t.pick.status == R::Loading) { ...t, pick: dropped(t.pick), job: NoJob } else t
+  val calm = if (t.pick.status == R::Loading) { ...t, pick: R::drop(t.pick), job: NoJob } else t
   { ...calm, visit: t.visit + 1, notice: Quiet, waiting: Quiet }
 
 pure def stepNoLateAnswerAfterLeaving(before: Transfer, via: str, after: Transfer): bool =
@@ -233,8 +233,8 @@ pure def stepNoLateAnswerAfterLeaving(before: Transfer, via: str, after: Transfe
 pure def canRestart(t: Transfer, by: Actor): bool = by == Phone
 
 pure def restart(t: Transfer, by: Actor): Transfer =
-  val cut = inFlight(t.writing)
-  val calm = { ...t, pick: dropped(t.pick), job: NoJob, writing: cutOff(t.writing), hidden: false, waiting: Quiet }
+  val cut = A::inFlight(t.writing)
+  val calm = { ...t, pick: R::drop(t.pick), job: NoJob, writing: A::cutOff(t.writing), hidden: false, waiting: Quiet }
   if (cut) tell(Unsure, calm) else calm
 ```
 
@@ -246,8 +246,8 @@ A write on its way is cut off, and its outcome is unknown.
 pure def canOwnerChanged(t: Transfer, owner: int, by: Actor): bool = by == Phone and owner != t.owner and owner >= 0
 
 pure def ownerChanged(t: Transfer, owner: int, by: Actor): Transfer =
-  { ...t, owner: owner, job: NoJob, pick: dropped(t.pick), note: 0, revision: 0, notice: Quiet, waiting: Quiet,
-    visit: t.visit + 1, writing: cutOff(t.writing) }
+  { ...t, owner: owner, job: NoJob, pick: R::drop(t.pick), note: 0, revision: 0, notice: Quiet, waiting: Quiet,
+    visit: t.visit + 1, writing: A::cutOff(t.writing) }
 
 pure def alwaysAnOperationIsTheOwners(t: Transfer): bool = t.job != NoJob implies isOwner(t.owner)
 ```

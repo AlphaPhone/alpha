@@ -139,7 +139,7 @@ unavailable or storage has failed"), and nothing else of Notes open.
 ```quint
 pure def canStart(r: Recorder, room: Admission, available: bool, folder: int, covered: bool, by: Actor): bool =
   mayOpen(covered, by) and isOwner(r.owner) and available and admits(room) and not(r.calling) and not(unfinished(r))
-    and folder >= 0 and not(inFlight(r.erasing) and r.doomedFor == r.owner)
+    and folder >= 0 and not(A::inFlight(r.erasing) and r.doomedFor == r.owner)
 
 pure def start(r: Recorder, room: Admission, available: bool, folder: int, covered: bool, by: Actor): Moved =
   val n = r.issued + 1
@@ -462,7 +462,7 @@ time, and a new recording for that owner waits until erasure settles.
 
 ```quint
 pure def canConfirmDiscard(r: Recorder, take: int, by: Actor): bool =
-  by == Owner and take == r.take and r.ask == AskDiscard and not(inFlight(r.erasing))
+  by == Owner and take == r.take and r.ask == AskDiscard and not(A::inFlight(r.erasing))
 
 pure def confirmDiscard(r: Recorder, take: int, by: Actor): Moved =
   val attempt = A::record(A::plan(r.erasing.id + 1))
@@ -499,7 +499,7 @@ pure def erased(r: Recorder, ticket: int, ok: bool, known: bool, by: Actor): Rec
 pure def alwaysTheQuestionIsAboutAnUnfinishedRecording(r: Recorder): bool =
   (r.ask == AskDiscard implies (r.phase == Recording or r.phase == Paused or r.phase == Failed))
     and (r.phase == Discarding implies (r.erasing.outcome == A::Recorded and r.doomed == r.take and r.doomedFor == r.owner))
-    and (inFlight(r.erasing) implies (r.doomed > 0 and isOwner(r.doomedFor)))
+    and (A::inFlight(r.erasing) implies (r.doomed > 0 and isOwner(r.doomedFor)))
     and (r.pending implies r.erasing.outcome == A::Recorded)
 ```
 
@@ -509,7 +509,7 @@ pure def alwaysTheQuestionIsAboutAnUnfinishedRecording(r: Recorder): bool =
 pure def stepErasedOnlyWhenWrittenDown(before: Recorder, via: str, after: Recorder, out: List[Effect]): bool =
   out.every(e => match e {
     | WritesDown(w) => (via == "confirmDiscard" and before.ask == AskDiscard and w.take == before.take
-          and w.owner == before.owner and w.ticket == before.erasing.id + 1 and w.capture == before.capture and not(inFlight(before.erasing)))
+          and w.owner == before.owner and w.ticket == before.erasing.id + 1 and w.capture == before.capture and not(A::inFlight(before.erasing)))
         or (via == "resumeDiscard" and before.erasing.outcome == A::Recorded and w.ticket == before.erasing.id
           and w.take == before.doomed and w.owner == before.doomedFor and w.capture == 0)
     | Erases(x) => via == "writtenDown" and before.erasing.outcome == A::Recorded and x.ticket == before.erasing.id
@@ -560,7 +560,7 @@ pure def canRestart(r: Recorder, intact: bool, found: int, by: Actor): bool = by
 
 pure def restart(r: Recorder, intact: bool, found: int, by: Actor): Recorder =
   val calm = { ...r, capture: 0, unsaved: 0, level: 0, ask: NoAsk, calling: false, pending: false,
-    keeping: cutOff(r.keeping), look: dropped(r.look), erasing: cutOff(r.erasing) }
+    keeping: A::cutOff(r.keeping), look: R::drop(r.look), erasing: if (r.erasing.outcome == A::Recorded) r.erasing else A::cutOff(r.erasing) }
   val whole = intact and found == r.kept and not(r.damaged)
   if ((live(r) or r.phase == Failed) and r.kept > 0)
     (if (whole) { ...calm, phase: if (live(r)) Paused else Failed, recovered: live(r), found: found }
@@ -656,7 +656,7 @@ pure def ownerChanged(r: Recorder, owner: int, by: Actor): Moved =
   val ending = if (r.capture != 0) List(Tells({ capture: r.capture, command: End })) else List()
   { state: { ...r, owner: owner, phase: Idle, take: 0, capture: 0, folder: 0, kept: 0, unsaved: 0, level: 0,
       recovered: false, damaged: false, found: 0, ask: NoAsk, note: 0, missing: false,
-      keeping: cutOff(r.keeping), look: dropped(r.look), erasing: cutOff(r.erasing) },
+      keeping: A::cutOff(r.keeping), look: R::drop(r.look), erasing: if (r.erasing.outcome == A::Recorded) r.erasing else A::cutOff(r.erasing) },
     out: ending }
 ```
 

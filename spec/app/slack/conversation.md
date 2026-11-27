@@ -82,8 +82,8 @@ pure def workspaceRevoked(c: Conversation, workspace: int): Conversation =
   if (c.workspace != workspace) { ...c, connectedWorkspaces: rest }
   else {
     ...initial, connectedWorkspaces: rest,
-    channelRead: { ...c.channelRead, status: R::Idle },
-    threadRead: { ...c.threadRead, status: R::Idle },
+    channelRead: R::drop(c.channelRead),
+    threadRead: R::drop(c.threadRead),
     op: if (c.op.outcome == A::Sent) A::conclude(c.op, false, false) else c.op,
   }
 ```
@@ -113,7 +113,7 @@ pure def openChannel(c: Conversation, workspace: int, channel: int, kind: ConvKi
   val opened = {
     ...c, workspace: workspace, channel: channel, kind: kind, front: front,
     newestLoaded: false, unread: 0, channelFurther: false, channelPages: 0, channelCursor: 0, channelSpent: Set(),
-    threadTs: 0, threadLoaded: false, threadRead: { ...c.threadRead, status: R::Idle },
+    threadTs: 0, threadLoaded: false, threadRead: R::drop(c.threadRead),
     threadFurther: false, threadPages: 0, threadCursor: 0, threadSpent: Set(),
     pendingDeleteTs: 0, deleteReview: V::unreviewed,
   }
@@ -124,7 +124,7 @@ pure def canCloseChannel(c: Conversation): bool =
 
 pure def closeChannel(c: Conversation): Conversation = {
   ...c, workspace: 0, channel: 0, front: false, newestLoaded: false, unread: 0,
-  channelRead: { ...c.channelRead, status: R::Idle }, channelFurther: false, channelPages: 0, channelCursor: 0, channelSpent: Set(),
+  channelRead: R::drop(c.channelRead), channelFurther: false, channelPages: 0, channelCursor: 0, channelSpent: Set(),
   pendingDeleteTs: 0, deleteReview: V::unreviewed,
 }
 
@@ -143,7 +143,7 @@ pure def canCloseThread(c: Conversation): bool = c.threadTs > 0 and c.op.outcome
 
 pure def closeThread(c: Conversation): Conversation = {
   ...c, threadTs: 0, threadLoaded: false,
-  threadRead: { ...c.threadRead, status: R::Idle }, threadFurther: false, threadPages: 0, threadCursor: 0, threadSpent: Set(),
+  threadRead: R::drop(c.threadRead), threadFurther: false, threadPages: 0, threadCursor: 0, threadSpent: Set(),
   pendingDeleteTs: 0, deleteReview: V::unreviewed,
 }
 ```

@@ -1,0 +1,363 @@
+// spec/cloud/index.md, "Story: Operate Alpha's own cloud"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, describe, it } from "@effect/vitest"
+import type { CloudProfile } from "@elizaos/cloud"
+import { profileNamed } from "../src/alpha.vibe"
+import { sha256Hex } from "../src/digest.ts"
+import { hostedClouds, hostedProfileProblems } from "../src/hosted.vibe"
+import { deploy, generated, packageDirectory, profiled, stagingCompatibleProfile } from "../src/operator.vibe"
+import { PROFILE_ASSET } from "../src/profile-asset.ts"
+
+module node {
+  import { spawnSync } from "node:child_process"
+  import fs from "node:fs"
+  import path from "node:path"
+
+  export interface CliResult {
+    readonly status: number | null
+    readonly stdout: string
+    readonly stderr: string
+    readonly combined: string
+  }
+
+  /**
+   * Builds `@repo/cloud` into an isolated temporary directory so CLI `bundle` tests never race
+   * with concurrent package builds touching `apps/cloud/dist` or `apps/cloud/.vibe`.
+   * @throws {Error}
+   */
+  export function prepareCliSandbox(packageDir: string, sandboxDir: string): string {
+    const distDir = path.join(sandboxDir, "dist")
+    const sidecarDir = path.join(sandboxDir, ".vibe", "declarations")
+    const tsconfigFile = path.join(sandboxDir, "tsconfig.sandbox.json")
+    fs.symlinkSync(path.join(packageDir, "node_modules"), path.join(sandboxDir, "node_modules"), "dir")
+    fs.symlinkSync(path.join(packageDir, "resources.json"), path.join(sandboxDir, "resources.json"), "file")
+    fs.symlinkSync(path.join(packageDir, "package.json"), path.join(sandboxDir, "package.json"), "file")
+    const tsconfig = {
+      extends: path.join(packageDir, "tsconfig.build.json"),
+      compilerOptions: {
+        rootDir: packageDir,
+        outDir: distDir,
+        declaration: false,
+        typeRoots: [
+          path.join(packageDir, "node_modules", "@types"),
+          path.join(packageDir, "..", "..", "node_modules", "@types"),
+        ],
+      },
+      include: [
+        path.join(packageDir, "src"),
+        path.join(packageDir, "gen", "*.ts"),
+        path.join(packageDir, "gen", "*.vibe"),
+        path.join(packageDir, "profile"),
+        path.join(packageDir, "seed"),
+        path.join(packageDir, "wrangler", "*.json"),
+      ],
+      vibe: { sidecarDir },
+    }
+    fs.writeFileSync(tsconfigFile, JSON.stringify(tsconfig, null, 2))
+    const vibelangBin = path.join(packageDir, "node_modules", ".bin", "vibelang")
+    const compiled = spawnSync(vibelangBin, ["-p", tsconfigFile], {
+      cwd: packageDir,
+      encoding: "utf8",
+    })
+    if (compiled.status !== 0) {
+      throw new Error(`vibelang sandbox compile failed (${String(compiled.status)}): ${compiled.stdout}\n${compiled.stderr}`)
+    }
+    fs.symlinkSync(
+      path.join(packageDir, "node_modules", "@elizaos", "cloud-worker", "dist", "pages"),
+      path.join(distDir, "pages"),
+      "dir",
+    )
+    return path.join(distDir, "src", "main.js")
+  }
+
+  /** Runs the built Alpha Cloud CLI with `args` and captures exit status and output. @throws {never} */
+  export function runCloudCli(mainEntry: string, cwd: string, args: ReadonlyArray<string>): CliResult {
+    const result = spawnSync(process.execPath, [mainEntry, ...args], {
+      cwd,
+      encoding: "utf8",
+    })
+    const stdout = result.stdout ?? ""
+    const stderr = result.stderr ?? ""
+    return { status: result.status, stdout, stderr, combined: `${stdout}\n${stderr}` }
+  }
+}
+import { prepareCliSandbox, runCloudCli } from node
+
+const holds = (assertion: () => void) => Effect.try(assertion)
+
+const priorTemplateUrl = "wss://api.cartesia.ai/stt/websocket"
+const canonicalOrigin = "wss://api.cartesia.ai"
+const expectedOriginProblem = "speech realtimeUrl must be a wss origin without an endpoint path"
+
+/** Builds a complete synthetic operator secrets `.env` body for `stripeKey`. */
+function syntheticSecretsText(stripeKey: string): string {
+  const entries = generated({
+    DATABASE_URL: "postgres://urlcompat:synthetic@db.urlcompat.test:5432/alpha",
+    GOOGLE_CLIENT_SECRET: "urlcompat-google-client",
+    GOOGLE_CONNECT_CLIENT_SECRET: "urlcompat-google-connect",
+    STRIPE_SECRET_KEY: stripeKey,
+    STRIPE_WEBHOOK_SECRET: "whsec_urlcompat_webhook",
+    CEREBRAS_API_KEY: "urlcompat-cerebras",
+    CARTESIA_API_KEY: "urlcompat-cartesia",
+    GOOGLE_MAPS_API_KEY: "urlcompat-maps",
+  })
+  return Object.entries(entries).map(([name, value]) => `${name}=${value}`).join("\n") + "\n"
+}
+
+/** Clones `profile` with the given `speech.realtimeUrl` overrides. */
+function withSpeechUrls(profile: CloudProfile, urls: { readonly production?: string; readonly staging?: string }): CloudProfile {
+  return {
+    ...profile,
+    environments: {
+      production: urls.production === undefined
+        ? profile.environments.production
+        : { ...profile.environments.production, speech: { ...profile.environments.production.speech!, realtimeUrl: urls.production } },
+      staging: urls.staging === undefined
+        ? profile.environments.staging
+        : { ...profile.environments.staging, speech: { ...profile.environments.staging.speech!, realtimeUrl: urls.staging } },
+    },
+  }
+}
+
+describe(`Staging Cartesia template URL compatibility (spec/cloud/index.md, "Story: Operate Alpha's own cloud")`, () => {
+  it.effect("normalizes only the exact prior Cartesia template URL in memory for staging while keeping production and invalid URLs strict", () => effect {
+    const files = try FileSystem.FileSystem
+    const path = try Path.Path
+    const directory = try files.makeTempDirectoryScoped({ prefix: "alpha-staging-url-unit-" })
+    const hosts = try hostedClouds()
+    const canonical = try profileNamed("candidate")
+    const priorBoth = withSpeechUrls(canonical, { production: priorTemplateUrl, staging: priorTemplateUrl })
+    const priorStagingOnly = withSpeechUrls(canonical, { staging: priorTemplateUrl })
+    const priorProductionOnly = withSpeechUrls(canonical, { production: priorTemplateUrl })
+
+    const normalizedBoth = stagingCompatibleProfile(priorBoth, "staging")
+    const normalizedStagingOnly = stagingCompatibleProfile(priorStagingOnly, "staging")
+    const normalizedProductionOnly = stagingCompatibleProfile(priorProductionOnly, "staging")
+    const untouchedProduction = stagingCompatibleProfile(priorBoth, "production")
+    const untouchedDefault = stagingCompatibleProfile(priorBoth)
+    const untouchedCanonical = stagingCompatibleProfile(canonical, "staging")
+
+    try holds(() => {
+      assert.strictEqual(canonical.environments.production.speech?.realtimeUrl, canonicalOrigin)
+      assert.strictEqual(canonical.environments.staging.speech?.realtimeUrl, canonicalOrigin)
+      assert.deepStrictEqual(hostedProfileProblems(priorBoth, hosts), [
+        `production: ${expectedOriginProblem}`,
+        `staging: ${expectedOriginProblem}`,
+      ])
+      assert.strictEqual(priorBoth.environments.production.speech?.realtimeUrl, priorTemplateUrl)
+      assert.strictEqual(priorBoth.environments.staging.speech?.realtimeUrl, priorTemplateUrl)
+      assert.deepStrictEqual(normalizedBoth, canonical)
+      assert.deepStrictEqual(normalizedStagingOnly, canonical)
+      assert.deepStrictEqual(normalizedProductionOnly, canonical)
+      assert.deepStrictEqual(hostedProfileProblems(normalizedBoth, hosts), [])
+      assert.strictEqual(untouchedCanonical, canonical)
+      assert.strictEqual(untouchedProduction, priorBoth)
+      assert.strictEqual(untouchedDefault, priorBoth)
+      assert.deepStrictEqual(hostedProfileProblems(untouchedProduction, hosts), [
+        `production: ${expectedOriginProblem}`,
+        `staging: ${expectedOriginProblem}`,
+      ])
+    })
+
+    const priorFile = path.join(directory, "prior-profile.json")
+    const priorText = JSON.stringify(priorBoth, null, 2) + "\n"
+    try files.writeFileString(priorFile, priorText)
+
+    const loadedStaging = try profiled(priorFile, "staging")
+    const priorTextAfter = try files.readFileString(priorFile)
+    const refusedProduction = profiled(priorFile, "production") catch (failure) =>
+      failure._tag === "CandidateRefused" ? { tag: failure._tag, problems: failure.problems, message: failure.message } : { tag: failure._tag }
+    const refusedDefault = profiled(priorFile) catch (failure) =>
+      failure._tag === "CandidateRefused" ? { tag: failure._tag, problems: failure.problems, message: failure.message } : { tag: failure._tag }
+
+    try holds(() => {
+      assert.strictEqual(loadedStaging.profile.environments.production.speech?.realtimeUrl, canonicalOrigin)
+      assert.strictEqual(loadedStaging.profile.environments.staging.speech?.realtimeUrl, canonicalOrigin)
+      assert.strictEqual(priorTextAfter, priorText)
+      assert.deepStrictEqual(refusedProduction, {
+        tag: "CandidateRefused",
+        problems: [`production: ${expectedOriginProblem}`, `staging: ${expectedOriginProblem}`],
+        message: `production: ${expectedOriginProblem}\nstaging: ${expectedOriginProblem}`,
+      })
+      assert.deepStrictEqual(refusedDefault, refusedProduction)
+    })
+
+    const rejectedCandidateUrls = [
+      "wss://api.cartesia.ai/other",
+      "wss://api.cartesia.ai/bad/path",
+      "wss://api.cartesia.ai/stt/websocket/",
+      "wss://api.cartesia.ai/",
+      "ws://api.cartesia.ai",
+      "ws://api.cartesia.ai/stt/websocket",
+      "wss://api.cartesia.ai:443/stt/websocket",
+      "wss://other.example/stt/websocket",
+    ] as const
+    for (const [index, badUrl] of rejectedCandidateUrls.entries()) {
+      const badProfile = withSpeechUrls(canonical, { staging: badUrl })
+      const unchanged = stagingCompatibleProfile(badProfile, "staging")
+      const badFile = path.join(directory, `bad-candidate-${index}.json`)
+      try files.writeFileString(badFile, JSON.stringify(badProfile, null, 2))
+      const failure = profiled(badFile, "staging") catch (error) =>
+        error._tag === "CandidateRefused" ? { tag: error._tag, problems: error.problems, message: error.message } : { tag: error._tag }
+      try holds(() => {
+        assert.strictEqual(unchanged, badProfile, `staging must not normalize ${badUrl}`)
+        assert.deepStrictEqual(failure, {
+          tag: "CandidateRefused",
+          problems: [`staging: ${expectedOriginProblem}`],
+          message: `staging: ${expectedOriginProblem}`,
+        }, `staging must refuse ${badUrl}`)
+        assert.ok(!JSON.stringify(failure).includes(badUrl), `diagnostic must not echo ${badUrl}`)
+      })
+    }
+
+    const malformedSentinel = "secret-malformed-url-sentinel"
+    const malformedUrls = [
+      `https://api.cartesia.ai/${malformedSentinel}`,
+      `not-a-url-${malformedSentinel}`,
+      `wss://api.cartesia.ai/stt/websocket?token=${malformedSentinel}`,
+    ] as const
+    for (const [index, badUrl] of malformedUrls.entries()) {
+      const badFile = path.join(directory, `bad-malformed-${index}.json`)
+      try files.writeFileString(badFile, JSON.stringify(withSpeechUrls(canonical, { staging: badUrl }), null, 2))
+      const failure = (effect {
+        try profiled(badFile, "staging")
+        return { tag: "UnexpectedSuccess" as const, problem: "", message: "" }
+      }) catch (error) =>
+        error._tag === "OperatorFailed"
+          ? { tag: error._tag, problem: error.problem, message: error.message ?? "" }
+          : { tag: error._tag, problem: "", message: "" }
+      try holds(() => {
+        assert.strictEqual(failure.tag, "OperatorFailed", `malformed URL must fail parseProfile: ${badUrl}`)
+        const text = JSON.stringify(failure)
+        assert.ok(failure.problem.includes(`["environments"]["staging"]["speech"]["realtimeUrl"]`), `diagnostic must name realtimeUrl field: ${failure.problem}`)
+        assert.ok(failure.message.includes(`["environments"]["staging"]["speech"]["realtimeUrl"]`), `diagnostic message must name realtimeUrl field: ${failure.message}`)
+        assert.ok(!text.includes(malformedSentinel), `diagnostic must not leak sentinel value: ${text}`)
+      })
+    }
+
+    const stagingSecretsFile = path.join(directory, "staging.env")
+    try files.writeFileString(stagingSecretsFile, syntheticSecretsText("sk_test_urlcompat_staging"), { mode: 0o600 })
+    const productionSecretsFile = path.join(directory, "production.env")
+    try files.writeFileString(productionSecretsFile, syntheticSecretsText("sk_live_urlcompat_production"), { mode: 0o600 })
+
+    const stagingDeployResult = (effect {
+      try deploy({ environment: "staging", profile: priorFile, secrets: stagingSecretsFile, component: "all" })
+      return { tag: "UnexpectedSuccess" as const, problem: "" }
+    }) catch (failure) =>
+      failure._tag === "OperatorFailed"
+        ? { tag: failure._tag, problem: failure.problem }
+        : { tag: failure._tag, problem: "" }
+    const productionDeployResult = (effect {
+      try deploy({ environment: "production", profile: priorFile, secrets: productionSecretsFile, component: "all" })
+      return { tag: "UnexpectedSuccess" as const }
+    }) catch (failure) =>
+      failure._tag === "CandidateRefused"
+        ? { tag: failure._tag, problems: failure.problems, message: failure.message }
+        : { tag: failure._tag }
+
+    try holds(() => {
+      assert.strictEqual(stagingDeployResult.tag, "OperatorFailed")
+      assert.ok(
+        stagingDeployResult.problem.includes("placeholder entitlement public key"),
+        `staging deploy should pass profiled normalization and reach entitlement check: ${JSON.stringify(stagingDeployResult)}`,
+      )
+      assert.deepStrictEqual(productionDeployResult, {
+        tag: "CandidateRefused",
+        problems: [`production: ${expectedOriginProblem}`, `staging: ${expectedOriginProblem}`],
+        message: `production: ${expectedOriginProblem}\nstaging: ${expectedOriginProblem}`,
+      })
+    })
+  } |> scoped(%) |> Effect.provide(%, [NodeServices.layer, FetchHttpClient.layer]))
+
+  it.effect("CLI bundle passes for staging with normalized profile.json asset and refuses production, bad paths, ws://, and malformed URLs", () => effect {
+    const files = try FileSystem.FileSystem
+    const path = try Path.Path
+    const pkgDir = try packageDirectory()
+    const directory = try files.makeTempDirectoryScoped({ prefix: "alpha-staging-url-cli-" })
+    const sandboxDir = path.join(directory, "sandbox")
+    try files.makeDirectory(sandboxDir, { recursive: true })
+    const mainEntry = try Effect.try(() => prepareCliSandbox(pkgDir, sandboxDir))
+
+    const canonical = try profileNamed("candidate")
+    const priorBoth = withSpeechUrls(canonical, { production: priorTemplateUrl, staging: priorTemplateUrl })
+    const priorFile = path.join(directory, "prior-both.json")
+    const priorText = JSON.stringify(priorBoth, null, 2) + "\n"
+    try files.writeFileString(priorFile, priorText)
+
+    const stagingOut = path.join(directory, "out-staging")
+    const stagingBundle = runCloudCli(mainEntry, sandboxDir, [
+      "bundle", "--environment", "staging", "--profile", priorFile, "--out", stagingOut,
+    ])
+    const renderedProfileFile = path.join(stagingOut, "assets.staging", PROFILE_ASSET)
+    const renderedProfileText = try files.readFileString(renderedProfileFile)
+    const renderedProfile = try Effect.try(() => JSON.parse(renderedProfileText) as CloudProfile)
+    const renderedWranglerText = try files.readFileString(path.join(stagingOut, "wrangler.staging.json"))
+    const renderedWrangler = try Effect.try(() =>
+      JSON.parse(renderedWranglerText) as { readonly vars?: Readonly<Record<string, string>> },
+    )
+    const priorTextAfter = try files.readFileString(priorFile)
+
+    try holds(() => {
+      assert.strictEqual(stagingBundle.status, 0, stagingBundle.combined)
+      assert.strictEqual(renderedProfile.environments.staging.speech?.realtimeUrl, canonicalOrigin)
+      assert.strictEqual(renderedProfile.environments.production.speech?.realtimeUrl, canonicalOrigin)
+      assert.strictEqual(renderedWrangler.vars?.CLOUD_PROFILE_SHA256, sha256Hex(renderedProfileText))
+      assert.strictEqual(priorTextAfter, priorText)
+    })
+
+    const productionBundle = runCloudCli(mainEntry, sandboxDir, [
+      "bundle", "--environment", "production", "--profile", priorFile, "--out", path.join(directory, "out-production"),
+    ])
+    try holds(() => {
+      assert.strictEqual(productionBundle.status, 1, productionBundle.combined)
+      assert.ok(productionBundle.combined.includes(`production: ${expectedOriginProblem}`), productionBundle.combined)
+      assert.ok(productionBundle.combined.includes(`staging: ${expectedOriginProblem}`), productionBundle.combined)
+      assert.ok(!productionBundle.combined.includes(priorTemplateUrl), productionBundle.combined)
+    })
+
+    const badPathUrl = "wss://api.cartesia.ai/bad/path"
+    const badPathFile = path.join(directory, "bad-path.json")
+    try files.writeFileString(badPathFile, JSON.stringify(withSpeechUrls(canonical, { staging: badPathUrl }), null, 2))
+    const badPathBundle = runCloudCli(mainEntry, sandboxDir, [
+      "bundle", "--environment", "staging", "--profile", badPathFile, "--out", path.join(directory, "out-bad-path"),
+    ])
+    try holds(() => {
+      assert.strictEqual(badPathBundle.status, 1, badPathBundle.combined)
+      assert.ok(badPathBundle.combined.includes(`staging: ${expectedOriginProblem}`), badPathBundle.combined)
+      assert.ok(!badPathBundle.combined.includes(badPathUrl), badPathBundle.combined)
+      assert.ok(!badPathBundle.combined.includes("/bad/path"), badPathBundle.combined)
+    })
+
+    const wsUrl = "ws://api.cartesia.ai"
+    const wsFile = path.join(directory, "ws-scheme.json")
+    try files.writeFileString(wsFile, JSON.stringify(withSpeechUrls(canonical, { production: wsUrl }), null, 2))
+    const wsBundle = runCloudCli(mainEntry, sandboxDir, [
+      "bundle", "--environment", "staging", "--profile", wsFile, "--out", path.join(directory, "out-ws"),
+    ])
+    try holds(() => {
+      assert.strictEqual(wsBundle.status, 1, wsBundle.combined)
+      assert.ok(wsBundle.combined.includes(`production: ${expectedOriginProblem}`), wsBundle.combined)
+      assert.ok(!wsBundle.combined.includes(wsUrl), wsBundle.combined)
+    })
+
+    const cliSecretSentinel = "secret-cli-malformed-sentinel"
+    const malformedFile = path.join(directory, "malformed-url.json")
+    try files.writeFileString(
+      malformedFile,
+      JSON.stringify(withSpeechUrls(canonical, { staging: `https://api.cartesia.ai/${cliSecretSentinel}` }), null, 2),
+    )
+    const malformedBundle = runCloudCli(mainEntry, sandboxDir, [
+      "bundle", "--environment", "staging", "--profile", malformedFile, "--out", path.join(directory, "out-malformed"),
+    ])
+    try holds(() => {
+      assert.strictEqual(malformedBundle.status, 1, malformedBundle.combined)
+      assert.ok(malformedBundle.combined.includes(`["environments"]["staging"]["speech"]["realtimeUrl"]`), malformedBundle.combined)
+      assert.ok(!malformedBundle.combined.includes(cliSecretSentinel), malformedBundle.combined)
+    })
+
+    const checkRun = runCloudCli(mainEntry, sandboxDir, ["check"])
+    try holds(() => {
+      assert.strictEqual(checkRun.status, 0, checkRun.combined)
+    })
+  } |> scoped(%) |> Effect.provide(%, NodeServices.layer), 120_000)
+})

@@ -44,7 +44,7 @@ pure val entriesValues =
 pure def canGo(d: Sheet, trail: List[int]): bool = trail.every(f => f > 0)
 
 pure def go(d: Sheet, trail: List[int]): Sheet =
-  { open: true, trail: trail, reading: if (trail.length() == 0) F::drop(d.reading) else R::ask(d.reading), folders: List(), names: List() }
+  { open: true, trail: trail, reading: if (trail.length() == 0) R::drop(d.reading) else R::ask(d.reading), folders: List(), names: List() }
 
 pure def canRead(d: Sheet, ticket: int): bool = d.open and R::canAnswer(d.reading, ticket)
 
@@ -55,7 +55,7 @@ pure def read(d: Sheet, ticket: int, ok: bool, entries: List[F::Item]): Sheet =
 
 pure def canClose(d: Sheet): bool = d.open
 
-pure def close(d: Sheet): Sheet = { open: false, trail: List(), reading: F::drop(d.reading), folders: List(), names: List() }
+pure def close(d: Sheet): Sheet = { open: false, trail: List(), reading: R::drop(d.reading), folders: List(), names: List() }
 ```
 
 ### A folder that was not read shows no folders and no names

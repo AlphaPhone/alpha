@@ -392,7 +392,7 @@ describe("UI component contracts", () => {
     expect(container.querySelector("form")).toBeNull();
   });
 
-  // spec/app/assistant/cards.md, "What each kind offers"
+  // spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it"
   it("draws a phone step's result chip as one of Alpha's lines, its mark first and the chip filling the row in the column of the reply text", () => {
     const container = render(
       <>

@@ -37,7 +37,6 @@ type Effect =
   | WithdrawTarget({ target: Target })
   | WithdrawWorkspace({ workspace: int })
   | WithdrawAll
-  | OpenSlackTarget({ target: Target, ts: int })
 type Noticed = { state: Notices, out: List[Effect] }
 
 pure val noTarget: Target = { workspace: 0, channel: 0, threadTs: 0 }
@@ -57,7 +56,6 @@ pure def watching(s: Notices, workspace: int): bool =
 pure val workspaceValues = Set(0, 1, 2)
 pure val channelValues = Set(0, 1, 2)
 pure val threadTsValues = Set(0, 1)
-pure val tsValues = Set(1, 2)
 pure val pointValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val incomingValues = Set(
@@ -97,7 +95,7 @@ pure def canNotifyPermissionChanged(s: Notices, notifyAllowed: bool): bool =
 pure def notifyPermissionChanged(s: Notices, notifyAllowed: bool): Noticed =
   if (not(notifyAllowed))
     {
-      state: { ...s, notifyAllowed: false, check: { ...s.check, status: R::Idle }, checkingWorkspace: 0, up: List() },
+      state: { ...s, notifyAllowed: false, check: R::drop(s.check), checkingWorkspace: 0, up: List() },
       out: if (s.connected.size() > 0 or s.up.length() > 0) List(WithdrawAll) else List(),
     }
   else { state: { ...s, notifyAllowed: true }, out: List() }
@@ -120,7 +118,7 @@ pure def workspaceRemoved(s: Notices, workspace: int): Noticed =
       ...s,
       connected: s.connected.exclude(Set(workspace)),
       watermarks: s.watermarks.put(workspace, 0),
-      check: if (dropPoll) { ...s.check, status: R::Idle } else s.check,
+      check: if (dropPoll) R::drop(s.check) else s.check,
       checkingWorkspace: if (dropPoll) 0 else s.checkingWorkspace,
       front: if (s.front.workspace == workspace) noTarget else s.front,
       up: s.up.select(p => p.target.workspace != workspace),
@@ -196,19 +194,8 @@ pure def frontChanged(s: Notices, workspace: int, channel: int, threadTs: int): 
     out: if (hasUp) List(WithdrawTarget({ target: target })) else List(),
   }
 
-pure def canTapped(s: Notices, workspace: int, channel: int, threadTs: int, ts: int): bool =
-  val target = { workspace: workspace, channel: channel, threadTs: threadTs }
-  watching(s, workspace) and ts > 0 and s.up.some(p => p.target == target and p.ts == ts)
-
-pure def tapped(s: Notices, workspace: int, channel: int, threadTs: int, ts: int): Noticed =
-  val target = { workspace: workspace, channel: channel, threadTs: threadTs }
-  {
-    state: { ...s, up: s.up.select(p => p.target != target) },
-    out: List(OpenSlackTarget({ target: target, ts: ts })),
-  }
-
 pure def restart(s: Notices): Notices =
-  { ...s, check: { ...s.check, status: R::Idle }, checkingWorkspace: 0, front: noTarget }
+  { ...s, check: R::drop(s.check), checkingWorkspace: 0, front: noTarget }
 ```
 
 ### Per-workspace isolation, baseline gating, withdrawal on visible read and isolated workspace revocation

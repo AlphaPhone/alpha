@@ -1,6 +1,6 @@
 name: Promotion checks
 
-# Full uncached verification gate for promoting the integration branch to main:
+# Full uncached verification gate for promoting to main:
 # runs Node 26 + pnpm verify without cached verification receipts, verifies third-party
 # notices, checks zero Bun usage, and confirms the pinned Eliza commit is reachable upstream.
 on:

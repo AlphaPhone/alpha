@@ -4,9 +4,9 @@ How Alpha learns that a newer version of itself exists, and when it may
 start installing it. Alpha reads its update channel's manifest every fifteen
 minutes while it is on screen, keeps the offer that fits this phone, shows
 it in Settings, and starts an automatic update only while the owner and the
-phone are idle. Installing the offer is [Install](./install.md); a page
-that opens or is open during an update is [Page](./page.md). How a release
-reaches the channel is [Release](../../release/).
+phone are idle. A page that opens or is open during an update is
+[Page](./page.md). How a release reaches the channel is
+[Release](../../release/).
 
 ## Story: Read the update channel
 
@@ -133,7 +133,7 @@ recording by Notes, and a step of the connection to the agent and the
 sign-in card by the account. The page reads no audio mode: audio counts as
 normal while no call is up, and Alpha's updater itself reads Android's
 audio mode, the window's focus (which the notification shade takes) and the
-lock before it commits ([Install](./install.md)). `asked` says the running
+lock before it commits. `asked` says the running
 check came from Settings; `note` is what Settings says after such a check.
 `misses` counts the checks that failed in a row, `deferrals` the automatic
 updates Android put off in a row, and `retryAt` is when the next may start.
@@ -397,7 +397,7 @@ a step of its own such as Home being edited, or anything else holding the
 phone. A review card and a chat that is not at rest show only in Ask Alpha
 raised or over Home as a sheet, so they are open too; the notification
 shade is drawn by Android over Alpha without telling the page, so Alpha's
-updater reads it as the window's focus at its re-check ([Install](./install.md)).
+updater reads it as the window's focus at its re-check.
 A recording under way is not idle either.
 
 ```quint

@@ -305,7 +305,7 @@ pure def sometimesDeclined(s: AgentCalendar): bool = s.result == Declined and s.
 
 ### The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken
 
-As in Sunday's v119, a reply whose Calendar action filed a request shows
+A reply whose Calendar action filed a request shows
 the card in Ask Alpha, below that reply, whether the owner typed or
 talked: the same card as in Calendar, with the same Approve and Decline,
 so the owner approves where they asked and never has to open Calendar to
@@ -318,8 +318,7 @@ reply's outcome, until the owner asks something else.
 
 The card at the foot of a conversation is bound to the request the
 calendar holds: it shows, and its Approve and Decline act, only while that
-request is one a reply of this conversation filed, as Sunday's v119 kept a
-card for each reply's own request. While the calendar holds a request no
+request is one a reply of this conversation filed. While the calendar holds a request no
 reply here filed, no card shows here, so nothing here approves or declines
 it. When two replies here filed requests, the card shows the one the
 calendar holds, then the next once that one ends.

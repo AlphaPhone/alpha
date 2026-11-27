@@ -6,7 +6,6 @@ The rest of the area:
 
 - [Android](./android.md): the hand-over to Android's own settings pages
 - [Facts](./facts.md): what the phone reports, read fresh and never guessed, and Set as Home
-- [Home role](./roles.md): Alpha taking over Home on an Alpha image, and the access it grants itself
 - [Preferences](./preferences.md): appearance, text size, Ask before Alpha acts and loading images in Inbox
 - [Activity](./activity.md): the agent's recovery and the phone actions it took or proposed
 - [Licences](./licences.md): the licences shipped with Alpha
@@ -23,7 +22,7 @@ connection, its Cancel and its restart details (the account area); the
 access walkthrough and the crash journal (the startup area); collecting
 other apps' notifications, their history and recovering notification data
 (the notices area); Google Calendar and its saved-event backups (the
-calendar area); the password vault (the passwords area); the conversations (Ask Alpha); and each phone action's custody (the
+calendar area); the conversations (Ask Alpha); and each phone action's custody (the
 approvals area). Browser, Files and Messages on the Apps page open the app itself
 through the [shell](../shell/). Messages is listed on an Alpha image.
 

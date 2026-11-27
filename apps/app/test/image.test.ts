@@ -134,6 +134,8 @@ describe("Ship what Alpha is built from, with its licences (spec/app/image/licen
     expect(entry("Denton typeface")).toMatchObject({ license: "LicenseRef-Commercial-Font", flags: ["proprietary-licence-held-outside-repo"] });
     expect(entry("Public Sans")).toMatchObject({ license: "OFL-1.1", flags: [] });
     expect(entry("react")).toMatchObject({ license: "MIT", flags: [] });
+    expect(entry("rolldown")).toMatchObject({ license: "MIT" });
+    expect(entry("fsevents")).toBeUndefined();
     expect(entry("elizaOS (@elizaos/agent, @elizaos/os, @elizaos/cloud)")).toMatchObject({ license: "MIT" });
     expect(found.notices.some((notice) => notice.name.startsWith("@elizaos/") || notice.name.startsWith("@repo/"))).toBe(false);
     // spec/app/image/licences.md, "A licence identifier belongs to one family, and each family has its flags": what the Android classpath cannot name is flagged unknown, never dropped.

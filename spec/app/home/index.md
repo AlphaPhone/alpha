@@ -10,6 +10,7 @@ Alpha's agent does nothing on Home.
 - [Tiles](./tiles.md): the tiles kept on Home, read when Alpha starts and saved after each change
 - [Asking Android](./android.md): one ask at a time, its wait and its answer
 - [Cards](./cards.md): the daily overview above the tiles
+- [Apps drawer](./drawer.md): searching, listing and opening Alpha's and Android's apps
 
 ## Story: Start Home
 
@@ -24,6 +25,7 @@ launcher, or as the assistant alone.
 ```quint
 import read as R from "../../kit/read"
 import attempt as A from "../../kit/attempt"
+import actor.* from "../../kit/actor"
 import shell as S from "../shell"
 import tiles as T from "./tiles"
 import android as N from "./android"
@@ -31,7 +33,6 @@ import apps as P from "./apps"
 import drawer as D from "./drawer"
 
 type Host = InBrowser | AsApp | AsLauncher | AssistantOnly
-type Actor = Owner | Agent
 type Why = Gone | TurnedOff | ProfileLocked | NotInFront | Unable
 type Home = {
   host: Host, installed: P::Installed,

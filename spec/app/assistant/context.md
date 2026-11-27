@@ -28,7 +28,7 @@ Location for Alpha is on until the owner turns it off.
 
 ```quint
 import read as R from "../../kit/read"
-import extend as X from "./extend"
+import shell as S from "../shell"
 
 type Locator = {
   enabled: bool, granted: bool, clock: int,
@@ -84,7 +84,7 @@ pure val lValues = Set(initial)
 ```quint
 pure def forgetting(on: bool, granted: bool, l: Locator): Locator =
   { ...l, enabled: on, granted: granted,
-    gps: X::dropped(l.gps), gpsAt: -1, gpsNext: 0, network: X::dropped(l.network), networkAt: -1, networkNext: 0 }
+    gps: R::drop(l.gps), gpsAt: -1, gpsNext: 0, network: R::drop(l.network), networkAt: -1, networkNext: 0 }
 
 pure def canToggle(l: Locator, on: bool): bool = on != l.enabled
 
@@ -275,40 +275,38 @@ sends no optional field, `chatHeight` is omitted when the screen is
 sensitive or when the peer does not take optional turn-context fields.
 
 ```quint
-type OverlayDetent = DetentBar | DetentTyping | DetentSheet | DetentFull
 type ChatHeight = ChatHidden | ChatBar | ChatTyping | ChatSheet | ChatFull
 type TurnChatHeight = NoChatHeight | ReportedChatHeight({ height: ChatHeight })
 
-pure def chatHeightOf(detent: OverlayDetent, drawn: bool, pill: bool): ChatHeight =
-  match detent {
-    | DetentFull => ChatFull
-    | DetentSheet => ChatSheet
-    | DetentTyping => ChatTyping
-    | DetentBar => if (not(drawn) or pill) ChatHidden else ChatBar
-  }
+pure def chatHeightOf(detent: S::Detent, drawn: bool, pill: bool): ChatHeight =
+  if (detent == S::Full) ChatFull
+  else if (detent == S::Sheet) ChatSheet
+  else if (detent == S::Typing) ChatTyping
+  else if (not(drawn) or pill) ChatHidden
+  else ChatBar
 
 pure def sendsChatHeight(notSensitive: bool, peerTakes: bool): bool =
   notSensitive and peerTakes
 
-pure def chatHeightForTurn(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): TurnChatHeight =
+pure def chatHeightForTurn(source: Source, detent: S::Detent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): TurnChatHeight =
   if (sendsChatHeight(notSensitive, peerTakes)) ReportedChatHeight({ height: chatHeightOf(detent, drawn, pill) }) else NoChatHeight
 
-pure def lawOpenSheetOrFullAlwaysReportsOpenHeight(detent: OverlayDetent, drawn: bool, pill: bool): bool =
-  (detent == DetentSheet implies chatHeightOf(detent, drawn, pill) == ChatSheet)
-    and (detent == DetentFull implies chatHeightOf(detent, drawn, pill) == ChatFull)
+pure def lawOpenSheetOrFullAlwaysReportsOpenHeight(detent: S::Detent, drawn: bool, pill: bool): bool =
+  (detent == S::Sheet implies chatHeightOf(detent, drawn, pill) == ChatSheet)
+    and (detent == S::Full implies chatHeightOf(detent, drawn, pill) == ChatFull)
 
-pure def lawHiddenHeightOccursOnlyAtBarWhenUndrawnOrPill(detent: OverlayDetent, drawn: bool, pill: bool): bool =
-  (chatHeightOf(detent, drawn, pill) == ChatHidden) == (detent == DetentBar and (not(drawn) or pill))
+pure def lawHiddenHeightOccursOnlyAtBarWhenUndrawnOrPill(detent: S::Detent, drawn: bool, pill: bool): bool =
+  (chatHeightOf(detent, drawn, pill) == ChatHidden) == (detent == S::Bar and (not(drawn) or pill))
 
-pure def lawSensitiveScreenSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, peerTakes: bool): bool =
+pure def lawSensitiveScreenSendsNoChatHeight(source: Source, detent: S::Detent, drawn: bool, pill: bool, peerTakes: bool): bool =
   not(sendsChatHeight(false, peerTakes))
     and chatHeightForTurn(source, detent, drawn, pill, false, peerTakes) == NoChatHeight
 
-pure def lawUnsupportedPeerSendsNoChatHeight(source: Source, detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool): bool =
+pure def lawUnsupportedPeerSendsNoChatHeight(source: Source, detent: S::Detent, drawn: bool, pill: bool, notSensitive: bool): bool =
   not(sendsChatHeight(notSensitive, false))
     and chatHeightForTurn(source, detent, drawn, pill, notSensitive, false) == NoChatHeight
 
-pure def lawSpokenAndTypedTurnsReportSameChatHeight(detent: OverlayDetent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): bool =
+pure def lawSpokenAndTypedTurnsReportSameChatHeight(detent: S::Detent, drawn: bool, pill: bool, notSensitive: bool, peerTakes: bool): bool =
   chatHeightForTurn(Spoken, detent, drawn, pill, notSensitive, peerTakes)
     == chatHeightForTurn(Typed, detent, drawn, pill, notSensitive, peerTakes)
 ```

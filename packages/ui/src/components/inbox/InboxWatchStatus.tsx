@@ -28,7 +28,7 @@ export type InboxWatchStatusProps = {
  * For Settings: whether new mail is noticed on the phone, for which account, when it was last checked, and why not
  * when it is not.
  *
- * @model spec/app/inbox/notices.md
+ * @model spec/app/inbox/index.md
  */
 export function InboxWatchStatus({ phase, account, checkedAt, onSettings }: InboxWatchStatusProps) {
   const { status, label } = phases[phase];

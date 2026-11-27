@@ -190,7 +190,7 @@ export effect function addScanImage(blob: Blob, replacing: number, camera: boole
   })
 }
 
-// spec/app/photos/index.md, "Story: Scan text from a selected image"
+// spec/app/files/scan.md, "Story: Arrange the pages"
 export effect function scanSelectedImage(blob: Blob) {
   const shell = try Shell
   const photos = try PhotoLibrary.Machine

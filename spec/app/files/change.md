@@ -267,8 +267,8 @@ pure def sometimesTheSelectionChangedUnderTheSheet(c: Change): bool = c.stale
 ```quint
 pure def restart(c: Change): Change =
   val cut = busy(c)
-  { ...c, attempt: F::cut(c.attempt), clash: V::dismiss(c.clash), panel: 0, sharing: List(), stale: false,
-    sending: F::cut(c.sending), unsure: if (cut) c.unsure.concat(c.items) else c.unsure }
+  { ...c, attempt: A::cutOff(c.attempt), clash: V::dismiss(c.clash), panel: 0, sharing: List(), stale: false,
+    sending: A::cutOff(c.sending), unsure: if (cut) c.unsure.concat(c.items) else c.unsure }
 
 pure def stepARestartLeavesNothingUnderWay(before: Change, via: str, after: Change): bool =
   via == "restart" implies (not(busy(after)) and not(asking(after)) and after.panel == 0 and after.sending.outcome != A::Sent)

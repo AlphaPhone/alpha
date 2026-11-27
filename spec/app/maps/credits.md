@@ -101,7 +101,7 @@ Every map Alpha draws, the world map and the Cloud rasters alike, covers the
 world, so the camera treats them alike. Guidance following the phone owns
 the camera, at street zoom (16) or closer. Otherwise a new route is fitted into view up to street zoom
 (17); a newly picked place is centred at zoom 14 between the sheets and a
-line 60 points under the search field, as v119 measured it; and a new
+line 60 points under the search field; and a new
 set of result pins, with no place picked and no route, is fitted into view
 up to zoom 14. What is fitted keeps 48 pixels clear on every side. Leaving guidance turns the map north up again. Anything else
 keeps the camera where the owner left it.

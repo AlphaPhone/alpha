@@ -134,10 +134,10 @@ export effect function photoAction(input: DeviceOperation): (Receipt | undefined
       if (input.album !== undefined) return undefined
       const narrowing = input.favorite === true ? "Favorites" : input.kind === "video" ? "Videos" : input.text ? "Matching" : "Everything"
       const query = input.text ?? ""
-      if (now.tab === "Library" && now.filter === narrowing && now.query === query && now.person === 0) {
+      if (now.tab === "Library" && now.filter === narrowing && now.query === query) {
         return { kind: "photos_filter", shown: now.rows.length, more: now.more }
       }
-      const selected = try exit(library.send({ type: "narrow", narrowing, query, person: 0 }, "Agent"))
+      const selected = try exit(library.send({ type: "narrow", narrowing, query }, "Agent"))
       if (!Exit.isSuccess(selected)) return undefined
       const ticket = selected.value.state.library.ticket
       const waited = try Effect.timeoutOption(

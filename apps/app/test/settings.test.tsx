@@ -162,7 +162,7 @@ describe("Settings", () => {
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
   });
 
-  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/plan.md, \"Story: Know my plan\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
+  it("Find a setting and come back (spec/app/settings/index.md, \"Story: Find a setting and come back\"; spec/app/account/billing.md, \"Story: Pay in the browser\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     // spec/app/settings/index.md, "The build says once whether it is a development build, and the phone whether Alpha runs on a phone and on an Alpha image"
     await until(alpha, alpha.runtime, Pages.Machine, (s) => s.told && s.phone && !s.image && s.development);
@@ -907,14 +907,14 @@ describe("Settings", () => {
   it("Erase all data (spec/app/settings/reset.md, \"Story: Erase all data\")", async () => {
     const { alpha, machines, world } = await settingsOpen();
     await press("General");
-    // spec/app/settings/reset.md, "Only the phone's answer to the latest review counts; an approval is recorded on the phone before anything else": a cancelled review erases nothing and needs no word.
+    // spec/app/settings/reset.md, "Only the phone's answer to the latest review counts; a cancelled review needs no word, and an unavailable reset is told as unavailable": a cancelled review erases nothing and needs no word.
     await press("Erase all data");
     await until(alpha, machines, Reset.Machine, (s) => s.review.read.status === "Failed");
     expect((await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).said).toBe("Quiet");
     world.settings.reset = { status: "unavailable", message: "Reset is unavailable." };
     await press("Erase all data");
     await until(alpha, machines, Reset.Machine, (s) => s.said === "EraseUnavailable");
-    expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).pending]).toEqual([[1, 2], false]);
+    expect([world.settings.reviews, (await machines.runPromise(Reset.Machine.use((reset) => reset.get()))).review.read.status]).toEqual([[1, 2], "Failed"]);
   });
 
   it('Shows Carrier setup guidance on the web without exposing phone identifiers (spec/app/settings/index.md, "The carrier identifiers and Phone are sensitive screens, only on a phone")', async () => {

@@ -24,7 +24,6 @@ for begins.
 
 ```quint
 import read as R from "../../kit/read"
-import extend as X from "./extend"
 
 type Origin = Conversations | ContactDock({ route: int, person: str })
 type Search = { open: bool, origin: Origin, words: str, hits: R::Read, asked: int, shown: int, more: bool }
@@ -132,7 +131,7 @@ pure def openHit(s: Search, hit: int, conversation: int, message: int, here: boo
 ```quint
 pure def canCloseSearch(s: Search): bool = s.open
 
-pure def closeSearch(s: Search): Search = { ...s, open: false, hits: X::dropped(s.hits), shown: 0, more: false }
+pure def closeSearch(s: Search): Search = { ...s, open: false, hits: R::drop(s.hits), shown: 0, more: false }
 ```
 
 ### Another owner or agent session leaves search behind, words and hits

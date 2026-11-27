@@ -11,6 +11,8 @@ export const app = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
 const root = resolve(app, "../..")
 const LICENCE_FILE = /^(licen[cs]e|copying|notice)([.\-_].*)?$/i
+const BUILD_TOOLS = new Set(["esbuild", "lightningcss", "rolldown", "vite"])
+const BUILD_HOSTS = new Set(["darwin", "linux", "win32"])
 const PERMISSIVE = new Set(["0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "IJG", "ISC", "libpng-2.0", "libtiff", "MIT", "OFL-1.1", "SunPro", "Zlib"])
 const NEWLY_PERMISSIVE = new Set(["Artistic-2.0", "BlueOak-1.0.0", "BSD-3-Clause-Clear", "BSL-1.0", "CC0-1.0", "CC-BY-3.0", "CC-BY-4.0", "MIT-0", "PSF-2.0", "Python-2.0",
   "Unicode-3.0", "Unicode-DFS-2016", "Unlicense", "WTFPL", "X11"])
@@ -58,6 +60,7 @@ interface PackageManifest {
   readonly repository?: string | { readonly url?: string }
   readonly dependencies?: Readonly<Record<string, string>>
   readonly optionalDependencies?: Readonly<Record<string, string>>
+  readonly os?: string | readonly string[]
 }
 interface ElizaLock { readonly commit: string; readonly remote: string; readonly branch: string }
 interface ClasspathRecord { readonly coordinates: readonly string[] }
@@ -174,11 +177,17 @@ function npmDrafts(): Draft[] {
     if (!inWorkspace && !isEliza && !isRepo) drafts.set(`${manifest.name}@${manifest.version}`, packageDraft(canonicalDir, manifest))
     const names = [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.optionalDependencies ?? {})]
     for (const name of names) {
+      const optional = Object.hasOwn(manifest.optionalDependencies ?? {}, name)
       const found = installed(canonicalDir, name) ?? installed(app, name)
       if (found === undefined) {
-        if (Object.hasOwn(manifest.optionalDependencies ?? {}, name)) continue
+        if (optional) continue
         if (isEliza) continue
         throw new Error(`${name}, a dependency of ${manifest.name}, is not installed: run pnpm install`)
+      }
+      if (optional && BUILD_TOOLS.has(manifest.name)) {
+        const { os } = json<PackageManifest>(join(found, "package.json"))
+        const platforms = typeof os === "string" ? [os] : os ?? []
+        if (platforms.length > 0 && platforms.every((platform) => BUILD_HOSTS.has(platform))) continue
       }
       walk(found)
     }

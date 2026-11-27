@@ -1,7 +1,7 @@
 // spec/app/settings/reset.md, "Story: Erase all data"
 import * as Reset from "../../gen/app__settings__reset.effect.vibe"
-import type { Answer, Effect as Out, Event } from "../../gen/app__settings__reset.effect.vibe"
-import { type Job, answer, due, reacting, stop, untimed } from "../runtime/index.vibe"
+import type { Effect as Out, Event } from "../../gen/app__settings__reset.effect.vibe"
+import { type Job, answer, due, fieldsOf, filledStore, reacting, untimed, withoutFields } from "../runtime/index.vibe"
 
 module held {
   import { resetPlugin, reviewDataReset } from "@elizaos/os-bridges"
@@ -14,46 +14,41 @@ module held {
 }
 import { reviewed } from held
 
-// spec/app/settings/reset.md, "Only the phone's answer to the latest review counts; an approval is recorded on the phone before anything else"
-const answers: Readonly<Record<Awaited<ReturnType<typeof reviewed>>, Answer>> = { NativeCancelled: "Declined", NativeUnavailable: "NoReset", ShellUnavailable: "NoReset" }
-
+// spec/app/settings/reset.md, "Only the phone's answer to the latest review counts; a cancelled review needs no word, and an unavailable reset is told as unavailable"
 effect function reviewOf(ticket: number): Event!! {
-  const notice = tryPromise(reviewed) catch () => "ShellUnavailable" as const
-  return { type: "reviewed", review: ticket, reply: answers[notice] }
+  const reply = tryPromise(reviewed) catch () => "ShellUnavailable" as const
+  return { type: "reviewed", review: ticket, reply }
 }
 
-/**
- * eliza's reset plugin records, stops, revokes and erases in native code, and tells the page only that nothing was
- * reset. The steps a try asks of the page are therefore never carried out from here: each is given up on its time.
- */
 function carry(fx: Out): Job<Event, never, []> {
   return match (fx) {
     when { tag: "ReviewReset", let review }: answer("review", reviewOf(review), { type: "giveUpOnReview", now: untimed });
-    when { tag: "RecordReset", let record }: answer("record", succeed<Event>({ type: "recorded", record, saved: false, at: untimed }), { type: "recorded", record, saved: false, at: untimed });
-    when { tag: "StopAccountUsers" }: stop("try");
-    when { tag: "RevokeCloudKeys" }: stop("try");
-    when { tag: "ClearData" }: stop("try");
-    when { tag: "CheckErased", let checking }: answer("check", succeed<Event>({ type: "erasedChecked", checking, erased: false, known: false }), { type: "erasedChecked", checking, erased: false, known: false });
   }
 }
 
-// spec/app/settings/reset.md, "Every review, stop, revocation and erase ends"
+// spec/app/settings/reset.md, "Every review ends"
 function timers(state: Reset.Reset) {
-  const waits: ReadonlyArray<[boolean, string, number, Event]> = [
-    [state.review.read.status === "Loading", "review", state.review.due, { type: "giveUpOnReview", now: untimed }],
-    [state.stopping.read.status === "Loading", "stop", state.stopping.due, { type: "giveUpOnStopping", now: untimed }],
-    [state.revoking.read.status === "Loading", "revoke", state.revoking.due, { type: "giveUpOnRevoking", now: untimed, at: untimed }],
-    [state.clear.outcome === "Sent", "clear", state.clearDue, { type: "giveUpOnClearing", now: untimed }],
-  ]
-  return waits.flatMap(([busy, key, at, event]) => (busy ? [due<Event, []>(key, at, event)] : []))
+  return state.review.read.status === "Loading"
+    ? [due<Event, []>("review", state.review.due, { type: "giveUpOnReview", now: untimed })]
+    : []
 }
 
-// spec/app/settings/reset.md, "Alpha starting again keeps the record and the tries; a try it cut short before the erase was sent erased nothing, and one cut short after is one it cannot tell about"
-const launching = effect {
-  const { pending } = try (try Reset.Machine).get()
-  const launch: Event = { type: "launch", found: pending }
-  return [launch] as const
+// spec/app/settings/reset.md, "Alpha starting again retires any review left in flight"
+const launching = succeed<readonly [Event]>([{ type: "launch" }] as const)
+
+// spec/app/settings/reset.md, "A reset holds the phone's review in flight and what Alpha said when nothing was reset"
+/** What a reset kept before it held only its review and what was said. */
+const dropped = ["recording", "pending", "mayBeRecorded", "tries", "made", "launchTry", "stopping", "revoking", "revokedIn", "clear", "clearDue", "checking"]
+/** The words a reset said then that Alpha no longer says. */
+const unsaid: ReadonlyArray<unknown> = ["NotConfirmedItsYou", "ReviewExpired", "ReviewAlreadyOpen", "SetAScreenLock", "NoDeviceAuth", "MayStillGoAhead", "NotErased", "CouldNotTell", "Erased"]
+
+/** A reset an earlier build kept: read with only its review and what was said, a word no longer said read as a fresh machine has it. */
+function stored(key: string, start = Reset.initial) {
+  return Layer.provide(Reset.stored(key, start), filledStore(key, (kept) => {
+    const { said, ...rest } = fieldsOf(withoutFields(kept, dropped)) ?? {}
+    return { ...rest, said: unsaid.includes(said) ? Reset.initial.said : said }
+  }, Reset.parseState))
 }
 
-/** Erasing all data: kept across restarts, as the phone keeps the record of an approved reset. */
-export const resetting = reacting(Reset, { keep: 1, open: launching, carry, timers })
+/** Erasing all data, handed over to Android's native `ElizaReset` plugin. */
+export const resetting = reacting({ ...Reset, stored }, { keep: 1, open: launching, carry, timers })

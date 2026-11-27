@@ -69,21 +69,11 @@ describe("Camera on a phone", () => {
     const cameraSession = await onCamera();
     const { alpha, runtime, world } = cameraSession;
 
-    // spec/app/camera/index.md, "The grid turns on and off without restarting the preview": v119's Camera header has no grid, ratio or timer control (template.html at 45f6bed30, lines 1861-1868), so these turn on through the machine and the header shows only back, flip and flash.
+    // spec/app/camera/index.md, "Story: Frame the shot": v119's Camera header holds only back, flip and flash.
     expect(button("Framing grid")).toBeUndefined();
     expect(button("Aspect ratio 4:3")).toBeUndefined();
     expect(button("Timer off")).toBeUndefined();
-    const owner = (event: { readonly type: "toggleGrid" | "toggleRatio" | "cycleDelay" }) => drawn(() => runtime.runPromise(Effect.flatMap(Machine, (machine) => machine.send(event, "Owner"))));
-    await owner({ type: "toggleGrid" });
-    await until(alpha, runtime, Machine, (state) => state.grid);
-    await owner({ type: "toggleRatio" });
-    await until(alpha, runtime, Machine, (state) => state.phase === "Ready" && state.wide);
-    expect(world.camera.preview?.captureAspectRatio).toBe("16:9");
-    await owner({ type: "cycleDelay" });
     await press("Take photo");
-    await until(alpha, runtime, Machine, (state) => state.countdown === 3);
-    expect(world.camera.photos).toHaveLength(0);
-    await later(alpha, 3000);
     await until(alpha, runtime, Machine, (state) => state.last > 0 && state.shot === 0);
     expect(world.camera.photos).toMatchObject([{ saveToGallery: true, thumbnailOnly: true }]);
 

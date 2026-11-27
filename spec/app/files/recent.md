@@ -292,7 +292,7 @@ Android ends a picker with the app, so none reports back after a restart.
 pure def canRestart(s: Recent, by: Actor): bool = by == Phone
 
 pure def restart(s: Recent, by: Actor): Moved =
-  val updated = { ...s, rows: ended(s.rows), pickers: List(), live: 0, replacing: 0, reaching: F::drop(s.reaching), shown: nobody }
+  val updated = { ...s, rows: ended(s.rows), pickers: List(), live: 0, replacing: 0, reaching: R::drop(s.reaching), shown: nobody }
   { state: updated, out: dropped(s, updated) }
 
 pure def stepARestartEndsTheSession(before: Recent, via: str, after: Recent): bool =

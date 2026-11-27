@@ -153,7 +153,7 @@ pure def workspaceRemoved(s: WorkspaceList, workspace: int): Moved =
   if (rest.length() == 0)
     {
       state: {
-        ...cleaned, selected: nowhere, list: { ...s.list, status: R::Idle }, further: false, failure: Fine,
+        ...cleaned, selected: nowhere, list: R::drop(s.list), further: false, failure: Fine,
         pages: 0, total: 0, cursor: 0, spent: Set(), saved: false, mutedChannels: Set(),
         muteOp: A::plan(s.muteOp.id),
       },
@@ -277,7 +277,7 @@ pure def restart(s: WorkspaceList): WorkspaceList =
   val rev = credOf(s.connected, s.selected.workspace)
   val restores = readable(s) and s.keptPages > 0 and s.kept == s.selected and rev > 0 and s.keptCredential == rev
   {
-    ...s, list: { ...s.list, status: R::Idle }, further: false, failure: Fine,
+    ...s, list: R::drop(s.list), further: false, failure: Fine,
     pages: if (restores) s.keptPages else 0, total: if (restores) s.keptTotal else 0,
     cursor: 0, spent: Set(), saved: restores,
     muteOp: if (s.muteOp.outcome == A::Sent) A::conclude(s.muteOp, false, false) else s.muteOp,

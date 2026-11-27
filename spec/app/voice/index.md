@@ -179,6 +179,9 @@ pure def lawNativeTalkRequiresCurrentOwnerEpochAndReadiness(
 ): bool =
   (not(engineReady) or not(residentRouteReady) or not(sameOwner) or not(sameEpoch) or not(captureActive))
     implies not(nativeCaptureAdmitted(engineReady, residentRouteReady, sameOwner, sameEpoch, captureActive))
+
+pure def alwaysIdleVoiceHoldsNoMicrophone(v: Voice): bool =
+  v.phase == Idle implies v.mic == Off
 ```
 
 ### The speech pipeline warms on startup, foreground return and account readiness without opening the microphone
@@ -761,6 +764,9 @@ pure def lawTalkRespectsSelectedChatAndExclusivePostSlot(
 ): bool =
   (hasSelectedChat implies not(talkCreatesBlankConversation(hasSelectedChat, editorEmpty, sendInFlight)))
     and (sendInFlight implies not(talkTurnCanPost(sendInFlight)))
+
+pure def alwaysSentTurnsBelongToASession(v: Voice): bool =
+  v.sent > 0 implies v.session > 0
 ```
 
 ### What was heard but not sent is never counted as sent
@@ -1098,6 +1104,9 @@ pure def lawSpokenFilesNavigationRunsAtMostOnceWhileActive(
 ): bool =
   not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, true, false))
     and not(spokenFilesNavigationAdmitted(sameVoiceTurn, sameSourceScreen, directActionPermitted, false, true))
+
+pure def alwaysNavigationClaimRequiresTalking(v: Voice): bool =
+  v.claim != 0 implies talking(v)
 ```
 
 ### A navigation claim is released when the shell does not open its destination

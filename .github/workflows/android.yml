@@ -55,13 +55,18 @@ jobs:
         run: |
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
-      - name: Verify zero Bun and notice freshness
+          printf '%s\n' "$ANDROID_HOME/cmake/3.22.1/bin" >> "$GITHUB_PATH"
+      - name: Install speech model converter dependencies
         run: |
-          pnpm no-bun
-          pnpm --filter @repo/app licences --check
-      - name: Prepare pinned Eliza checkout and verify Android inputs
+          python3 -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0+cpu'
+          python3 -m pip install 'numpy==2.2.6' 'zstandard==0.23.0' 'librosa==0.11.0' 'onnx==1.21.0' 'PyYAML==6.0.2' 'tqdm==4.67.1' 'requests==2.34.2'
+      - name: Verify zero Bun
+        run: pnpm no-bun
+      - name: Prepare pinned Eliza checkout and verify Android inputs and notices
         run: |
           pnpm eliza
+          pnpm --filter @repo/eliza-harness build
+          pnpm --filter @repo/app licences --check
           pnpm --filter @repo/app android inputs
       - name: Build and verify the launcher APKs (debug, instrumentation, release)
         env:
@@ -73,7 +78,13 @@ jobs:
       - name: Run Alpha native JVM unit tests
         timeout-minutes: 15
         working-directory: apps/app/android
-        run: ./gradlew --no-daemon :app:testLauncherDebugUnitTest
+        run: |
+          eliza_pin=$(node -p 'require(process.env.GITHUB_WORKSPACE + "/eliza.lock.json").commit')
+          engine_pin=$(node -p 'require(process.env.GITHUB_WORKSPACE + "/.eliza/packages/os/android/local-inference/engine.lock.json").engine.commit')
+          ./gradlew --no-daemon \
+            "-PelizaInferenceEngineDir=$PWD/.cache/voice-engine/$engine_pin" \
+            "-PelizaParadeeNativeDir=$PWD/.cache/voice/$eliza_pin" \
+            -PelizaSpeechBridgeCapacitor=true :app:testLauncherDebugUnitTest
       - name: Verify AOSP Fresh Presets host JVM checks
         run: python3 apps/app/aosp/branding/provision/test_fresh_presets.py
       - name: Require flag-off APKs with packaged runtime

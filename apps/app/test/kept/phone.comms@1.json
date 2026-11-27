@@ -1,7 +1,7 @@
 {
   "key": "alpha/app/phone/comms@1",
   "spec": "spec/app/phone/comms.md",
-  "shape": "dcf61a2fb7ca8991",
+  "shape": "3d2159f3f0bf363e",
   "state": {
     "app": "MessagesApp",
     "subject": "ListSubject",
@@ -19,22 +19,53 @@
     "callLive": false,
     "emergency": false,
     "ring": "",
-    "proposal": {
-      "tag": "NoProposal"
-    },
-    "past": [
-      {
-        "pastId": "proposal-4",
-        "fate": "Done"
-      }
-    ],
     "briefed": "",
-    "approved": 0,
     "requests": [
       {
         "about": "messages:thread:9",
         "request": "Reply that I am running late"
       }
     ]
-  }
+  },
+  "earlier": [
+    {
+      "from": "5c647718e1",
+      "until": "c2bc8c0dde",
+      "state": {
+        "app": "MessagesApp",
+        "subject": "ListSubject",
+        "key": "messages:list:",
+        "target": "AlphaTarget",
+        "height": "SheetOpen",
+        "voice": false,
+        "stage": [
+          {
+            "app": "MessagesApp",
+            "subject": "ThreadSubject",
+            "key": "messages:thread:9"
+          }
+        ],
+        "callLive": false,
+        "emergency": false,
+        "ring": "",
+        "proposal": {
+          "tag": "NoProposal"
+        },
+        "past": [
+          {
+            "pastId": "proposal-4",
+            "fate": "Done"
+          }
+        ],
+        "briefed": "",
+        "approved": 0,
+        "requests": [
+          {
+            "about": "messages:thread:9",
+            "request": "Reply that I am running late"
+          }
+        ]
+      }
+    }
+  ]
 }

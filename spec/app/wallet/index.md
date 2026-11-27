@@ -60,8 +60,6 @@ pure val initial: Wallet = {
 }
 
 pure def serves(custody: Custody): bool = custody == Ready or custody == Unavailable
-
-pure def rested(r: R::Read): R::Read = { ...r, status: R::Idle }
 ```
 
 ### What the simulator tries
@@ -96,7 +94,7 @@ pure def canShow(w: Wallet, showing: bool): bool = showing != w.showing
 
 pure def show(w: Wallet, showing: bool): Moved =
   if (showing) { state: { ...w, showing: true, standing: R::ask(w.standing) }, out: List(ReadWallet({ ticket: w.standing.ticket + 1 })) }
-  else { state: { ...w, showing: false, receiving: false, copy: rested(w.copy) }, out: List() }
+  else { state: { ...w, showing: false, receiving: false, copy: R::drop(w.copy) }, out: List() }
 
 pure def canRefresh(w: Wallet): bool = w.standing.status != R::Loading
 
@@ -112,13 +110,13 @@ pure def taken(custody: Custody, canHold: bool, accounts: List[Account], w: Wall
   if (serves(custody))
     { state: { ...w, custody: custody, canHold: canHold, accounts: accounts,
                holdings: R::ask(w.holdings), desk: R::ask(w.desk), activity: R::ask(w.activity),
-               receiving: open, copy: if (open) w.copy else rested(w.copy) },
+               receiving: open, copy: if (open) w.copy else R::drop(w.copy) },
       out: List(ReadHoldings({ ticket: w.holdings.ticket + 1 }), ReadDesk({ ticket: w.desk.ticket + 1 }),
                 ReadActivity({ ticket: w.activity.ticket + 1 })) }
   else
     { state: { ...w, custody: custody, canHold: canHold, accounts: List(),
-               holdings: rested(w.holdings), held: List(), unread: List(), desk: rested(w.desk), waiting: List(),
-               activity: rested(w.activity), past: List(), receiving: false, copy: rested(w.copy) },
+               holdings: R::drop(w.holdings), held: List(), unread: List(), desk: R::drop(w.desk), waiting: List(),
+               activity: R::drop(w.activity), past: List(), receiving: false, copy: R::drop(w.copy) },
       out: List() }
 ```
 
@@ -178,8 +176,8 @@ The wallet is read again the next time it is shown.
 
 ```quint
 pure def reopen(w: Wallet): Wallet =
-  { ...w, showing: false, receiving: false, copy: rested(w.copy), standing: rested(w.standing),
-    holdings: rested(w.holdings), desk: rested(w.desk), activity: rested(w.activity),
+  { ...w, showing: false, receiving: false, copy: R::drop(w.copy), standing: R::drop(w.standing),
+    holdings: R::drop(w.holdings), desk: R::drop(w.desk), activity: R::drop(w.activity),
     changing: if (busy(w)) A::conclude(w.changing, false, false) else w.changing }
 
 pure def stepReopenLeavesNoChangeSent(before: Wallet, via: str, after: Wallet): bool =
@@ -258,7 +256,7 @@ pure def receive(w: Wallet): Wallet = { ...w, receiving: true }
 
 pure def canCloseReceive(w: Wallet): bool = w.receiving
 
-pure def closeReceive(w: Wallet): Wallet = { ...w, receiving: false, copy: rested(w.copy) }
+pure def closeReceive(w: Wallet): Wallet = { ...w, receiving: false, copy: R::drop(w.copy) }
 
 pure def alwaysReceiveShowsAnAccount(w: Wallet): bool =
   (w.receiving implies (serves(w.custody) and w.accounts.length() > 0)) and (w.copy.status == R::Loading implies w.receiving)
@@ -350,7 +348,7 @@ pure def canSwitchWallet(w: Wallet, wanted: bool): bool =
 pure def switchWallet(w: Wallet, wanted: bool): Moved =
   val id = w.changing.id + 1
   { state: { ...w, change: if (wanted) TurningOn else TurningOff, changing: A::dispatch(A::record(A::plan(id))),
-             receiving: false, copy: rested(w.copy) },
+             receiving: false, copy: R::drop(w.copy) },
     out: List(Switch({ attempt: id, wanted: wanted })) }
 ```
 

@@ -1,17 +1,17 @@
 # Clock
 
-The Clock page inside Workflows. Android's Clock app owns the alarms, so
-Alpha only hands a reviewed request over to it: set an alarm, show the
-alarms, snooze or dismiss the one ringing. Alpha keeps no alarm of its own,
-and what it remembers of a handoff says only whether Clock was opened. In
-a plain browser there is no Clock, so nothing is handed over and nothing
-is remembered.
+The Android Clock handoff page inside Workflows. Alongside Alpha's own
+built-in Clock app, this page hands a reviewed alarm request over to
+Android's system Clock app: set an alarm, show the alarms, or snooze or
+dismiss the one ringing. Workflows keeps no alarm state of its own for
+these handoffs, and what it remembers says only whether Android Clock was
+opened. In a plain browser there is no Android Clock, so nothing is handed
+over and nothing is remembered.
 
 The agent may propose the same handoff itself (eliza's `ClockHandoff`
-device operation); that proposal is reviewed by the approvals area
-(`spec/app/approvals`) and ends in the same receipt, under the receipt rule
-stated here. Whether Alpha is showing is the shell's: it sends `suspend`
-when Alpha is hidden.
+device operation); that proposal is reviewed on the phone and ends in the
+same receipt, under the receipt rule stated here. Whether Alpha is showing
+is the shell's: it sends `suspend` when Alpha is hidden.
 
 ## Story: Describe an alarm for Clock
 

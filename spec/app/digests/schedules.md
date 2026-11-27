@@ -10,9 +10,8 @@ morning digest now. On the agent's side these are eliza's digest loops and
 `offersMissedRun` (`workflow/hostedDigest`); Alpha never runs a digest
 itself.
 
-Whether a source is current for a schedule is a fact of
-[Sources](./sources.md), and whether a newer result was kept a fact of
-[Digests](./index.md), each passed in with the event that needs it; when
+Whether a source is current for a schedule and whether a newer result was
+kept in [Digests](./index.md) are passed in with the event that needs them; when
 it runs is a [Schedule](../workflows/schedule.md) of the daily kind.
 
 ## Story: Keep my digest schedules

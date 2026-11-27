@@ -249,7 +249,7 @@ reviews. The pack loads eliza's `device-actions` and `reply-draft` modules
 and allows `PROPOSE_DEVICE_ACTION`. Which steps the phone takes, and which
 the old phone withheld (`notes.organize.v1` and the telephony contact
 lookup), is the phone's capability offer (`spec/app/platform/index.md`,
-`spec/app/telephony/actions.md`), not the agent's policy.
+`spec/app/phone/`, `spec/app/messages/`, `spec/app/contacts/`), not the agent's policy.
 
 ```quint
 pure val deviceActionModules: List[str] = List("@elizaos/agent/device-actions", "@elizaos/agent/reply-draft")
@@ -288,6 +288,8 @@ pure val launchViews: List[LaunchView] = List(
   { id: "phone", label: "Phone", path: "/phone", aliases: List() },
   { id: "messages", label: "Messages", path: "/messages", aliases: List() },
   { id: "inbox", label: "Inbox", path: "/inbox", aliases: List() },
+  { id: "telegram", label: "Telegram", path: "/telegram", aliases: List() },
+  { id: "slack", label: "Slack", path: "/slack", aliases: List() },
   { id: "calendar", label: "Calendar", path: "/calendar", aliases: List() },
   { id: "clock", label: "Clock", path: "/clock", aliases: List("alarms", "timers", "stopwatch", "world clock") },
   { id: "reminders", label: "Reminders", path: "/reminders", aliases: List("reminder", "to-do", "todo", "tasks") },
@@ -502,6 +504,11 @@ pure def browserTranscriptionOffered(localBrowser: bool, nativeSpeechEngine: boo
   localBrowser and not(nativeSpeechEngine) and windowBytes > 0 and windowBytes <= browserNotesTranscriptionLimit
 pure def lawNativeEngineNeverOffersBrowserTranscription(localBrowser: bool, windowBytes: int): bool =
   not(browserTranscriptionOffered(localBrowser, true, windowBytes))
+pure def lawBrowserNotesTranscriptionIsNonStreamingPageRoute(limit: int): bool =
+  limit == browserNotesTranscriptionLimit implies
+    (limit > 0
+      and pageRoutes.includes({ method: Get, path: browserNotesTranscription, stream: false })
+      and pageRoutes.includes({ method: Post, path: browserNotesTranscription, stream: false }))
 ```
 
 ### Only Android's native speech transport can call the resident recognizer
@@ -557,6 +564,8 @@ pure def browserCleanupConfirmed(browserAudio: bool, bytesRemoved: bool, pending
   browserAudio and bytesRemoved and pendingReceipt and exactNoteAndReceipt
 pure def lawNativeRecordingCannotConfirmOnBrowserCleanup(bytesRemoved: bool, pendingReceipt: bool, exactNoteAndReceipt: bool): bool =
   not(browserCleanupConfirmed(false, bytesRemoved, pendingReceipt, exactNoteAndReceipt))
+pure def lawBrowserNotesCleanupIsOnThePage(method: Method): bool =
+  pageRoutes.includes({ method: method, path: browserNotesCleanup, stream: false }) iff method == Post
 ```
 
 ### Only the phone's native channel can verify that a reviewed recording was erased
@@ -714,8 +723,9 @@ a pack is built only for a hosted environment; a journey runs the pack
 against its own local cloud and that cloud's model.
 
 ```quint
+import cloud as C from "../cloud"
 type Environment = Local | Staging | Production
-pure val cloudModel: str = "qwen-3.8-27b"
+pure val cloudModel: str = C::alphaModel
 pure def packedFor(e: Environment): bool = e != Local
 ```
 

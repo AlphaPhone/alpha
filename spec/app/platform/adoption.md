@@ -113,7 +113,7 @@ pure def lawAJournalHeldOnlyInTheEarlierStoreIsNeverReadAsEmpty(copied: bool): b
 
 | Earlier slot | Area | What becomes of it |
 |---|---|---|
-| `action-journal:v1:…` | [Approvals](../approvals/) | moved the first time it is read |
+| `action-journal:v1:…` | Approvals | moved the first time it is read |
 | `sms-send-ledger:v1:device`, `alpha-sms-operation:v1:…` | [Messages](../messages/) | moved the first time it is read |
 | `workflow-notice-delivery:v1`, `workflow-approval-notices:v1`, `workflow-notice-taps:v1`, `workflow-notice-owner:v1` | [Notices](../notices/) | moved the first time it is read |
 | `inbox-drafts:v1:…`, `inbox-operation:v1:…` | [Inbox](../inbox/) | the area's to move, through `AlphaConnection` |

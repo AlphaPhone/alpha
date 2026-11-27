@@ -6,6 +6,7 @@ import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
@@ -34,6 +35,7 @@ public class MainActivity extends BridgeActivity {
  private static int nextTextAsk;
  private static OfferedAsk offeringAsk;
  private static WeakReference<MainActivity> livePage = new WeakReference<>(null);
+ private static final NavigationOpenRequest navigationOpen = new NavigationOpenRequest();
  private static boolean handoffUnavailable;
  private static int unansweredFrontStarts;
  private boolean homeTask;
@@ -43,7 +45,6 @@ public class MainActivity extends BridgeActivity {
  private volatile boolean windowFocused;
  private volatile boolean tornDown;
  private final AtomicLong composerVisit = new AtomicLong();
- private final NavigationOpenRequest navigationOpen = new NavigationOpenRequest();
  private InsetsState insets;
  private volatile TextAsk textAsk;
  private int closedTextAsk;
@@ -142,14 +143,9 @@ public class MainActivity extends BridgeActivity {
    return;
   }
   if (receiveTextAsk(incoming) || receiveSmsDraft(incoming)) setIntent(new Intent(this, MainActivity.class));
-  if (incoming != null && AlphaNavigationService.ACTION_SHOW_MAPS.equals(incoming.getAction())) {
-   navigationOpen.offer(android.os.SystemClock.elapsedRealtime());
-  }
   homeTask = state == null ? isHomeTaskStart(getIntent()) : state.getBoolean(HOME_TASK, isHomeTaskStart(getIntent()));
-  if (isHome(getIntent())) {
-   SmsNoticeOpenRequest.clear();
-   navigationOpen.clear();
-  }
+  if (isHome(getIntent())) SmsNoticeOpenRequest.clear();
+  captureNavigationOpen(getIntent());
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaSignInPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
@@ -228,6 +224,7 @@ public class MainActivity extends BridgeActivity {
 
    @Override public void onPageLoaded(WebView page) {
     if (insets != null) insets.publish(page);
+    signalNavigationOpen();
    }
   });
   var decor = getWindow().getDecorView();
@@ -321,8 +318,6 @@ public class MainActivity extends BridgeActivity {
 
  boolean isAssistantSurface() { return assistantVisit() != 0; }
  long composerVisit() { return composerVisit.get(); }
- boolean consumeNavigationOpen() { return navigationOpen.consume(android.os.SystemClock.elapsedRealtime()); }
- void clearNavigationOpen() { navigationOpen.clear(); }
 
  void setVolumeShutter(boolean enabled) { volumeShutter = enabled; }
 
@@ -352,9 +347,6 @@ public class MainActivity extends BridgeActivity {
   }
   HostedDigestDelivery.get().capture(intent);
   InboxNoticeDelivery.get(this).capture(intent);
-  if (intent != null && AlphaNavigationService.ACTION_SHOW_MAPS.equals(intent.getAction())) {
-   navigationOpen.offer(android.os.SystemClock.elapsedRealtime());
-  }
   if (isFrontStart(intent)) {
    if (!handingOff) unansweredFrontStarts = 0;
    return;
@@ -365,9 +357,10 @@ public class MainActivity extends BridgeActivity {
    textAsk = null;
    SmsDraftOpenRequest.retire(this);
    SmsNoticeOpenRequest.clear();
-   navigationOpen.clear();
   }
+  boolean openMaps = captureNavigationOpen(intent);
   super.onNewIntent(intent);
+  if (openMaps) signalNavigationOpen();
   var bridge = getBridge();
   WebView view = bridge == null ? null : bridge.getWebView();
   if (view != null && home) view.evaluateJavascript(HOME, null);
@@ -375,6 +368,26 @@ public class MainActivity extends BridgeActivity {
 
  private static boolean isHome(Intent intent) {
   return intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME);
+ }
+
+ private boolean captureNavigationOpen(Intent intent) {
+  if (isAssistantSurface() || intent == null || isFrontStart(intent)) return false;
+  if (AlphaNavigationService.ACTION_SHOW_MAPS.equals(intent.getAction())) {
+   navigationOpen.offer(SystemClock.elapsedRealtime());
+   intent.setAction(Intent.ACTION_MAIN);
+   return true;
+  }
+  if (isHome(intent)) navigationOpen.clear();
+  return false;
+ }
+
+ boolean consumeNavigationOpen() { return !isAssistantSurface() && navigationOpen.consume(SystemClock.elapsedRealtime()); }
+ void clearNavigationOpen() { if (!isAssistantSurface()) navigationOpen.clear(); }
+
+ private void signalNavigationOpen() {
+  if (getBridge() != null && getBridge().getWebView() != null && !isAssistantSurface()) {
+   getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('alpha:maps-open'))", null);
+  }
  }
 
  private static boolean isHomeTaskStart(Intent intent) {

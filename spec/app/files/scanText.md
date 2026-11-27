@@ -149,9 +149,9 @@ pure def stepTextNotedIsNotNotedAgain(before: Text, via: str, after: Text): bool
 ### Closing the scan drops the readings and the review; a restart also leaves a note or a link cut off as it truly stands
 
 ```quint
-pure def close(t: Text): Text = { ...t, reading: F::drop(t.reading), event: F::drop(t.event), found: false, links: V::dismiss(t.links) }
+pure def close(t: Text): Text = { ...t, reading: R::drop(t.reading), event: R::drop(t.event), found: false, links: V::dismiss(t.links) }
 
-pure def restart(t: Text): Text = ending(F::cut(t.note), { ...close(t), opening: F::cut(t.opening) })
+pure def restart(t: Text): Text = ending(A::cutOff(t.note), { ...close(t), opening: A::cutOff(t.opening) })
 ```
 
 ### Text can be read, fail to be read, show no links, open a link or fail to, find an event or none, find the Calendar unavailable, and be noted or left unsure

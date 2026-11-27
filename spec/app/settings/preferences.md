@@ -619,7 +619,7 @@ phone's look on its own, the phone reports that as kept while Alpha has
 kept none of its own.
 
 ```quint
-pure def drop(t: T::Timed): T::Timed = if (T::busy(t)) T::answer(t, false) else t
+pure def drop(t: T::Timed): T::Timed = { ...t, read: R::retire(t.read) }
 
 pure def canStart(s: Preferences, by: Sender): bool = answers(by)
 

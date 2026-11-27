@@ -182,6 +182,9 @@ pure def scheduleShowsNotConnected(standalone: bool, connected: bool, upcomingCo
 pure def lawScheduleStopsBeforePrefetchEnd(month: int): bool =
   scheduleLastMonth(month) == month + 1 and scheduleLastMonth(month) < windowLastMonth(month)
 
+pure def lawScheduleCoversThisAndNextMonth(month: int): bool =
+  scheduleLastMonth(month) == month + 1 and scheduleLastMonth(month) <= windowLastMonth(month)
+
 pure def lawDisconnectedEmptyScheduleSaysNotConnected(standalone: bool): bool =
   scheduleShowsNotConnected(standalone, false, 0) iff standalone
 ```
