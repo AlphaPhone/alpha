@@ -1,0 +1,10 @@
+{
+  "key": "alpha/app/startup/journal@1",
+  "spec": "spec/app/startup/journal.md",
+  "shape": "5cf69cbaf1b3e127",
+  "state": {
+    "entries": [],
+    "seen": 0,
+    "dropped": 0
+  }
+}

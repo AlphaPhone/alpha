@@ -7,7 +7,7 @@ import * as Updates from "../../gen/app__update.effect.vibe"
 import type { Activity, Effect as Out, Event, Feed, Release } from "../../gen/app__update.effect.vibe"
 import { Device } from "../platform/index.vibe"
 import { LauncherUpdates } from "../platform/index.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { type Job, answer, contained, filledStore, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { type Engagement, Engagements, engagements, notesReported } from "./activity.vibe"
 import { Names, names } from "./names.vibe"
@@ -128,8 +128,15 @@ function carry(fx: Out): Job<Event, LauncherUpdates | KeyValueStore.KeyValueStor
   }
 }
 
-// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
-const machine = reacting(Updates, { keep: 1, open: [{ type: "restart" }], carry })
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+/** Updates kept before the failed checks were counted: read with one if the last check failed, and none otherwise. */
+function storedUpdates(key: string, start = Updates.initial) {
+  return Layer.provide(Updates.stored(key, start), filledStore(key, (kept) => ({ misses: kept.checked === "Missed" ? 1 : Updates.initial.misses, ...kept }), Updates.parseState))
+}
+
+// spec/app/update/index.md, "A restart keeps the installed version, the signing root, the saved offer, the last check, the failed checks and the deferrals, and forgets the permission, the owner's activity, a check or install under way, and the note"
+const machine = reacting({ ...Updates, stored: storedUpdates }, { keep: 1, open: [{ type: "restart" }], carry })
 
 // spec/app/update/index.md, "The installed version never goes down, the signing root never changes, and a phone past its first 30 seconds is never starting again"
 effect function observed(): void!!(LauncherUpdates | Names | Updates.Machine) {

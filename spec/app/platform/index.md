@@ -321,7 +321,8 @@ pure def lawOnlyAnUnreadableValueIsSetAside(kept: Kept, placeHeld: bool): bool =
 
 A machine's state gains and loses fields while its version stays the same.
 A state an earlier build kept is read with each field it lacks at the value
-a fresh machine starts with, and without each field the state no longer
+a fresh machine starts with, or at the value its record's own spec reads
+from the rest of the state, and without each field the state no longer
 has; nothing else in it changes, so the owner's choices in it are there
 after the restart. Only a value that is still not a state after that is set
 aside, as a value of a wrong kind always is.
