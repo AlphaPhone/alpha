@@ -658,21 +658,29 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it("keeps voice and mic open across agent navigation to an app, to Home, and to Home again, keeping a raised Sheet where the view is in sight and lowering it or Full where they would hide it, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
+    let told = 0;
+    await until(runtime, Conversation, (s) => { told = s.context.revision; return s.observing; });
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
+    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included": the turn is sent once the screen it tells of shows the raised sheet, so its prepared view opens on that screen.
+    await until(runtime, Conversation, (s) => s.context.revision > told);
+    const shows = (viewId: string) => (metadata: unknown) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, false)];
 
-    world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
+    world.ask.nextReplyChunks = ["Opening Calendar."];
+    world.ask.nextActions = shows("calendar");
     speakUtterance(world, "Open my calendar");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Sheet" });
 
-    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Back on Home."];
+    world.ask.nextReplyChunks = ["Back on Home."];
+    world.ask.nextActions = shows("home");
     speakUtterance(world, "Go home");
     await until(runtime, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.followed === placeOf(undefined) && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: [], assistant: "Sheet" });
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": asked for Home with the sheet over Home, Talk lowers it and keeps listening.
     const route = (await getShell(runtime)).route;
-    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Here is Home."];
+    world.ask.nextReplyChunks = ["Here is Home."];
+    world.ask.nextActions = shows("home");
     speakUtterance(world, "Go home");
     await until(runtime, Shell.Machine, (s) => s.route === route + 1);
     await until(runtime, Voice.Machine, (s) => s.sent === 3 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
@@ -680,10 +688,17 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
 
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it": Full over Home hides any destination, so opening Calendar lowers it in the same move.
     await sendShell(runtime, { type: "raise", detent: "Full" });
-    world.ask.nextReplyChunks = ["[NAVIGATE:Calendar] Opening Calendar."];
+    world.ask.nextReplyChunks = ["Opening Calendar."];
+    world.ask.nextActions = shows("calendar");
     speakUtterance(world, "Open my calendar");
     await until(runtime, Voice.Machine, (s) => s.sent === 4 && s.phase === "Listening" && s.mic === "On" && s.followed === placeOf("Calendar") && s.claim === 0);
     expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"], assistant: "Bar" });
+
+    // spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen": the words of a reply never move the shell, even ones shaped as an old navigation tag; only what its actions prepared does.
+    world.ask.nextReplyChunks = ["[NAVIGATE:Home] Back on Home."];
+    speakUtterance(world, "Go home");
+    await until(runtime, Voice.Machine, (s) => s.sent === 5 && s.phase === "Listening" && s.mic === "On" && s.claim === 0);
+    expect(await getShell(runtime)).toMatchObject({ trail: ["Calendar"] });
 
     await sendShell(runtime, { type: "openView", view: "Notes" });
     await until(runtime, Voice.Machine, (s) => s.phase === "Idle");
@@ -1350,6 +1365,40 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   });
 
   // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
+  it("over the Cloud relay, Mute pressed again while the microphone Unmute reopened within the gap is still opening keeps the finished sentence, and it is sent once when the gap ends, as v119 did", async () => {
+    const { world, alpha, area } = await openCloudVoiceSheet(false);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Listening" && s.mic === "On" && s.network);
+    const sessionId = world.voice.activeMicSession;
+    const state = () => area.runPromise(Effect.flatMap(Voice.Machine, (m) => m.get()));
+    const asked = "What is on my calendar tomorrow?";
+    await drawn(() => {
+      world.voice.emitCloud?.({ type: "speech-start", sessionId });
+      world.voice.emitCloud?.({ type: "speech-end", sessionId, text: asked });
+    });
+    await later(alpha, 100);
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
+    let opens = () => {};
+    world.voice.cloudUnmuteGate = () => new Promise<void>((resolve) => { opens = resolve; });
+    await press("Unmute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => !s.muted && s.mic === "Opening");
+    // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": v119's Mute kept the utterance whether or not its capture had opened (voice-assistant-session.ts:593-622).
+    await press("Mute microphone");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.muted && s.mic === "Off");
+    expect([(await state()).sent, world.ask.said]).toEqual([0, []]);
+    await later(alpha, CLOUD_TURN_GAP_MS);
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 1 && s.muted && s.mic === "Off" && s.phase === "Listening");
+    expect(world.ask.said).toEqual([asked]);
+    await drawn(() => opens());
+    await later(alpha, 2000);
+    expect([(await state()).sent, world.ask.said]).toEqual([1, [asked]]);
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (s) => s.phase === "Idle");
+  });
+
+  // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically"; spec/app/voice/index.md, "Mute turns the microphone off, and unmuting opens it again only where Alpha listens"
   it("over the Cloud relay, speech on the microphone Unmute reopened within the gap joins the words held for it, and both are sent as one turn", async () => {
     const { world, alpha, area, sessionId, state, heard } = await startCloudTalk();
     const name = "Make a checklist called shoot day checklist.";
@@ -1479,7 +1528,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     ];
     const client = (typed as { viewClientId: string }).viewClientId;
     const binding = (viewId: string) => ({ requestId: `request-${viewId}`, clientId: client, viewId, viewType: "gui", installationId: "alpha" });
-    world.ask.nextReplyChunks = ["[NAVIGATE:Notes] Opening Calendar."];
+    world.ask.nextReplyChunks = ["Opening Calendar."];
     world.ask.nextActions = preparedFor("calendar");
     speakUtterance(world, "Open my calendar");
     await drawnUntil(alpha, area, Voice.Machine, (s) => s.sent === 2 && s.phase === "Listening" && s.mic === "On");

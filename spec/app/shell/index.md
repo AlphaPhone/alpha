@@ -239,9 +239,9 @@ opens over another, from the left when the stage returns to the one before
 from Phone's tabs on its Contacts tab swaps at once, as v119's Phone tabs did
 (phone-adapter.ts:256-270); that choice holds only for the return it makes, so
 choosing Contacts again on Contacts, or any Back after the view has changed,
-slides as v119's Back did (model.js:6018). An emergency call is never staged,
-so nothing slides while one is live (model.js:6286), and nothing slides under
-reduced motion.
+slides as v119's Back did (model.js:6018), and going Home ends that choice
+too. An emergency call is never staged, so nothing slides while one is live
+(model.js:6286), and nothing slides under reduced motion.
 
 ```quint
 pure def canOpenCommsView(s: Shell, view: View): bool =
