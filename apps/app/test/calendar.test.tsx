@@ -961,7 +961,7 @@ describe("on a phone", () => {
     expect([localStorage.getItem("alpha.calendar.numbers"), Boolean(button(/^Piano/))]).toEqual([numbers, true]);
   });
 
-  it("Two starts that cannot read the kept numbers never give one number to two events (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+  it(`Two starts that cannot read the kept numbers never give one number to two events (spec/app/calendar/editor.md, "Story: Keep my draft through a restart")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     localStorage.setItem("alpha.calendar.numbers", "{");
@@ -997,7 +997,7 @@ describe("on a phone", () => {
     expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Piano", "Walk", "Gym"]);
   });
 
-  it("A deletion and a doubt kept across a start that could not read the kept numbers are kept as they were (spec/app/calendar/deletions.md, \"A restart pauses a deletion still in its window; the owner sends it or keeps the event\"; spec/app/calendar/editor.md, \"A read of the event releases the doubt; a form waiting on it then shows the event as it now is\")", async () => {
+  it(`A deletion and a doubt kept across a start that could not read the kept numbers are kept as they were (spec/app/calendar/deletions.md, "A restart pauses a deletion still in its window; the owner sends it or keeps the event"; spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     const first = await open(world, only("view:Calendar", "notice"));
@@ -1042,7 +1042,7 @@ describe("on a phone", () => {
     expect(document.body.textContent).toContain("Alpha restarted before deleting Gym.");
   });
 
-  it("Kept numbers JavaScript cannot hold exactly are set aside, and each event keeps a number of its own (spec/app/calendar/deletions.md, \"Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm\")", async () => {
+  it(`Kept numbers JavaScript cannot hold exactly are set aside, and each event keeps a number of its own (spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     world.calendar.phoneEvents.push({ id: "p2", calendarId: "local", title: "Piano", begin: world.at(0, 16), end: world.at(0, 17), allDay: false, recurring: false });
@@ -1053,7 +1053,7 @@ describe("on a phone", () => {
     expect([localStorage.getItem("alpha.calendar.numbers.unreadable"), new Set(ids).size, ids.every((id) => Number.isSafeInteger(id))]).toEqual([unsafe, 2, true]);
   });
 
-  it("Numbering long after 2109, or after a clock set far ahead, still gives each event a number of its own (spec/app/calendar/deletions.md, \"Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm\")", async () => {
+  it(`Numbering long after 2109, or after a clock set far ahead, still gives each event a number of its own (spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     const ahead = 2 ** 43;
@@ -1064,7 +1064,7 @@ describe("on a phone", () => {
     expect([new Set(ids).size, ids.every((id) => Number.isSafeInteger(id))]).toEqual([2, true]);
   });
 
-  it("A doubt whose event went while Alpha was closed is let go by the first read that shows it gone (spec/app/calendar/editor.md, \"A read of the event releases the doubt; a form waiting on it then shows the event as it now is\")", async () => {
+  it(`A doubt whose event went while Alpha was closed is let go by the first read that shows it gone (spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     const first = await open(world, only("view:Calendar", "notice"));
@@ -1084,7 +1084,7 @@ describe("on a phone", () => {
     expect((await runtime.runPromise(Editor.use((e) => e.get()))).latched).toEqual([]);
   });
 
-  it("A repeating event that moved after the owner confirmed deleting one occurrence is not deleted (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+  it(`A repeating event that moved after the owner confirmed deleting one occurrence is not deleted (spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged")`, async () => {
     const world = morning(true);
     world.calendar.granted = true;
     world.calendar.phoneEvents.push(...[-7, 0, 7].map((day) => ({ id: "p5", calendarId: "local", title: "Piano", begin: world.at(day, 16), end: world.at(day, 17), allDay: false, recurring: true })));
@@ -1548,7 +1548,7 @@ describe("on a phone", () => {
     await until(alpha, agent, View, (s) => s.front && s.owner === 0);
   }
 
-  it("Signing out forgets the name the agent listed for the owner before, so the next card reads the list again (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+  it(`Signing out forgets the name the agent listed for the owner before, so the next card reads the list again (spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it")`, async () => {
     const { named } = await namesAfterOwnerChange("approval-signed-out", async (world, alpha, agent) => {
       world.calendar.summary = undefined;
       await reopenSignedOut(world, alpha, agent);
@@ -1556,7 +1556,7 @@ describe("on a phone", () => {
     expect(named).toEqual([true, false, false]);
   });
 
-  it("A card names the calendar the agent lists now, never one a Google account that went away listed before (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+  it(`A card names the calendar the agent lists now, never one a Google account that went away listed before (spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it")`, async () => {
     const { named } = await namesAfterOwnerChange("approval-account-gone", async (world, alpha, agent) => {
       world.calendar.summary = undefined;
       world.calendar.feedState = "unavailable";
@@ -1597,17 +1597,17 @@ describe("on a phone", () => {
     });
   }
 
-  it("A read of the agent's list begun before the owner signed out proposes nothing of that owner's request, and the next card shows whole (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", async () => {
+  it(`A read of the agent's list begun before the owner signed out proposes nothing of that owner's request, and the next card shows whole (spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars")`, async () => {
     const { named, writes } = await heldAcrossSignOut("calendars");
     expect([...named, askedCard().includes("lens check"), writes]).toEqual([true, false, false, false, []]);
   });
 
-  it("An answer of the agent's approvals list read for the owner before a sign-out is refused, so that owner's request never shows signed out (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\")", async () => {
+  it(`An answer of the agent's approvals list read for the owner before a sign-out is refused, so that owner's request never shows signed out (spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars")`, async () => {
     const { named, writes } = await heldAcrossSignOut("approvals");
     expect([...named, askedCard().includes("lens check"), writes]).toEqual([true, false, false, false, []]);
   });
 
-  it("Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, \"A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars\"; spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+  it(`Signed out, a card whose read of the agent's list fails names no calendar the owner before was shown (spec/app/calendar/index.md, "A changed owner clears the agent's rows, closes the open event and the Calendars sheet, and takes that owner's hidden calendars"; spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it")`, async () => {
     const { named, listed, writes } = await namesAfterOwnerChange("approval-signed-out-unlisted", async (world, alpha, agent) => {
       world.calendar.calendarsDown = true;
       await reopenSignedOut(world, alpha, agent);
@@ -1675,7 +1675,7 @@ describe("on a phone", () => {
 
   const standup = { source: { calendarId: "eliza-calendar/primary" }, eventId: "ev-standup", expectedVersion: "1" };
 
-  it("A read of the list that comes back after its card was declined never makes the next card approvable (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/agent.md, \"A card that leaves out a field its change would set can be declined, never approved\")", async () => {
+  it(`A read of the list that comes back after its card was declined never makes the next card approvable (spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "A card that leaves out a field its change would set can be declined, never approved")`, async () => {
     const { world, card, first } = await lateListRead((at) => {
       const a = at.calendar.approvals.find((one) => one.id === "approval-a");
       if (a) a.revision = "r2";
@@ -1684,7 +1684,7 @@ describe("on a phone", () => {
       .toEqual([true, false, false, false, true, true, ["reject approval-a"]]);
   });
 
-  it("A read of the list that comes back after its card was declined never voids the next card, when the first card's event moved in Google (spec/app/calendar/agent.md, \"The agent proposes one change at a time, for the revision of the event it selected, and the card shows it\"; spec/app/calendar/agent.md, \"When the event changes in Google, the card waiting for the owner no longer counts\")", async () => {
+  it(`A read of the list that comes back after its card was declined never voids the next card, when the first card's event moved in Google (spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts")`, async () => {
     const { world, card, first } = await lateListRead((at) => {
       const lunch = at.calendar.events.find((one) => one.id === "ev-team-lunch");
       if (lunch) lunch.metadata = { ...lunch.metadata, etag: "2" };
