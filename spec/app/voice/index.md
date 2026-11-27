@@ -375,13 +375,28 @@ Mute pressed within that gap shuts the microphone at once, and the words
 already heard are still sent when the gap ends, as the Sunday demo build's
 voice session closed the capture on Mute and then still sent the utterance
 waiting on its long gap (v119, .eliza/client-features/packages/voice/src/
-voice-assistant-session.ts:596-611). Stop, or the relay's capture ending,
+voice-assistant-session.ts:596-611). Mute pressed while the owner is still
+speaking keeps what they said up to then: the relay's final words for it
+still arrive as the microphone shuts, and are sent once the gap after them
+ends, as that session's Mute finalized the speech up to then and sent it
+(voice-assistant-session.ts:593-611). Unmute pressed within the gap opens
+the microphone again and keeps those words and their gap: speech that
+starts on the reopened microphone joins them, and they are sent once, when
+the gap ends, as that session kept the utterance and its timer across the
+capture Unmute opened (voice-assistant-session.ts:612-622 and 722-735). A
+gap that ends while the reopened microphone is still closing ends the turn
+as it closes, and one that ends while it is still opening ends the turn as
+soon as it is open. Stop, or the relay's capture ending,
 within the gap sends nothing, as that session dropped an utterance not yet
 sent (voice-assistant-session.ts:574-575 and 786-797).
 
 ```quint
 pure def canTurnEnded(v: Voice, session: int): bool =
-  v.phase == Listening and v.heard and session == v.session and (v.mic == On or (v.muted and v.network))
+  v.phase == Listening and v.heard and session == v.session
+    and (v.mic == On or (v.network and (v.muted or v.mic == Closing)))
+
+pure def turnEndWaits(v: Voice, session: int): bool =
+  v.phase == Listening and v.heard and session == v.session and v.network and not(v.muted) and v.mic == Opening
 
 pure def turnEnded(v: Voice, session: int): Change =
   if (v.mic == On)
@@ -409,6 +424,17 @@ pure def stepATurnIsSentOnlyOnceTheMicrophoneHasClosed(before: Voice, via: str, 
         and x.session == before.session and x.turn == before.turn and after.sent == before.turn
     | _ => true
   })
+
+pure def lawAGapThatEndsWhileTheMicrophoneOpensEndsTheTurnOnceItIsOpen(session: int): bool =
+  val reopening = { ...initial, phase: Listening, session: session, turn: 1, heard: true, network: true, mic: Opening }
+  turnEndWaits(reopening, session) and not(canTurnEnded(reopening, session))
+    and canTurnEnded(micOpened(reopening, session).state, session)
+
+pure def lawAGapThatEndsWhileTheMicrophoneClosesEndsTheTurnAsItCloses(session: int): bool =
+  val closing = { ...initial, phase: Listening, session: session, turn: 1, heard: true, network: true, mic: Closing }
+  val ended = turnEnded(closing, session).state
+  canTurnEnded(closing, session) and ended.phase == Transcribing
+    and micClosed(ended, session).out == List(Send({ session: session, turn: 1, network: true }))
 ```
 
 ### What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it
