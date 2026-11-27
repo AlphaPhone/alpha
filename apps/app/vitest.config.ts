@@ -12,7 +12,10 @@ const eliza = new RegExp(`^${fs.realpathSync.native(path.join(import.meta.dirnam
 /**
  * The journeys over eliza's real agent and cloud ask the run's setup for them (@repo/eliza-harness/owned). eliza's clients are
  * linked from their own checkout: as in the page (vite.config.ts), they run on this package's one copy of Effect and
- * of Capacitor, so that a schema or an error of theirs is one Alpha's code can read.
+ * of Capacitor, so that a schema or an error of theirs is one Alpha's code can read. Chromium's page connects only once
+ * Vite's first dependency optimization has scanned and bundled every browser journey's imports, which compiles the
+ * project's `.vibe` sources once; on a cold cache and a busy CI runner that takes over Vitest's minute (72 s in run
+ * 45913123689), so the browser journeys wait up to three minutes for it.
  */
 export default defineConfig(async (env) => mergeConfig(typeof base === "function" ? await base(env) : await base, {
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
@@ -21,5 +24,6 @@ export default defineConfig(async (env) => mergeConfig(typeof base === "function
     globalSetup: [fileURLToPath(import.meta.resolve("@repo/eliza-harness"))],
     setupFiles: ["./test/fakes/system-startup.ts"],
     server: { deps: { inline: [eliza] } },
+    browser: { connectTimeout: 180_000 },
   },
 }));

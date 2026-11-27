@@ -48,8 +48,8 @@ function phoneRow(event: AndroidCalendarEvent): Read {
 /** An event of the agent's calendar feed, as eliza's `EventRecord` of `@elizaos/plugin-calendar-client` reads it. */
 type FeedEvent = typeof EventRecord.Type
 
-/** The version a write names, as eliza's `eventVersion` of `@elizaos/plugin-calendar` reads it: the provider's etag, or the change time. */
-function versionOf(event: FeedEvent): string {
+/** The version a write names and a deletion's receipt compares, as eliza's `eventVersion` of `@elizaos/plugin-calendar` reads it: the provider's etag, or the change time. */
+export function versionOf(event: FeedEvent): string {
   const etag = typeof event.metadata["etag"] === "string" ? event.metadata["etag"] : ""
   return etag !== "" ? etag : event.updatedAt
 }

@@ -16,6 +16,20 @@ import { demo } from "../src/demo.vibe";
 
 const closing: (() => Promise<void>)[] = [];
 
+/** A clock that reads the time `now` gives and sleeps as `sleep` does. */
+function clockAt(now: () => number, sleep: Clock.Clock["sleep"]): Clock.Clock {
+  const nanos = () => BigInt(now()) * 1_000_000n;
+  return {
+    currentTimeMillisUnsafe: now,
+    currentTimeMillis: Effect.sync(now),
+    currentTimeNanosUnsafe: nanos,
+    currentTimeNanos: Effect.sync(nanos),
+    monotonicTimeNanosUnsafe: nanos,
+    monotonicTimeNanos: Effect.sync(nanos),
+    sleep,
+  };
+}
+
 describe(`Read Alpha Cloud policies (spec/site/index.md, "Story: Read Alpha Cloud's policies")`, () => {
   it("reads each document's full text and links at its own address, without JavaScript", () => {
     for (const { path, document: approved, links: external } of [
@@ -194,25 +208,17 @@ describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through
     let now = 0;
     let wakes = 0;
     const stall = Deferred.makeUnsafe<void>();
-    const stalledClock: Clock.Clock = {
-      currentTimeMillisUnsafe: () => now,
-      currentTimeMillis: Effect.sync(() => now),
-      currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
-      currentTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
-      monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
-      monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
-      sleep: () => Effect.suspend(() => {
-        wakes += 1;
-        if (wakes === 1) {
-          now = 1_500;
-          return Effect.yieldNow;
-        }
-        if (wakes === 2) {
-          return Effect.andThen(Deferred.await(stall), Effect.sync(() => { now = 100_000; }));
-        }
-        return Effect.never;
-      }),
-    };
+    const stalledClock = clockAt(() => now, () => Effect.suspend(() => {
+      wakes += 1;
+      if (wakes === 1) {
+        now = 1_500;
+        return Effect.yieldNow;
+      }
+      if (wakes === 2) {
+        return Effect.andThen(Deferred.await(stall), Effect.sync(() => { now = 100_000; }));
+      }
+      return Effect.never;
+    }));
     const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.succeed(Clock.Clock, stalledClock)));
     closing.push(() => runtime.dispose());
     const [paced, stalled] = await runtime.runPromise(Effect.gen(function* () {
@@ -229,20 +235,12 @@ describe('Walk through what Alpha does (spec/site/index.md, "Story: Walk through
   it('keeps advancing when a timer wakes 1ms before due instead of freezing the walkthrough (spec/site/index.md, "A beat moves on once its time has come, and a scene\'s last beat leads to the next scene, the spoken note back to Home")', async () => {
     let now = 1_000;
     let wakes = 0;
-    const earlyClock: Clock.Clock = {
-      currentTimeMillisUnsafe: () => now,
-      currentTimeMillis: Effect.sync(() => now),
-      currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
-      currentTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
-      monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
-      monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
-      sleep: (duration) => Effect.suspend(() => {
-        const ms = Duration.toMillis(duration);
-        wakes += 1;
-        now += wakes === 1 ? Math.max(0, ms - 1) : ms;
-        return Effect.yieldNow;
-      }),
-    };
+    const earlyClock = clockAt(() => now, (duration) => Effect.suspend(() => {
+      const ms = Duration.toMillis(duration);
+      wakes += 1;
+      now += wakes === 1 ? Math.max(0, ms - 1) : ms;
+      return Effect.yieldNow;
+    }));
     const runtime = ManagedRuntime.make(Layer.provideMerge(demo, Layer.succeed(Clock.Clock, earlyClock)));
     closing.push(() => runtime.dispose());
     await runtime.runPromise(Effect.void);
