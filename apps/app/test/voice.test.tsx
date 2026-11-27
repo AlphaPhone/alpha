@@ -657,11 +657,9 @@ describe("Voice Bug 1 & Bug 3 journeys", () => {
   it("keeps voice and mic open across agent navigation to an app, to Home, and to Home again, keeping a raised Sheet where the view is in sight and lowering it or Full where they would hide it, while owner navigation stops voice", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const runtime = await startListening(world);
-    let told = 0;
-    await until(runtime, Conversation, (s) => { told = s.context.revision; return s.observing; });
+    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored": the turn is sent once this screen is told to an agent that takes it; raising the sheet tells nothing new, so its prepared view opens on that same screen.
+    await until(runtime, Conversation, (s) => s.observing && s.context.revision > 0);
     await sendShell(runtime, { type: "raise", detent: "Sheet" });
-    // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included": the turn is sent once the screen it tells of shows the raised sheet, so its prepared view opens on that screen.
-    await until(runtime, Conversation, (s) => s.context.revision > told);
     const shows = (viewId: string) => (metadata: unknown) => [prepared(String((metadata as { viewClientId?: unknown }).viewClientId), viewId, false)];
 
     world.ask.nextReplyChunks = ["Opening Calendar."];
