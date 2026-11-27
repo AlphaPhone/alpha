@@ -141,9 +141,7 @@
           "status": "Loaded",
           "ticket": 1
         },
-        "latched": [
-          41
-        ],
+        "latched": [],
         "unreadable": false
       }
     }
