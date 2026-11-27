@@ -1343,7 +1343,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     await until(first.alpha, first.runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
     await press("Send");
     await until(first.alpha, first.runtime, Composer, (s) => s.away === "Asked");
-    await drawn(() => vi.waitFor(() => expect(Object.keys(localStorage).some((key) => key.startsWith("alpha/assistant/slot-v2/") && key.endsWith(".sent"))).toBe(true)));
+    await drawn(() => vi.waitFor(() => expect([...world.ask.said, ...world.ask.unheard]).toEqual([text])));
     expect(kept(world, dinner(world))).toMatchObject({ text, sending: true });
     await first.close();
   };
