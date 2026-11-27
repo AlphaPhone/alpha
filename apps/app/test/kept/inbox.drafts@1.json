@@ -1,0 +1,398 @@
+{
+  "key": "alpha/app/inbox/drafts@1",
+  "spec": "spec/app/inbox/drafts.md",
+  "shape": "163af6fb34531340",
+  "state": {
+    "session": 0,
+    "open": false,
+    "letter": {
+      "id": 0,
+      "session": 0,
+      "kind": "Fresh",
+      "account": 0,
+      "toReplyTo": false,
+      "recipients": 0,
+      "invalid": 0,
+      "attachments": 0,
+      "mib": 0,
+      "textOnly": false,
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      },
+      "revision": 0,
+      "gmail": 0,
+      "unsure": false,
+      "copyAttempt": 0,
+      "verified": 0,
+      "sending": 0,
+      "use": "ToSend",
+      "sent": 0,
+      "doubt": {
+        "attempt": 0,
+        "revision": 0
+      }
+    },
+    "made": 0,
+    "kept": {
+      "id": 0,
+      "session": 0,
+      "kind": "Fresh",
+      "account": 0,
+      "toReplyTo": false,
+      "recipients": 0,
+      "invalid": 0,
+      "attachments": 0,
+      "mib": 0,
+      "textOnly": false,
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      },
+      "revision": 0,
+      "gmail": 0,
+      "unsure": false,
+      "copyAttempt": 0,
+      "verified": 0,
+      "sending": 0,
+      "use": "ToSend",
+      "sent": 0,
+      "doubt": {
+        "attempt": 0,
+        "revision": 0
+      }
+    },
+    "copy": {
+      "id": 0,
+      "session": 0,
+      "kind": "Fresh",
+      "account": 0,
+      "toReplyTo": false,
+      "recipients": 0,
+      "invalid": 0,
+      "attachments": 0,
+      "mib": 0,
+      "textOnly": false,
+      "draft": {
+        "sync": "Kept",
+        "edits": 0,
+        "carried": 0,
+        "base": 0
+      },
+      "revision": 0,
+      "gmail": 0,
+      "unsure": false,
+      "copyAttempt": 0,
+      "verified": 0,
+      "sending": 0,
+      "use": "ToSend",
+      "sent": 0,
+      "doubt": {
+        "attempt": 0,
+        "revision": 0
+      }
+    },
+    "stored": false,
+    "write": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "pending": false,
+    "burst": 0,
+    "due": 0,
+    "clock": 0,
+    "unkept": false,
+    "full": false,
+    "leaving": false,
+    "load": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "lookup": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "check": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "checking": 0,
+    "checked": [],
+    "shelf": {
+      "shelved": [],
+      "letters": {}
+    },
+    "shelfSelection": {
+      "account": 0,
+      "picks": [],
+      "reviewing": false
+    },
+    "discarding": false,
+    "notice": "Clear"
+  },
+  "earlier": [
+    {
+      "from": "af49288978",
+      "until": "cfc39fe906",
+      "state": {
+        "session": 0,
+        "open": false,
+        "letter": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "made": 0,
+        "kept": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "copy": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "stored": false,
+        "write": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "pending": false,
+        "burst": 0,
+        "due": 0,
+        "clock": 0,
+        "unkept": false,
+        "full": false,
+        "leaving": false,
+        "load": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "lookup": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "check": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "checking": 0,
+        "checked": [],
+        "shelf": {
+          "shelved": [],
+          "letters": {}
+        },
+        "discarding": false,
+        "notice": "Clear"
+      }
+    },
+    {
+      "from": "cfc39fe906",
+      "until": "dd68f5bd83",
+      "state": {
+        "session": 0,
+        "open": false,
+        "letter": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "copyAttempt": 0,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "made": 0,
+        "kept": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "copyAttempt": 0,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "copy": {
+          "id": 0,
+          "session": 0,
+          "kind": "Fresh",
+          "account": 0,
+          "toReplyTo": false,
+          "recipients": 0,
+          "invalid": 0,
+          "attachments": 0,
+          "mib": 0,
+          "textOnly": false,
+          "draft": {
+            "sync": "Kept",
+            "edits": 0,
+            "carried": 0,
+            "base": 0
+          },
+          "revision": 0,
+          "gmail": 0,
+          "unsure": false,
+          "copyAttempt": 0,
+          "verified": 0,
+          "sending": 0,
+          "use": "ToSend",
+          "sent": 0,
+          "doubt": {
+            "attempt": 0,
+            "revision": 0
+          }
+        },
+        "stored": false,
+        "write": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "pending": false,
+        "burst": 0,
+        "due": 0,
+        "clock": 0,
+        "unkept": false,
+        "full": false,
+        "leaving": false,
+        "load": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "lookup": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "check": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "checking": 0,
+        "checked": [],
+        "shelf": {
+          "shelved": [],
+          "letters": {}
+        },
+        "discarding": false,
+        "notice": "Clear"
+      }
+    }
+  ]
+}

@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { CloudError, isCredentialInvalid } from "@elizaos/cloud";
-import { Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
+import { type Context, Effect, Exit, Fiber, Layer, Option, Redacted, Stream } from "effect";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { at } from "../src/areas.ts";
+import { at, mounts } from "../src/areas.ts";
 import { adopt, earlierSlot, keptAt, vaulted } from "../src/platform/adoption.vibe";
 import { Agent, type Reached } from "../src/platform/agent.vibe";
 import { plugin as capacitorPlugin } from "../src/platform/capacitor.ts";
@@ -22,8 +25,8 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { listenerCount } from "./fakes/phone.ts";
 import type { Platform } from "../src/platform/platform.vibe";
-import { area } from "../src/runtime/area.tsx";
-import { button, closeAll, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
+import { type Alpha, area } from "../src/runtime/area.tsx";
+import { button, closeAll, drawn, hardware, later, only, open, press, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { publish } from "./fakes/platform.ts";
 import { scene } from "./fakes/scene.ts";
@@ -290,6 +293,118 @@ it("Keep my phone's state across restarts: a kept value Alpha can no longer read
   await reopened(tenth);
   expect([localStorage.getItem(kept), waiting.length, Object.fromEntries(waiting)[`${kept}.unreadable`], Boolean(button("Notes"))]).toEqual([tenth, 9, "held-0", true]);
 });
+
+/**
+ * One durable record (`reacting(…, { keep })`) and every shape it was kept in on develop: `state` is what today's build
+ * writes under `key`, `shape` the fingerprint of today's decode, `kept` the paths of the owner's data a restart keeps,
+ * and `earlier` each earlier shape, as a build of that time wrote it.
+ */
+interface KeptRecord {
+  readonly key: string;
+  readonly shape: string;
+  readonly state: Readonly<Record<string, unknown>>;
+  readonly kept?: readonly string[];
+  readonly memoryOnly?: readonly string[];
+  readonly earlier?: readonly { readonly from: string; readonly until: string; readonly state: Readonly<Record<string, unknown>> }[];
+}
+/** A runtime of Alpha's, as far as reading a machine needs it. */
+interface Running {
+  runPromise<A, E>(effect: Effect.Effect<A, E>): Promise<A>;
+}
+interface KeptMachine {
+  readonly Machine: Context.Key<unknown, { get(): Effect.Effect<unknown> }>;
+  readonly initial: Readonly<Record<string, unknown>>;
+  readonly parseState: (input: unknown) => unknown;
+}
+const keptRecords = Object.values(import.meta.glob<KeptRecord>("./kept/*.json", { eager: true, import: "default" }));
+const generated = import.meta.glob<KeptMachine>("../gen/*.effect.vibe");
+const generatedName = (key: string) => key.replace(/^alpha\//, "").replace(/@\d+$/, "").replace(/\/index$/, "").replaceAll("/", "__");
+const machineOf = (key: string) => {
+  const load = generated[`../gen/${generatedName(key)}.effect.vibe`];
+  if (!load) throw new Error(`no generated machine for ${key}`);
+  return load();
+};
+
+/** The fingerprint of what decides whether a kept value is a state: the generated `parseState`, `inv` and each `always` rule. */
+function shapeOf(key: string) {
+  const lines = fs.readFileSync(path.join(import.meta.dirname, "../gen", `${generatedName(key)}.ts`), "utf8").split("\n");
+  const checked = lines.flatMap((line, at) => (/^export function (parseState|inv|always\w*)\(/.test(line) ? [lines.slice(at, lines.indexOf("}", at) + 1).join("")] : []));
+  return createHash("sha256").update(checked.join("").replace(/\s+/g, "")).digest("hex").slice(0, 16);
+}
+
+const valueAt = (value: unknown, dotted: string) => dotted.split(".").reduce<unknown>((one, name) => (typeof one === "object" && one !== null ? (one as Record<string, unknown>)[name] : undefined), value);
+
+/** Alpha opened over `stored`, every screen loaded and every area built: each key a durable machine keeps its attempts beside, what the store holds after, and each record's state. */
+async function keptOver(stored: ReadonlyMap<string, unknown>) {
+  await closeAll();
+  for (const [key, value] of stored) localStorage.setItem(key, JSON.stringify(value));
+  const { alpha } = await open({ ...scene(), phone: true });
+  const screens = await Promise.all(mounts.map((mount) => mount.load()));
+  const runtimes: Running[] = [alpha.runtime, ...screens.flatMap(({ default: screen }) => {
+    const built = (screen as { runtime?: (opened: Alpha) => Running }).runtime;
+    return built ? [built(alpha)] : [];
+  })];
+  await drawn(() => Promise.all(runtimes.map((runtime) => runtime.runPromise(Effect.void))));
+  const machines = await Promise.all(keptRecords.map(async ({ key }) => [key, (await machineOf(key)).Machine] as const));
+  const states = async () => new Map(await Promise.all(machines.map(async ([key, Machine]) => {
+    for (const runtime of runtimes) {
+      const found = await runtime.runPromise(Effect.serviceOption(Machine));
+      if (Option.isSome(found)) return [key, await runtime.runPromise(found.value.get())] as const;
+    }
+    return [key, undefined] as const;
+  })));
+  let settled = await states();
+  for (let turn = 0, steady = 0; turn < 50 && steady < 3; turn++) {
+    await later(alpha, 0);
+    const next = await states();
+    steady = JSON.stringify([...next]) === JSON.stringify([...settled]) ? steady + 1 : 0;
+    settled = next;
+  }
+  const held = new Map(Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index) ?? "").map((key) => [key, localStorage.getItem(key)]));
+  const durable = new Set([...held.keys()].filter((key) => key.endsWith(".epoch")).map((key) => key.slice(0, -".epoch".length)));
+  return { durable, held, states: settled };
+}
+
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+it("Keep my phone's state across restarts: every shape a durable record was ever kept in is read again with the owner's data, and a value of a wrong kind is still set aside (spec/app/platform/index.md, \"A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it\")", async () => {
+  const problems: string[] = [];
+  for (const record of keptRecords) {
+    const { parseState, initial } = await machineOf(record.key);
+    const shape = shapeOf(record.key);
+    if (shape !== record.shape) problems.push(`${record.key}: its kept shape changed (now ${shape}, test/kept has ${record.shape}). Move its "state" into "earlier", bring that earlier shape forward in the record's migration, then write today's "state" and "shape"`);
+    if (parseState({ ...Object.fromEntries((record.memoryOnly ?? []).map((name) => [name, initial[name]])), ...record.state }) === undefined) problems.push(`${record.key}: the "state" in test/kept is not today's shape`);
+  }
+
+  const today = await keptOver(new Map(keptRecords.map(({ key, state }) => [key, state])));
+  const recorded = new Set(keptRecords.map(({ key }) => key));
+  for (const key of today.durable) if (!recorded.has(key)) problems.push(`${key}: a durable record with no file in test/kept`);
+  for (const key of recorded) if (!today.durable.has(key)) problems.push(`${key}: test/kept has a record Alpha no longer keeps`);
+  for (const key of today.held.keys()) if (key.includes(".unreadable")) problems.push(`${key}: today's shape was set aside`);
+  for (const { key, state, kept = [] } of keptRecords) {
+    for (const name of kept) if (JSON.stringify(valueAt(today.states.get(key), name)) !== JSON.stringify(valueAt(state, name))) problems.push(`${key}: ${name} was not kept across a restart`);
+  }
+
+  const rounds = Math.max(...keptRecords.map(({ earlier = [] }) => earlier.length));
+  for (let round = 0; round < rounds; round++) {
+    const earlier = keptRecords.flatMap(({ key, state, kept = [], earlier: shapes = [] }) => (shapes[round] ? [{ key, today: state, kept, ...shapes[round] }] : []));
+    const restarted = await keptOver(new Map(keptRecords.map(({ key, state, earlier: shapes = [] }) => [key, shapes[round]?.state ?? state])));
+    for (const one of earlier) {
+      const shape = `${one.key} as kept from ${one.from} until ${one.until}`;
+      if (restarted.held.has(`${one.key}.unreadable`)) problems.push(`${shape}: set aside`);
+      else if (JSON.stringify(restarted.states.get(one.key)) !== JSON.stringify(today.states.get(one.key))) problems.push(`${shape}: read as ${JSON.stringify(restarted.states.get(one.key))}, today's shape as ${JSON.stringify(today.states.get(one.key))}`);
+      for (const name of one.kept) if (JSON.stringify(valueAt(restarted.states.get(one.key), name)) !== JSON.stringify(valueAt(one.today, name))) problems.push(`${shape}: ${name} was not kept`);
+    }
+  }
+
+  const wrong = new Map(keptRecords.map(({ key, state }) => {
+    const [name, value] = Object.entries(state)[0] ?? [];
+    return [key, name === undefined ? state : { ...state, [name]: typeof value === "string" ? 0 : "of a wrong kind" }];
+  }));
+  const refused = await keptOver(wrong);
+  for (const [key, value] of wrong) if (refused.held.get(`${key}.unreadable`) !== JSON.stringify(value)) problems.push(`${key}: a value of a wrong kind was not set aside as it was`);
+
+  expect(problems).toEqual([]);
+}, 600_000);
 
 // spec/app/platform/index.md, "Story: Ship only what this build allows"
 it("Ship only what this build allows: test mocks are admitted only when ELIZA_DEV_ALLOW_TEST_MOCKS is 1 (spec/app/platform/index.md, \"Story: Ship only what this build allows\")", () => {

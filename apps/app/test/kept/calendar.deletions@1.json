@@ -1,0 +1,50 @@
+{
+  "key": "alpha/app/calendar/deletions@1",
+  "spec": "spec/app/calendar/deletions.md",
+  "shape": "9e9047e6b3a47e8f",
+  "state": {
+    "owner": 1,
+    "waiting": 0,
+    "reach": "OneEvent",
+    "revision": 3,
+    "undo": {
+      "holding": "Free",
+      "until": 0
+    },
+    "notice": false,
+    "scale": 100,
+    "paused": false,
+    "sending": 0,
+    "sendingReach": "OneEvent",
+    "hiding": 0,
+    "hidingReach": "OneEvent",
+    "dropped": 0,
+    "failed": 0
+  },
+  "kept": [
+    "owner"
+  ],
+  "earlier": [
+    {
+      "from": "0df1b3a3a3",
+      "until": "cd12a00869 (#1827)",
+      "state": {
+        "owner": 1,
+        "waiting": 0,
+        "reach": "OneEvent",
+        "revision": 3,
+        "undo": {
+          "holding": "Free",
+          "until": 0
+        },
+        "notice": false,
+        "scale": 100,
+        "paused": false,
+        "sending": 0,
+        "hiding": 0,
+        "dropped": 0,
+        "failed": 0
+      }
+    }
+  ]
+}

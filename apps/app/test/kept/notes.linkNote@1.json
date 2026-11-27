@@ -1,0 +1,27 @@
+{
+  "key": "alpha/app/notes/linkNote@1",
+  "spec": "spec/app/notes/linkNote.md",
+  "shape": "c7350ae861a9e2b5",
+  "state": {
+    "owner": 0,
+    "note": 0,
+    "revision": 0,
+    "link": {
+      "tie": "NoLink",
+      "id": 0,
+      "mark": 0
+    },
+    "showing": false,
+    "changed": false,
+    "review": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "removal": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "removing": 0
+  }
+}

@@ -63,8 +63,11 @@ plan-action cards answer the latest reply only. A proposal and a calendar
 change are decided elsewhere. A phone step's proposal is drawn as v119
 drew it: its title, what it does and its button, then a last row "Keep
 things as they are." with Decline at its end. How the owner's decision on
-it ended shows under it as v119's result chip, a quiet line with an Alpha
-blue bar at its start, which is never spoken.
+it ended shows under it as v119's result chip, drawn as one of Alpha's
+lines: Alpha's mark, then a quiet chip with an Alpha blue bar at its start
+that fills the rest of the row, in the column of Alpha's reply text, which
+is never spoken (v119 45f6bed30 agent-adapter.ts:2840, template.html:4534,
+phone.css:442-444).
 
 ```quint
 pure def opens(kind: Kind): bool =

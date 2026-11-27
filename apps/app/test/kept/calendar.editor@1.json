@@ -1,0 +1,43 @@
+{
+  "key": "alpha/app/calendar/editor@1",
+  "spec": "spec/app/calendar/editor.md",
+  "shape": "bdd3af9ee5bb0e67",
+  "state": {
+    "owner": 0,
+    "form": "NoForm",
+    "shown": false,
+    "target": 0,
+    "day": 0,
+    "revision": 0,
+    "titled": false,
+    "allDay": false,
+    "start": 0,
+    "end": 1,
+    "repeats": false,
+    "scope": "Unchosen",
+    "extras": false,
+    "draft": {
+      "sync": "Kept",
+      "edits": 0,
+      "carried": 0,
+      "base": 0
+    },
+    "kept": false,
+    "banner": "NoBanner",
+    "confirming": "NoConfirm",
+    "write": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "kind": "Create",
+    "writing": 0,
+    "filed": false,
+    "unknownCreate": false,
+    "separate": false,
+    "receipts": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "latched": []
+  }
+}

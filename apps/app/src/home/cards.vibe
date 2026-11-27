@@ -11,7 +11,7 @@ import { Agent } from "../platform/index.vibe"
 import { Device, native, registered } from "../platform/index.vibe"
 import { ask } from "../platform/index.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
-import { type Job, answer, contained, due, following, hearing, reacting, run, started, untimed, together } from "../runtime/index.vibe"
+import { type Job, answer, contained, due, filledStore, following, hearing, reacting, run, started, untimed, together, withFields } from "../runtime/index.vibe"
 import { createShelf } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { homeInput } from "./home.vibe"
@@ -306,9 +306,16 @@ const advancing = started(Effect.scoped(effect {
   })))
 }), "advancing the agenda card as events end")
 
+// spec/app/platform/index.md, "A state kept in a shape an earlier build wrote is read in today's shape, with what the owner kept in it"
+/** Cards kept before each remembered when it was asked: read as a fresh card is. */
+function storedCards(key: string, start = Cards.initial) {
+  const asked = { calendar: { asked: Cards.initial.calendar.asked }, agent: { asked: Cards.initial.agent.asked } }
+  return Layer.provide(Cards.stored(key, start), filledStore(key, (kept) => ({ ...kept, calendar: withFields(kept.calendar, asked.calendar), agent: withFields(kept.agent, asked.agent) }), Cards.parseState))
+}
+
 /** The cards, kept across restarts for their tickets: looked at when Home shows and when Alpha comes back to the front, and read again at each of the owner's midnights. */
 export const cards = together(
-  reacting(Cards, {
+  reacting({ ...Cards, stored: storedCards }, {
     keep: 1,
     open: Effect.map(restarted(), (event) => [event] as const),
     carry: (fx) => carry(fx, current),

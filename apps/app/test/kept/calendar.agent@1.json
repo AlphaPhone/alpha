@@ -1,0 +1,37 @@
+{
+  "key": "alpha/app/calendar/agent@1",
+  "spec": "spec/app/calendar/agent.md",
+  "shape": "865aab989f1d2679",
+  "state": {
+    "feed": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "query": "Events",
+    "stage": "Idle",
+    "change": "Create",
+    "reply": "NoReply",
+    "complete": false,
+    "filing": 0,
+    "id": 0,
+    "series": false,
+    "managed": false,
+    "bound": 0,
+    "revision": 0,
+    "updated": false,
+    "card": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "write": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "check": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "result": "NoResult"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "key": "alpha/app/files/trash@1",
+  "spec": "spec/app/files/trash.md",
+  "shape": "454dca90b51fae79",
+  "state": {
+    "open": false,
+    "allowed": false,
+    "listing": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "entries": [],
+    "attempt": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "job": {
+      "kind": "Binning",
+      "items": [],
+      "entries": [],
+      "approval": 0
+    },
+    "done": [],
+    "waiting": [],
+    "erasing": {
+      "showing": false,
+      "revision": 0,
+      "shown": 0
+    },
+    "doomed": [],
+    "binned": [],
+    "undo": {
+      "holding": "Free",
+      "until": 0
+    },
+    "marked": [],
+    "details": 0
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "b7b4c1cd94",
+      "state": {
+        "open": false,
+        "allowed": false,
+        "listing": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "entries": [],
+        "attempt": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "job": {
+          "kind": "Binning",
+          "items": [],
+          "entries": [],
+          "approval": 0
+        },
+        "done": [],
+        "waiting": [],
+        "erasing": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "doomed": [],
+        "binned": [],
+        "undo": {
+          "holding": "Free",
+          "until": 0
+        }
+      }
+    },
+    {
+      "from": "b7b4c1cd94",
+      "until": "173bd6f26b",
+      "state": {
+        "open": false,
+        "allowed": false,
+        "listing": {
+          "status": "Idle",
+          "ticket": 0
+        },
+        "entries": [],
+        "attempt": {
+          "id": 0,
+          "outcome": "Planned"
+        },
+        "job": {
+          "kind": "Binning",
+          "items": [],
+          "entries": [],
+          "approval": 0
+        },
+        "done": [],
+        "waiting": [],
+        "erasing": {
+          "showing": false,
+          "revision": 0,
+          "shown": 0
+        },
+        "doomed": [],
+        "binned": [],
+        "undo": {
+          "holding": "Free",
+          "until": 0
+        },
+        "marked": []
+      }
+    }
+  ]
+}

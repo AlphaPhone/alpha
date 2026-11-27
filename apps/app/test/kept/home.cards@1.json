@@ -1,0 +1,59 @@
+{
+  "key": "alpha/app/home/cards@1",
+  "spec": "spec/app/home/cards.md",
+  "shape": "cac25f1d2c9a6024",
+  "state": {
+    "calendar": {
+      "read": {
+        "status": "Idle",
+        "ticket": 3
+      },
+      "source": "Unanswered",
+      "day": 0,
+      "items": [],
+      "since": 0,
+      "asked": 0
+    },
+    "agent": {
+      "read": {
+        "status": "Idle",
+        "ticket": 2
+      },
+      "source": "Unanswered",
+      "day": 0,
+      "items": [],
+      "since": 0,
+      "asked": 0
+    },
+    "today": 0
+  },
+  "earlier": [
+    {
+      "from": "8e28feb686",
+      "until": "26f8019918 (#1643)",
+      "state": {
+        "calendar": {
+          "read": {
+            "status": "Idle",
+            "ticket": 3
+          },
+          "source": "Unanswered",
+          "day": 0,
+          "items": [],
+          "since": 0
+        },
+        "agent": {
+          "read": {
+            "status": "Idle",
+            "ticket": 2
+          },
+          "source": "Unanswered",
+          "day": 0,
+          "items": [],
+          "since": 0
+        },
+        "today": 0
+      }
+    }
+  ]
+}

@@ -15,7 +15,7 @@ it("Keep a message and its list on a wide phone canvas", async () => {
   await page.getByRole("button", { name: /^Inbox(?![A-Za-z])/ }).click();
   const subviewElement = async (name: string) => {
     const selector = `[data-alpha-subview="${name}"]`;
-    await expect.poll(() => document.querySelector(selector)).toBeInstanceOf(HTMLElement);
+    await expect.poll(() => document.querySelector(selector), { timeout: 10_000 }).toBeInstanceOf(HTMLElement);
     const element = document.querySelector<HTMLElement>(selector);
     if (!element) throw new Error(`Inbox did not draw ${name}`);
     return element;

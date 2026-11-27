@@ -13,6 +13,7 @@ import { type AgentCalendar, readsRequestsAgain, refreshes } from "../../gen/app
 import { Time } from "../runtime/index.vibe"
 import { asked } from "./asked.ts"
 import { readFeed } from "./calendar.vibe"
+import { Calendars } from "./owner.vibe"
 import { type Request, complete, decodeRequest } from "./requests.ts"
 import type { Row } from "./shown.ts"
 import { Requests, Shown } from "./stores.vibe"
@@ -155,6 +156,16 @@ effect function rowsFor(request: Request, cached: ReadonlyArray<Row>): ReadonlyA
   return fetched.value.map((one) => shown.toRow("Google", one))
 }
 
+// spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it"
+/** Read the agent's calendar list for a card whose request names a calendar Calendar holds no summary for, so the card names it whether or not Calendar was opened, as v119 read the sources for each card (45f6bed30 calendar-approval-fields.ts:17). */
+effect function nameSource(request: Request): void!!(Agent | Shown) {
+  const shown = try Shown
+  const own = request.calendarId === "" || request.calendarId === "primary"
+  if ((own ? shown.listedName("") : shown.listedSummary(request.calendarId)) !== "") return
+  const listed = ask(Agent, HttpClientRequest.get("/api/lifeops/calendar/calendars"), Calendars) catch () => undefined
+  if (listed !== undefined) shown.listed(listed.calendars)
+}
+
 // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it"; spec/app/calendar/agent.md, "When the event changes in Google, the card waiting for the owner no longer counts"; spec/app/calendar/agent.md, "A card voided by a change in Google is shown again at the event's new revision, marked updated"
 /** Read the agent's approvals list and tell the card what it holds: the oldest pending Calendar request, a new revision of the one shown, or that it is gone. */
 effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.KeyValueStore | Requests | Shown | Time) {
@@ -179,6 +190,7 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
       try contained(machine.send({ type: "withdraw" }, "Agent"), "withdrawing a request the agent dropped")
       return
     }
+    try nameSource(now)
     const rows = try rowsFor(now, cached)
     const revision = revisionOf(now, rows)
     if (revision > s.revision) try contained(machine.send({ type: "eventChanged", revision }, world), "a change to the request or its event")
@@ -191,6 +203,7 @@ effect function listRequests(): void!!(Agent | Changes.Machine | KeyValueStore.K
   const oldest = pending.findLast((request) => request.id !== declined)
   if (oldest === undefined) return
   try ignore((try KeyValueStore.KeyValueStore).set(shownKey, JSON.stringify(oldest)))
+  try nameSource(oldest)
   const rows = try rowsFor(oldest, cached)
   const id = oldest.change === "Create" ? 0 : shown.number("Google", oldest.eventId)
   const row = rows.find((candidate) => candidate.key === oldest.eventId) ?? shown.find(id)

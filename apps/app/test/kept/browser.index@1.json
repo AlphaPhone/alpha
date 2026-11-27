@@ -1,0 +1,31 @@
+{
+  "key": "alpha/app/browser/index@1",
+  "spec": "spec/app/browser/index.md",
+  "shape": "99a42a88347ad5e6",
+  "state": {
+    "open": [
+      1
+    ],
+    "privates": [],
+    "selected": 1,
+    "issued": 1,
+    "native": [],
+    "kept": [],
+    "restore": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "hydrated": false,
+    "untouched": true,
+    "stale": false,
+    "writing": false,
+    "write": 0,
+    "carried": [],
+    "began": 0,
+    "failures": 0,
+    "retryAt": 0,
+    "erasing": "Kept",
+    "agent": 0,
+    "layer": "Uncovered"
+  }
+}

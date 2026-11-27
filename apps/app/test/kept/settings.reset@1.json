@@ -1,0 +1,48 @@
+{
+  "key": "alpha/app/settings/reset@1",
+  "spec": "spec/app/settings/reset.md",
+  "shape": "31abc1fac422cf6b",
+  "state": {
+    "review": {
+      "read": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "due": 0
+    },
+    "recording": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "pending": false,
+    "mayBeRecorded": false,
+    "tries": 0,
+    "made": 0,
+    "launchTry": false,
+    "stopping": {
+      "read": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "due": 0
+    },
+    "revoking": {
+      "read": {
+        "status": "Idle",
+        "ticket": 0
+      },
+      "due": 0
+    },
+    "revokedIn": 0,
+    "clear": {
+      "id": 0,
+      "outcome": "Planned"
+    },
+    "clearDue": 0,
+    "checking": {
+      "status": "Idle",
+      "ticket": 0
+    },
+    "said": "Quiet"
+  }
+}

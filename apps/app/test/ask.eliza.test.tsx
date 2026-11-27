@@ -620,6 +620,10 @@ it('Filter Files from Home and open the named file with the resident agent (spec
   // spec/app/files/index.md, "An exact Files request from another screen may open Files once after the typed reply finishes": Files draws its preview only while Ask Alpha is not raised over it.
   await hardware("back");
   await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Bar");
-  await waitForScreen(() => expect(document.querySelector('[role="dialog"][aria-label="Preview"] pre')?.textContent).toBe(contents));
+  await waitForScreen(() => expect(
+    [...document.querySelectorAll('[role="dialog"][aria-label="Preview"] ol li')]
+      .map((line) => line.lastElementChild?.textContent)
+      .join("\n"),
+  ).toBe(contents));
   expect(receipts().map(({ evidence }) => evidence.result)).toEqual([undefined, undefined]);
 }, 300_000);
