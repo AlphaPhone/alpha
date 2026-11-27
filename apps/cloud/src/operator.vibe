@@ -1,5 +1,5 @@
 // spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment"; spec/cloud/provisioning.md, "Story: Bring a deployment up, one confirmed step at a time"
-import { parseProfile, type CloudEnvironment, type CloudProfile } from "@elizaos/cloud"
+import { parseProfile, type CloudEnvironment, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud"
 import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import type { Hosts } from "../gen/cloud.effect.vibe"
@@ -217,9 +217,45 @@ effect function readJson(file: string): unknown!OperatorFailed!FileSystem.FileSy
 /** The profile disagrees with Alpha Cloud's hosts or another rule of its deployment. */
 export error CandidateRefused { problems: ReadonlyArray<string>, message: string }
 
+const priorCartesiaTemplateRealtimeUrl = "wss://api.cartesia.ai/stt/websocket"
+const canonicalCartesiaRealtimeOrigin = "wss://api.cartesia.ai"
+
+/**
+ * Formats a `parseProfile` refusal using field paths or static deployment-rule text alone,
+ * never echoing raw profile values.
+ */
+function profileParseMessage(file: string, problem: string): string {
+  if (problem.startsWith("the profile breaks a deployment rule:")) return `${file}: ${problem}`
+  const paths = [...problem.matchAll(/at (\[[^\n]+\])/g)].map((match) => match[1])
+  if (paths.length > 0) return `${file}: invalid profile field ${paths.join(", ")}`
+  return `${file}: profile schema validation failed`
+}
+
+/**
+ * Normalizes the earlier `candidate.example.json` Cartesia speech `realtimeUrl`
+ * (`wss://api.cartesia.ai/stt/websocket`) to its WebSocket origin (`wss://api.cartesia.ai`)
+ * in memory for staging alone, across both environment blocks validated by
+ * `hostedProfileProblems`. Production and every other URL pass through unchanged.
+ */
+export function stagingCompatibleProfile(profile: CloudProfile, environment?: CloudEnvironment): CloudProfile {
+  if (environment !== "staging") return profile
+  const normalizeEnvironment = (settings: EnvironmentProfile): EnvironmentProfile => {
+    if (settings.speech?.realtimeUrl !== priorCartesiaTemplateRealtimeUrl) return settings
+    return { ...settings, speech: { ...settings.speech, realtimeUrl: canonicalCartesiaRealtimeOrigin } }
+  }
+  const production = normalizeEnvironment(profile.environments.production)
+  const staging = normalizeEnvironment(profile.environments.staging)
+  if (production === profile.environments.production && staging === profile.environments.staging) return profile
+  return { ...profile, environments: { production, staging } }
+}
+
 /** The completed profile of Alpha's own cloud in `file`, accepted by eliza and keeping its deployment rules. */
-export effect function profiled(file: string): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
-  const profile = parseProfile(try readJson(file)) catch effect (refusal) => { throw new OperatorFailed({ problem: `${file}: ${refusal.problem}` }) }
+export effect function profiled(file: string, environment?: CloudEnvironment): { readonly profile: CloudProfile; readonly hosts: Record<CloudEnvironment, Hosts> }!(OperatorFailed | HostedCloudUnknown | CandidateRefused)!(FileSystem.FileSystem | Path.Path) {
+  const parsed = parseProfile(try readJson(file)) catch effect (refusal) => {
+    const problem = profileParseMessage(file, refusal.problem)
+    throw new OperatorFailed({ problem, message: problem })
+  }
+  const profile = stagingCompatibleProfile(parsed, environment)
   const hosts = try hostedClouds()
   const problems = hostedProfileProblems(profile, hosts)
   if (problems.length > 0) throw new CandidateRefused({ problems, message: problems.join("\n") })
@@ -306,7 +342,7 @@ export effect function deploy(at: { readonly environment: CloudEnvironment; read
       const rollout = try Machine
       try rollout.send({ type: "freeze" })
       const { values, entitlementPublicKey: derivedKey } = try settledSecrets(at.secrets, at.environment)
-      const { profile } = try profiled(at.profile)
+      const { profile } = try profiled(at.profile, at.environment)
       const entitlement = profile.environments[at.environment].entitlement
       if (isExampleEntitlementPublicKey(derivedKey) || entitlement.publicKeys.some(isExampleEntitlementPublicKey)) {
         throw new OperatorFailed({ problem: "the profile still holds the example placeholder entitlement public key" })
