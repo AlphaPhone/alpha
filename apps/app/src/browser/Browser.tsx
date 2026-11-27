@@ -18,11 +18,11 @@ import type { Machine as SiteMachine } from "../../gen/app__browser__site.effect
 import { useMachine as useShare } from "../../gen/app__browser__share.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
-import { TabHost } from "../platform/browser.vibe";
-import type { Alpha, Resident } from "../runtime/area.tsx";
-import { Time } from "../runtime/time.vibe";
-import { AppBack } from "../shell/AppBack.tsx";
-import { desktopPreview } from "../shell/canvas.vibe";
+import { TabHost } from "../platform/index.vibe";
+import type { Alpha, Resident } from "../runtime/ui.tsx";
+import { Time } from "../runtime/index.vibe";
+import { AppBack } from "../shell/ui.tsx";
+import { desktopPreview } from "../shell/index.vibe";
 import type { ManagedRuntime } from "effect";
 import { Reviewing, approve, decline } from "./agent.vibe";
 import { Pages, type PageRuntime, addressOf, overPageChrome, idOf, inputOf, openDownloads, openFindFromMenu, openPasswords, placed, toggleDesktopSite } from "./browser.vibe";

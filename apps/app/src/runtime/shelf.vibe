@@ -1,12 +1,11 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import {
-  type BoundedCache,
   type Shelf,
   createBoundedCache,
   createShelf,
 } from "./store.ts"
 
-export { type BoundedCache, type Shelf, createBoundedCache, createShelf }
+export { type Shelf, createBoundedCache, createShelf }
 
 /**
  * Provides a scoped `Shelf<T>` under `tag` whose state is created freshly for each runtime and automatically reset

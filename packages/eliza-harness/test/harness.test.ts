@@ -132,7 +132,7 @@ describe("the eliza harness", () => {
     const tree = scratch();
     try {
       fs.cpSync(path.join(import.meta.dirname, "fixtures/bun"), tree, { recursive: true });
-      for (const file of ["bun.lock", "apps/agent/bun.lockb", "bunfig.toml", "legacy/bun.lock"]) {
+      for (const file of ["bun.lock", "apps/agent/bun.lockb", "bunfig.toml"]) {
         fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
         fs.writeFileSync(path.join(tree, file), "");
       }

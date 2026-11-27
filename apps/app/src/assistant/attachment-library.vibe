@@ -3,7 +3,7 @@ import type { LibraryAccess, MediaCursor, MediaItem } from "@elizaos/os-bridges"
 import { base64Of, fits, imageIntakeBytes, nameLimit } from "../../gen/app__assistant__attachments.effect.vibe"
 import type { Grant } from "../../gen/kit__permission.effect.vibe"
 import type { Row as AttachmentPhotoRow } from "../photos/catalog.vibe"
-import { PhotosPort, type BrowserCapture } from "../platform/photos.vibe"
+import { PhotosPort, type BrowserCapture } from "../platform/index.vibe"
 
 export type { AttachmentPhotoRow }
 export type AttachmentPhotoGrant = Exclude<Grant, "Unasked">

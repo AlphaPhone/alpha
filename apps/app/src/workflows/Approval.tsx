@@ -5,9 +5,9 @@ import { useState, useSyncExternalStore } from "react";
 import { Alert, cn, focusRing } from "@repo/ui";
 import { useMachine } from "../../gen/app__workflows__approvals.react.ts";
 import type { Machine } from "../../gen/app__workflows__approvals.effect.vibe";
-import { type Resident, type Shown } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { type Resident, type Shown } from "../runtime/ui.tsx";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
 import { ApprovalWords, sameAsking, stopReviewedWorkflowSpeech } from "./approvals.vibe";
 
 interface ApprovalProps extends Pick<Shown<Resident | Machine | ApprovalWords>, "runtime"> {

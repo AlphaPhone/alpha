@@ -8,9 +8,9 @@ import type { Machine as CarrierMachine } from "../../gen/app__settings__carrier
 import type * as NetworkGen from "../../gen/app__settings__network.ts";
 import { useMachine as useNetwork } from "../../gen/app__settings__network.react.ts";
 import type { Machine as NetworkMachine } from "../../gen/app__settings__network.effect.vibe";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import { type Found, foundShelf } from "./phone.vibe";
 import type { Common } from "./Settings.tsx";
 

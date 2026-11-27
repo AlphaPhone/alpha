@@ -9,12 +9,12 @@ import {
   ProviderError,
   RateLimited,
   secretOf,
-} from "../platform/messaging.vibe"
-import { Unreachable, Unsent } from "../platform/remote.vibe"
-import { Telegram, type TelegramClient, type TelegramUser, assertTelegramUserToken } from "../platform/telegram.vibe"
-import type { Outcome } from "../platform/remote.vibe"
-import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+} from "../platform/index.vibe"
+import { Unreachable, Unsent } from "../platform/index.vibe"
+import { Telegram, type TelegramClient, type TelegramUser, assertTelegramUserToken } from "../platform/index.vibe"
+import type { Outcome } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, run, started, together, untimed } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import {
   TELEGRAM_SESSION_KEY,
   TelegramStore,

@@ -3,12 +3,12 @@ import { Machine as View } from "../../gen/app__calendar.effect.vibe"
 import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
 import * as Reopen from "../../gen/app__calendar__reminderReopen.effect.vibe"
 import type { Event, ReopenEffect } from "../../gen/app__calendar__reminderReopen.effect.vibe"
-import { say } from "../notices/toasts.vibe"
-import { Device } from "../platform/device.vibe"
+import { say } from "../notices/index.vibe"
+import { Device } from "../platform/index.vibe"
 import { reopenDatedReminder } from "../reminders/reminders.vibe"
 import { remindersStore } from "../reminders/store.ts"
-import { answer, contained, reacting, started, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { answer, contained, reacting, started, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 
 effect function stillSelected(id: number) {
   if (!(try (try Device).showing())) return false

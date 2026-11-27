@@ -4,9 +4,9 @@ import { mailReadAhead } from "@elizaos/plugin-inbox-client"
 import * as Inbox from "../../gen/app__inbox.effect.vibe"
 import { Machine as Drafts } from "../../gen/app__inbox__drafts.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { Cloud } from "../platform/cloud.vibe"
-import { Device } from "../platform/device.vibe"
-import { started, together } from "../runtime/reactor.vibe"
+import { Cloud } from "../platform/index.vibe"
+import { Device } from "../platform/index.vibe"
+import { started, together } from "../runtime/index.vibe"
 import { Mail, type SearchPage, bodyAt, page } from "./gmail.vibe"
 
 interface Prepared<A> {

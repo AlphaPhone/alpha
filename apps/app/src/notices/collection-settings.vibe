@@ -5,10 +5,10 @@ import type { Actor } from "../../gen/app__approvals__operation.ts"
 import * as Settings from "../../gen/app__settings.effect.vibe"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Layers from "../../gen/app__shell__layers.effect.vibe"
-import { Device, registered } from "../platform/device.vibe"
-import { CLOUD_ENVIRONMENT, signInAccounts, VoiceBridge } from "../platform/voice.vibe"
-import { noticesOf } from "../platform/systemSettings.vibe"
-import { type Job, answer, contained, reacting, started, stop, together } from "../runtime/reactor.vibe"
+import { Device, registered } from "../platform/index.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts, VoiceBridge } from "../platform/index.vibe"
+import { noticesOf } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, started, stop, together } from "../runtime/index.vibe"
 
 type Surroundings = Device | Settings.Machine | Shell.Machine | Layers.Machine
 

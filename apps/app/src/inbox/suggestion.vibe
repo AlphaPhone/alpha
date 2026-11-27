@@ -4,7 +4,7 @@ import type { Effect as Out, Event, Target } from "../../gen/app__inbox__suggest
 import * as Drafts from "../../gen/app__inbox__drafts.effect.vibe"
 import type { Actor } from "../../gen/app__inbox__access.ts"
 import { Machine as Shell, showing as showingView } from "../../gen/app__shell.effect.vibe"
-import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/reactor.vibe"
+import { type Job, contained, hearing, reacting, run, started, together, untimed } from "../runtime/index.vibe"
 import { Letters, acceptable, policy } from "./composer.vibe"
 import { Mail } from "./gmail.vibe"
 import { ownerChanges } from "./mailbox.vibe"

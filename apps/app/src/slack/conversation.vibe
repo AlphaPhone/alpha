@@ -2,9 +2,9 @@
 import type * as Auth from "../../gen/app__slack__auth.effect.vibe"
 import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__slack__conversation.effect.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import type { Slack } from "../platform/slack.vibe"
-import { type Job, answer, reacting, run } from "../runtime/reactor.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import type { Slack } from "../platform/index.vibe"
+import { type Job, answer, reacting, run } from "../runtime/index.vibe"
 import { SlackLedger, compareSlackTs, runChannelAction, runWorkspaceCall } from "./ledger.vibe"
 
 effect function readChannelHistory(

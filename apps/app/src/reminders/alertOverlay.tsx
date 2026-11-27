@@ -1,7 +1,7 @@
 // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
 import { Effect, Layer } from "effect";
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { AlertBanner } from "./AlertBanner.tsx";
 import { beginEditReminder } from "./editor.vibe";
 import { RemindersShelf } from "./shelf.vibe";

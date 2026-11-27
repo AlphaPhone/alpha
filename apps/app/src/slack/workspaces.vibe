@@ -3,9 +3,9 @@ import * as Workspaces from "../../gen/app__slack.effect.vibe"
 import type { Effect as Out, Event, Section } from "../../gen/app__slack.effect.vibe"
 import type * as Auth from "../../gen/app__slack__auth.effect.vibe"
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
-import type { MessagingSessions } from "../platform/messaging.vibe"
-import type { Slack, SlackChannelSummary } from "../platform/slack.vibe"
-import { type Job, answer, contained, reacting, untimed } from "../runtime/reactor.vibe"
+import type { MessagingSessions } from "../platform/index.vibe"
+import type { Slack, SlackChannelSummary } from "../platform/index.vibe"
+import { type Job, answer, contained, reacting, untimed } from "../runtime/index.vibe"
 import { SlackLedger, runChannelAction, runWorkspaceCall } from "./ledger.vibe"
 
 function typesForSection(section: Section): string {

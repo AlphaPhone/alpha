@@ -97,7 +97,11 @@ pure val seenValues = Set(
   { names: 0, phones: 1, emails: 0, notes: 1, notable: false },
 )
 pure val weight_listed = 4
+pure val weight_openContact = 3
 pure val weight_contactRead = 4
+pure val weight_askDelete = 4
+pure val weight_erase = 4
+pure val weight_writeAnswered = 4
 ```
 
 ## Story: Browse my contacts

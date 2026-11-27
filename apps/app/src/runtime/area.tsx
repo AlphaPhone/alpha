@@ -7,8 +7,8 @@ import type { MediaHandoff } from "../assistant/attachments.vibe";
 import type { CalendarReviews } from "../calendar/reviews.vibe";
 import type { ScanExports } from "../files/scanEntry.vibe";
 import type { InboxCardEntry } from "../home/cards.vibe";
-import type { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "../platform/browser.vibe";
-import type { Platform } from "../platform/platform.vibe";
+import type { AgentPages, BrowserDownloadsHandoff, InboxBrowserLinks } from "../platform/index.vibe";
+import type { Platform } from "../platform/index.vibe";
 import type { resident } from "../resident.vibe";
 import type { Whole } from "./reactor.vibe";
 

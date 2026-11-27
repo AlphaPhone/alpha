@@ -7,13 +7,13 @@ import * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
-import { Agent } from "../platform/agent.vibe"
-import { Device, native, registered } from "../platform/device.vibe"
-import { ask } from "../platform/remote.vibe"
+import { Agent } from "../platform/index.vibe"
+import { Device, native, registered } from "../platform/index.vibe"
+import { ask } from "../platform/index.vibe"
 import { civilDay, dayStart, localDate } from "../calendar/time.ts"
-import { type Job, answer, contained, due, filledStore, following, hearing, reacting, run, started, untimed, together, withFields } from "../runtime/reactor.vibe"
-import { createShelf } from "../runtime/shelf.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type Job, answer, contained, due, filledStore, following, hearing, reacting, run, started, untimed, together, withFields } from "../runtime/index.vibe"
+import { createShelf } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 import { homeInput } from "./home.vibe"
 
 /** Read the runtime's current wall-clock timestamp synchronously inside a view. */
@@ -24,7 +24,7 @@ export const latestTime = effect {
 module held {
   import { calendarClient } from "@elizaos/os-bridges"
   import type { AndroidCalendarPlugin } from "@elizaos/os-bridges"
-  import { plugin as capacitorPlugin } from "../platform/capacitor.ts"
+  import { plugin as capacitorPlugin } from "../platform/index.vibe"
 
   let lastPlugin: AndroidCalendarPlugin | undefined
   let made: ReturnType<typeof calendarClient> | undefined

@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { drawsAppBack } from "../../gen/app__shell.ts";
 import { useMachine } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 
 /** Whether an app's first page draws its Back: never while Alpha is the launcher (`drawsAppBack`, FirstPage). */
 export function useFirstPageBack(alpha: Alpha): boolean {

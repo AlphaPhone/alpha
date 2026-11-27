@@ -4,10 +4,10 @@ import { Machine as PhoneMachine, clear, liveCall } from "../../gen/app__phone.e
 import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
-import { type Telephony, deletionRefused, namesOf, telephony } from "../platform/telephony.vibe"
-import { recognizesVoicemail, transcribeVoicemail } from "../platform/voice.vibe"
-import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
-import { Time } from "../runtime/time.vibe"
+import { type Telephony, deletionRefused, namesOf, telephony } from "../platform/index.vibe"
+import { recognizesVoicemail, transcribeVoicemail } from "../platform/index.vibe"
+import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/index.vibe"
+import { Time } from "../runtime/index.vibe"
 
 /** What Voicemail counts, kept beside it: the voicemails last listed, the one open, its audio as a playable source and its transcript. */
 export interface Heard {

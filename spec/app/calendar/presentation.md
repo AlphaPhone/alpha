@@ -51,7 +51,8 @@ pure def lawAPhoneEventLinksNowhere(https: bool, credentials: bool): bool = not(
 ## Story: Know which calendar an event is on
 
 > As the owner, I want the agent's calendar called by the name I see for it
-> everywhere: on an event, in the Calendars sheet and on a new event.
+> everywhere: on an event, in the Calendars sheet, on a new event and on a
+> change the agent asks me to approve.
 
 ### The agent's calendar goes by the name the agent lists for it
 
@@ -61,6 +62,12 @@ build named the event page by its source's summary and fell back to Agent
 Calendar where the source had none (v119 45f6bed30,
 apps/app/src/prototype/agent-calendar-adapter.ts:166 and 273; demo frame
 v100-077 shows Eliza Calendar, the summary eliza gives its own calendar).
+The card of a change the agent asks for names the calendar its request
+names the same way: the agent's own calendar by that summary, and another
+calendar by the summary the agent lists for it, or as the request names
+it where the agent lists none, as the Sunday demo build printed the summary
+of the request's source (apps/app/src/prototype/calendar-approval-fields.ts:17
+and 48).
 
 ```quint
 pure def calendarName(listed: str): str = if (listed == "") "Agent Calendar" else listed

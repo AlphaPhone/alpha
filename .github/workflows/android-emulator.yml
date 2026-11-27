@@ -1,0 +1,117 @@
+name: Android emulator evidence
+
+# Nightly on the default branch and on manual dispatch, never on a pull request.
+# Builds the launcher debug and instrumentation APKs on Node 26 + pnpm and runs the
+# instrumentation suite on a hosted x86_64 Android 35 SDK emulator.
+# Produces emulator-class evidence only — never a distributable release or device acceptance.
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  emulator:
+    name: Launcher APKs on the emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Free disk on the disposable runner
+        run: |
+          for unused in /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/local/share/powershell; do
+            if [ -d "$unused" ]; then sudo rm -rf -- "$unused"; fi
+          done
+          df -h "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          job: android-emulator
+          verification: "false"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned Android native toolchain
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Prepare pinned Eliza checkout and verify Android inputs
+        run: |
+          pnpm eliza
+          pnpm --filter @repo/app android inputs
+      - name: Build the launcher APKs with their instrumentation APK
+        id: build
+        timeout-minutes: 150
+        env:
+          ELIZA_DEV_ALLOW_TEST_MOCKS: ""
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
+        run: pnpm --filter @repo/app android build --release
+      - name: Anchor the exact build manifest
+        id: freeze
+        run: echo "manifest=$(sha256sum apps/app/artifacts/apk-manifest.json | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: android-emulator-apks-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/app/artifacts/apk-manifest.json
+            apps/app/artifacts/launcher-debug.apk
+            apps/app/artifacts/instrumentation/*.apk
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require emulator capacity and KVM
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage(".").free >= 8*1024**3, "Insufficient fresh-runner emulator capacity"'
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run launcher instrumentation on Android 35 emulator
+        timeout-minutes: 90
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_7
+          ram-size: 4096M
+          disk-size: 4096M
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+            test "$(sha256sum apps/app/artifacts/apk-manifest.json | cut -d' ' -f1)" = "${{ steps.freeze.outputs.manifest }}"
+            mkdir -p test-results/android-instrumentation
+            adb install -r apps/app/artifacts/launcher-debug.apk
+            adb install -r apps/app/artifacts/instrumentation/launcher-androidTest.apk
+            adb shell cmd role add-role-holder --user 0 android.app.role.HOME ai.alphacompute.alphaphone || true
+            adb shell am instrument -w -e clearPackageData true ai.alphacompute.alphaphone.test/androidx.test.runner.AndroidJUnitRunner | tee test-results/android-instrumentation/run.log
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: android-emulator-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/app/artifacts/apk-manifest.json
+            test-results/android-instrumentation/
+            apps/app/android/app/build/reports/
+          if-no-files-found: warn
+          retention-days: 3

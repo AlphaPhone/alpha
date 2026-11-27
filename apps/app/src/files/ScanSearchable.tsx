@@ -4,8 +4,8 @@ import type { Layer } from "effect";
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { Scan } from "../../gen/app__files__scan.ts";
-import { native } from "../platform/device.vibe";
-import type { Shown, Resident } from "../runtime/area.tsx";
+import { native } from "../platform/index.vibe";
+import type { Shown, Resident } from "../runtime/ui.tsx";
 import { ScanAssets, confirmSearch, searchWords, type SearchLine, type scan } from "./scan.vibe";
 import { scanActions, scanButton, scanPanel, scanPrimary, scanText, scanTitle } from "./scan-dialog.ts";
 

@@ -7,15 +7,15 @@ import { canPlay, cropUnits, maxZoom, panUnits, type Event, type Look, type Pan,
 import type { Machine } from "../../gen/app__photos__viewer.effect.vibe";
 import { taken, type Row } from "./catalog.vibe";
 import { OpenedPhoto, photoEmailAllowed, photoLook, photoMessageType, type MediaView } from "./viewer.vibe";
-import { photoLooks } from "../platform/photoCanvas.vibe";
+import { photoLooks } from "../platform/index.vibe";
 import { ClipEditor } from "./ClipEditor.tsx";
 import { CropFrame, CropHeader, editFrame, editHeader, editTool } from "./CropFrame.tsx";
 import { trashDaysLabel, trashDaysLeft } from "./Grid.tsx";
-import { headingOf } from "../runtime/dateHeading.ts";
-import { Time } from "../runtime/time.vibe";
-import { Device } from "../platform/device.vibe";
-import { fadeIn } from "../shell/Layers.tsx";
-import { launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
+import { headingOf } from "../runtime/ui.tsx";
+import { Time } from "../runtime/index.vibe";
+import { Device } from "../platform/index.vibe";
+import { fadeIn } from "../shell/ui.tsx";
+import { launcherInnerHeader, launcherTop } from "../shell/ui.tsx";
 
 const filters: readonly Look[] = ["Original", "Vivid", "Warm", "Cool", "Mono", "Fade", "Noir"];
 const messages = {

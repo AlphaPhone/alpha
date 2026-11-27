@@ -18,8 +18,8 @@ import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import { changedOn, folderLocation, parentPath, sized, validFileName } from "./entries.vibe";
 import { Handles } from "./handles.vibe";
 import { Opened, emailAccount, pictureFits } from "./preview.vibe";
-import { native } from "../platform/device.vibe";
-import { launcherInnerHeader, launcherTop } from "../shell/launcherFrame.ts";
+import { native } from "../platform/index.vibe";
+import { launcherInnerHeader, launcherTop } from "../shell/ui.tsx";
 
 /** Develop's File actions: a 220px panel under the header, ringed, with 44px rows and 20px icons. */
 const actionsPanel = "w-55 min-w-0 rounded-tile p-1.5 ring-1 ring-border shadow-popup dark:shadow-popup-dark";

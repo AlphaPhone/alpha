@@ -6,8 +6,8 @@ import { sameArchiveAuthority, type ArchiveAuthority } from "../../gen/app__assi
 import type { MediaCard, MediaNote } from "./media-review.vibe"
 import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 import type { MailQuestion } from "../inbox/mail-context.vibe"
-import type { Sighting } from "../platform/location.vibe"
-import type { CommsPrompt } from "../phone/comms.vibe"
+import type { Sighting } from "../platform/index.vibe"
+import type { CommsPrompt } from "../comms/index.vibe"
 import type { NoteTranscript } from "../notes/selection.vibe"
 import type { RecordingSummary } from "./recording-summary.vibe"
 

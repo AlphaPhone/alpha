@@ -6,8 +6,8 @@ import { useMachine as useMic } from "../../gen/app__notes__microphone.react.ts"
 import { useMachine } from "../../gen/app__notes__recording.react.ts";
 import type { Event } from "../../gen/app__notes__recording.ts";
 import { useMachine as useVoice } from "../../gen/app__notes__voice.react.ts";
-import { NoteDevice } from "../platform/noteDevice.vibe";
-import type { Alpha } from "../runtime/area.tsx";
+import { NoteDevice } from "../platform/index.vibe";
+import type { Alpha } from "../runtime/ui.tsx";
 import { RecordingDisplay, control, levelCount } from "./recording.vibe";
 
 function elapsed(seconds: number): string {

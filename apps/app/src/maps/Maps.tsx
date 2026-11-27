@@ -3,10 +3,10 @@ import { Alert, cn, dockClearance, focusRing, Input, type MapCamera, MapsChip, M
 import { Effect } from "effect";
 import { ArrowUpDown, Bike, Bus, Car, Check, ChevronLeft, Clock, Coffee, Dumbbell, ExternalLink, Footprints, Fuel, Globe, Info, LocateFixed, Lock, type LucideIcon, MapPin, Navigation, Phone, RotateCw, Search, Settings, Share2, ShoppingCart, SquarePlus, Star, Utensils, X } from "lucide-react";
 import { type ReactNode, useRef, useState, useSyncExternalStore } from "react";
-import { Time } from "../runtime/time.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { untimed } from "../runtime/reactor.vibe";
-import { AppBack } from "../shell/AppBack.tsx";
+import { Time } from "../runtime/index.vibe";
+import type { Resident, Shown } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import { AppBack } from "../shell/ui.tsx";
 import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
 import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice, Sheet } from "../../gen/app__maps.ts";

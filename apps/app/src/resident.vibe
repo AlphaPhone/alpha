@@ -40,6 +40,14 @@ import { remindersResident } from "./reminders/reminders.vibe"
 import { listing as workflowList } from "./workflows/list.vibe"
 import { digestBrief } from "./workflows/brief.vibe"
 import { browserDigestDelivery } from "./workflows/browser-digests.vibe"
+import { approvals } from "./approvals/approvals.vibe"
+import { passwords } from "./passwords/passwords.vibe"
+import { startupCore } from "./startup/boot.vibe"
+import { collection } from "./notices/collection.vibe"
+import { deletions } from "./notices/deletions.vibe"
+import { noticeTaps } from "./notices/notices.vibe"
+import { posting } from "./notices/posting.vibe"
+import { noticeReminders } from "./notices/reminders.vibe"
 import { nativeDigestDelivery } from "./workflows/native-digests.vibe"
 import { nativeApprovalOwner } from "./workflows/native-approval.vibe"
 
@@ -89,6 +97,14 @@ const machines = together(
   workflowList,
   digestBrief,
   browserDigestDelivery,
+  approvals,
+  passwords,
+  startupCore,
+  noticeTaps,
+  collection,
+  deletions,
+  posting,
+  noticeReminders,
   nativeDigestDelivery,
   nativeApprovalOwner,
 )

@@ -4,7 +4,7 @@ import {
   phoneWorkflowLocalDayBounds, type WorkflowReadResult, type WorkflowReminderReadOperation, type WorkflowReminderRow,
   validateWorkflowReadResult, workflowReminderRevisionInput, workflowSha,
 } from "@elizaos/plugin-workflow-client"
-import type { Agent } from "../platform/agent.vibe"
+import type { Agent } from "../platform/index.vibe"
 import { dueInstantMs } from "./recurrence.ts"
 import { readReminders } from "./reminders.vibe"
 

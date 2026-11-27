@@ -7,10 +7,10 @@ import { useMachine as useDeveloper } from "../../gen/app__settings__developer.r
 import type { Machine as DeveloperMachine } from "../../gen/app__settings__developer.effect.vibe";
 import { useMachine as useLicences } from "../../gen/app__settings__licences.react.ts";
 import type { Machine as LicencesMachine } from "../../gen/app__settings__licences.effect.vibe";
-import type { Alpha } from "../runtime/area.tsx";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import type { Alpha } from "../runtime/ui.tsx";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import { type Notice, type Notices, noticesShelf } from "./about.vibe";
 import { type Common, useConfirmDialogLayer } from "./Settings.tsx";
 

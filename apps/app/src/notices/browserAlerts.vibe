@@ -1,8 +1,8 @@
 // spec/app/notices/browserAlerts.md, "Story: Choose whether Alpha shows browser alerts"
 import * as Alerts from "../../gen/app__notices__browserAlerts.effect.vibe"
-import { browserAlertsEnabled, listenBrowserAlerts, saveBrowserAlerts } from "../platform/browserAlertStorage.ts"
-import { native } from "../platform/device.vibe"
-import { type Job, answer, hearing, reacting, together } from "../runtime/reactor.vibe"
+import { browserAlertsEnabled, listenBrowserAlerts, saveBrowserAlerts } from "../platform/index.vibe"
+import { native } from "../platform/index.vibe"
+import { type Job, answer, hearing, reacting, together } from "../runtime/index.vibe"
 
 effect function observe(read: number): Alerts.Event!! {
   const status = effect {

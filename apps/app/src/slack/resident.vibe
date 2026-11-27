@@ -1,6 +1,6 @@
 // spec/app/slack/index.md, "Story: Switch workspaces and browse Slack conversations with strict isolation"; spec/app/slack/agent.md, "Story: Let Alpha help across my Slack workspaces safely"
 import { waiting } from "../home/waiting.vibe"
-import { contained, started, together } from "../runtime/reactor.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
 import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
 import * as Composer from "../../gen/app__slack__composer.effect.vibe"

@@ -4,7 +4,7 @@ import { Exit } from "effect";
 import { useMemo, useSyncExternalStore } from "react";
 import { useMachine } from "../../gen/app__account__signIn.react.ts";
 import type { SignIn as State, Trouble } from "../../gen/app__account__signIn.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import {
   cancelSignInStep,
   checkSignIn,

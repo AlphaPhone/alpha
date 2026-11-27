@@ -1,7 +1,7 @@
 // spec/app/home/tiles.md, "Story: Keep my apps on Home"
 import { type Found, type Tile, homeOrder } from "../../gen/app__home__tiles.effect.vibe"
 import type { View } from "../../gen/app__shell.effect.vibe"
-import { viewOrder } from "../shell/order.ts"
+import { viewOrder } from "../shell/index.vibe"
 
 /** Where Home's tiles are kept. */
 export const savedKey = "alpha.home.tiles"

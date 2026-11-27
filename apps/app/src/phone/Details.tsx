@@ -4,7 +4,7 @@ import { Effect, type ManagedRuntime } from "effect";
 import type { Line, Machine as DetailsMachine } from "../../gen/app__phone__details.effect.vibe";
 import { imeiElsewhere, simSummary } from "../../gen/app__phone__details.ts";
 import { useMachine } from "../../gen/app__phone__details.react.ts";
-import { SystemSettings } from "../platform/systemSettings.vibe";
+import { SystemSettings } from "../platform/index.vibe";
 
 export interface DetailsProps {
   /** Provides the page's machine, the area's own, and Android settings handoffs. */

@@ -1,6 +1,6 @@
 // spec/app/shell/keyboard.md, "Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays"
 import * as Canvas from "../../gen/app__shell__keyboard.effect.vibe"
-import { contained } from "../runtime/reactor.vibe"
+import { contained } from "../runtime/index.vibe"
 
 module page {
   import type { Event } from "../../gen/app__shell__keyboard.ts"

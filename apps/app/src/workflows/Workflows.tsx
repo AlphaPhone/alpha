@@ -30,8 +30,8 @@ import type { Machine as DigestMachine } from "../../gen/app__digests__schedules
 import { Digests } from "./Digests.tsx";
 import type { DigestWords } from "./digests.vibe";
 import { ApprovalWords } from "./approvals.vibe";
-import type { Resident, Shown } from "../runtime/area.tsx";
-import { AppBack } from "../shell/AppBack.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
+import { AppBack } from "../shell/ui.tsx";
 import { Filters, kinds, statuses } from "./Filters.tsx";
 import { History, WorkflowPower } from "./History.tsx";
 import type { HistoryWordsPort } from "./history.vibe";

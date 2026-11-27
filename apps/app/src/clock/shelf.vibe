@@ -1,6 +1,6 @@
 // spec/app/clock/alarms.md, "Story: Manage my alarms"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"; spec/app/clock/stopwatch.md, "Story: Time laps with the stopwatch"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Shelf, createShelf } from "../runtime/shelf.vibe"
+import { type Shelf, createShelf } from "../runtime/index.vibe"
 import { type ClockRecordsStore, clockRecords, createClockRecords } from "./records.ts"
 import { detectHour24 } from "./time.ts"
 

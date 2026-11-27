@@ -1034,18 +1034,36 @@ describe("on a phone", () => {
     expect(world.calendar.writes).toEqual(["reject approval-earlier-reply", "approve approval-newer-reply", "create ev-lens-check"]);
   });
 
-  it("The card names the agent's own calendar as the Sunday demo build did (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+  async function openPrimaryApproval(summary?: string) {
     const world = morning(true);
+    if (summary !== undefined) world.calendar.summary = summary;
     const { alpha, agent, file } = await askingCalendar(world);
-    // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": eliza files the agent calendar's requests for calendar "primary", which v119 45f6bed30 named "Eliza Calendar" (prototype/calendar-approval-fields.ts:48, agent-calendar-adapter.ts:166).
     await file("approval-primary", "camera setup", 9, "primary");
     await until(alpha, agent, Changes, (a) => a.stage === "Awaiting");
     await vi.waitFor(() => expect(askedCard()).toContain("camera setup"));
+    return { world, alpha, agent, file };
+  }
+
+  it("The card names the agent's own calendar as the Sunday demo build did (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {
+    // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken": eliza files the agent calendar's requests for calendar "primary", which v119 45f6bed30 named "Eliza Calendar" (prototype/calendar-approval-fields.ts:48, agent-calendar-adapter.ts:166).
+    const { world } = await openPrimaryApproval();
     expect(["Eliza Calendar", "Your agent's calendar"].map((text) => askedCard().includes(text))).toEqual([true, false]);
     // spec/app/calendar/agent.md, "The agent proposes one change at a time, for the revision of the event it selected, and the card shows it": v119 headed a new event's card "Add event" (prototype/calendar-approval-fields.ts:46)
     expect(["Add event", "Create an event"].map((text) => askedCard().includes(text))).toEqual([true, false]);
     expect(button("Approve")).toBeDefined();
     expect(world.calendar.writes).toEqual([]);
+  });
+
+  it("The card names the calendar its request names by the summary the agent lists for it, as the Sunday demo build did (spec/app/calendar/presentation.md, \"The agent's calendar goes by the name the agent lists for it\")", async () => {
+    // spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it": v119 45f6bed30 prototype/calendar-approval-fields.ts:17 and 48 printed the summary of the request's source, for "primary" and for the calendar the agent lists alike.
+    const { world, file } = await openPrimaryApproval("Family");
+    expect(["Family", "Eliza Calendar", "Agent Calendar"].map((text) => askedCard().includes(text))).toEqual([true, false, false]);
+    await press("Decline");
+    await file("approval-listed", "lens check", 11, "eliza-calendar/primary");
+    await vi.waitFor(() => expect(askedCard()).toContain("lens check"));
+    expect(["Family", "Calendar eliza-calendar/primary"].map((text) => askedCard().includes(text))).toEqual([true, false]);
+    expect(button("Approve")).toBeDefined();
+    expect(world.calendar.writes).toEqual(["reject approval-primary"]);
   });
 
   it("How the earlier reply's request ended draws under that reply, never under the newer reply that filed another (spec/app/calendar/agent.md, \"The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken\")", async () => {

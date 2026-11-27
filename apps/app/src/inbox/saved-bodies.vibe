@@ -1,10 +1,10 @@
 // spec/app/inbox/message.md, "Story: Read a saved message offline"
 import { utf8Length } from "@elizaos/plugin-inbox-client"
-import { native } from "../platform/device.vibe"
-import { Vault } from "../platform/vault.vibe"
+import { native } from "../platform/index.vibe"
+import { Vault } from "../platform/index.vibe"
 
 module browser {
-  import { browserDocumentTransaction } from "../platform/browserDocuments.ts"
+  import { browserDocumentTransaction } from "../platform/index.vibe"
 
   const key = "alpha.inbox.saved-bodies.v1"
 

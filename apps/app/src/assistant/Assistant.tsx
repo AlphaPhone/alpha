@@ -35,17 +35,17 @@ import { Machine as ShellMachine, showing } from "../../gen/app__shell.effect.vi
 import { Machine as CanvasMachine } from "../../gen/app__shell__keyboard.effect.vibe";
 import type { Machine as LayersMachine } from "../../gen/app__shell__layers.effect.vibe";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { acceptMailReview, MailQuestions, type MailQuestion } from "../inbox/mail-context.vibe";
 import { MessagingBridge, type MessagingBridgeApi, type MessagingDraftProposal } from "../messaging/bridge.vibe";
-import { type Backs, home } from "../shell/shell.vibe";
+import { type Backs, home } from "../shell/index.vibe";
 import { isCommsView } from "../shell/views.tsx";
 import { type MediaCard, type MediaNote, MediaReview, namedReviewQuery } from "./media-review.vibe";
-import type { Agent } from "../platform/agent.vibe";
-import { native, type Device } from "../platform/device.vibe";
-import type { NoteStore } from "../platform/notes.vibe";
+import type { Agent } from "../platform/index.vibe";
+import { native, type Device } from "../platform/index.vibe";
+import type { NoteStore } from "../platform/index.vibe";
 import type { Machine as NotesMachine } from "../../gen/app__notes.effect.vibe";
-import type { Documents } from "../platform/documents.vibe";
+import type { Documents } from "../platform/index.vibe";
 import { AttachmentSources, type AttachmentSourceRow } from "./AttachmentSources.tsx";
 import { AttachmentPicker, choosePickerRow, clearPickerChoice, importPickerFiles, openAttachmentPicker, openContactAttachmentPicker, pickSystemDocument, selectPickerVolume, upPickerFolder } from "./attachment-picker.vibe";
 import { askComms, freedom, holdAndSend, openChatSearch, restTyping, startAndSend } from "./assistant.vibe";
@@ -59,9 +59,9 @@ import {
   actionsOf, actionUnits, type RecordingSummary, reviewRecordingSummary, saveRecordingSummary, summaryActions, summaryUnits,
 } from "./recording-summary.vibe";
 import { type Attached, type Board, type Line, type Seen, Talk } from "./talk.vibe";
-import { CommsTarget, type CommsTargetServices } from "../phone/CommsTarget.tsx";
-import { CommsBriefing, commsViewOf } from "../phone/comms.vibe";
-import { displayNumber } from "../phone/words.ts";
+import { CommsTarget, type CommsTargetServices } from "../comms/ui.tsx";
+import { CommsBriefing, commsViewOf } from "../comms/index.vibe";
+import { displayNumber } from "../comms/index.vibe";
 import { replyBlocks, wordsOf } from "./words.ts";
 import { handToMaps } from "../maps/handoff.ts";
 import { AskedRequest, asked, boundIn, filedBy } from "../calendar/asked.ts";

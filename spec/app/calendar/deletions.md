@@ -93,7 +93,7 @@ pure def confirm(s: Deletions, id: int, reach: Reach, revision: int, now: int): 
 ```quint
 pure def canUndo(s: Deletions, now: int): bool = s.waiting != 0 and not(s.paused) and U::canUndo(s.undo, now)
 
-pure def undo(s: Deletions, now: int): Deletions = { ...s, waiting: 0, undo: U::undo(s.undo), notice: false }
+pure def undo(s: Deletions, now: int): Deletions = { ...s, waiting: 0, undo: U::undo(s.undo), notice: false, paused: false }
 ```
 
 ### The window ends only once its Undo notice is no longer shown

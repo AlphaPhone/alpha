@@ -15,15 +15,15 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useMachine as useCanvas } from "../../gen/app__shell__keyboard.react.ts";
 import { contactChatActionsId } from "../assistant/contact-chat-id.ts";
 import { attachFromContact, searchFromContact } from "../assistant/contact-search.ts";
-import { returnPhoneTab } from "../phone/back.vibe";
-import { PhoneTabs, telephonyHeader } from "../phone/PhoneTabs.tsx";
-import { callerInitials, displayNumber } from "../phone/words.ts";
+import { returnPhoneTab } from "../comms/index.vibe";
+import { PhoneTabs, telephonyHeader } from "../comms/ui.tsx";
+import { callerInitials, displayNumber } from "../comms/index.vibe";
 import { type Book, type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
-import { CommsBar, type CommsServices, useCommsDock } from "../phone/CommsBar.tsx";
+import { CommsBar, type CommsServices, useCommsDock } from "../comms/ui.tsx";
 import { emailFieldLabel, emailLabel, emailRemoveLabel, phoneFieldLabel, phoneLabel, phoneRemoveLabel } from "./labels.ts";
-import type { Alpha } from "../runtime/area.tsx";
-import { AppBack, useFirstPageBack } from "../shell/AppBack.tsx";
-import { Layers, Over, Under } from "../shell/Layers.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
+import { AppBack, useFirstPageBack } from "../shell/ui.tsx";
+import { Layers, Over, Under } from "../shell/ui.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */

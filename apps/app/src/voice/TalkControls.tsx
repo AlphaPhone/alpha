@@ -8,7 +8,7 @@ import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import type { Machine } from "../../gen/app__voice.effect.vibe";
 import { useMachine } from "../../gen/app__voice.react.ts";
 import { micHeld, type Phase } from "../../gen/app__voice.ts";
-import { untimed } from "../runtime/reactor.vibe";
+import { untimed } from "../runtime/index.vibe";
 import { VoiceStopIcon } from "./VoiceStopIcon.tsx";
 import { VoiceWaveform } from "./VoiceWaveform.tsx";
 

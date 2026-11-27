@@ -5,9 +5,9 @@ import { Pause, Play, Undo2 } from "lucide-react";
 import type { Machine as StopwatchMachine } from "../../gen/app__clock__stopwatch.effect.vibe";
 import { useMachine as useStopwatch } from "../../gen/app__clock__stopwatch.react.ts";
 import { bestLapIndex, elapsedAt, lastLapTotal, worstLapIndex } from "../../gen/app__clock__stopwatch.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import { formatStopwatch } from "./time.ts";
 import { useStopwatchNow } from "./useClockStore.ts";
 

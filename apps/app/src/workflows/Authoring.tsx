@@ -12,7 +12,7 @@ import type { Machine as RunsMachine } from "../../gen/app__workflows__runs.effe
 import { useMachine as useRuns } from "../../gen/app__workflows__runs.react.ts";
 import { running as isRunActive } from "../../gen/app__workflows__runs.ts";
 import type { Preset } from "../../gen/app__workflows__schedule.ts";
-import type { Resident, Shown } from "../runtime/area.tsx";
+import type { Resident, Shown } from "../runtime/ui.tsx";
 import { type DraftOperation, DraftWords, appendDraft, available, describeDraft, discardDraft, keepMyDraft, removeDraftStep, renameDraft, takeSavedDraft, adoptGeneratedDraft } from "./authoring.vibe";
 
 interface AuthoringProps extends Pick<Shown<Resident | BuilderMachine | GenerateMachine | RunsMachine | DraftWords>, "runtime"> {

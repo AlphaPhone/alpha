@@ -1,4 +1,4 @@
-import { area } from "../runtime/area.tsx";
+import { area } from "../runtime/ui.tsx";
 import { Details } from "./Details.tsx";
 import { details } from "./details.vibe";
 

@@ -1,3 +1,0 @@
-import {notificationDocument} from './notification-store';
-import {openDomainRecovery} from './domain-recovery';
-export function openNotificationRecovery(){openDomainRecovery(notificationDocument,'notifications','Notification recovery','Download saved notification data before resetting. Reset clears notification settings, device events and history. Cross-app collection returns to off. Close older Alpha tabs before continuing.');}

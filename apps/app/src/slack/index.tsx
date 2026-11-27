@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { area, type Resident, type Shown } from "../runtime/area.tsx";
+import { area, type Resident, type Shown } from "../runtime/ui.tsx";
 import { SlackScreen } from "./Slack.tsx";
 import { slackBack } from "./resident.vibe";
 

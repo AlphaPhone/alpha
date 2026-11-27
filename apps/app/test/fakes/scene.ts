@@ -19,7 +19,7 @@ import { type PhotosScene, photosScene } from "./photos.ts";
 import type { MailLeaseScene } from "./phone.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { textReviewRoute } from "./text-review.ts";
-import { type UpdateScene, updateScene } from "./update.ts";
+import { type UpdateScene, updateRoutes, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
 import { type BrowserScene, browserScene } from "./browser.ts";
 import { type SlackScene, type TelegramScene, slackRoutes, slackScene, telegramRoutes, telegramScene } from "./messaging.ts";
@@ -103,6 +103,7 @@ export function services(world: Scene) {
   };
   return {
     agent: answering([
+      ...updateRoutes(world.update, () => world.now),
       () => world.residentAvailable ? undefined : new Response(null, { status: 503 }),
       health,
       ...sampleRoutes(world.sample),

@@ -6,12 +6,11 @@ import { AudioLines, Check, ChevronLeft, FileText, Folder, Image, Trash2, Undo2,
 import type { Machine } from "../../gen/app__files__trash.effect.vibe";
 import { daysLeft, view } from "../../gen/app__files__trash.ts";
 import { useMachine } from "../../gen/app__files__trash.react.ts";
-import { useTimed } from "../runtime/react.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import { Time } from "../runtime/time.vibe";
+import { useTimed } from "../runtime/ui.tsx";
+import { untimed, Time } from "../runtime/index.vibe";
 import { TrashFacts } from "./trashFacts.vibe";
 import { sized } from "./entries.vibe";
-import { launcherTop } from "../shell/launcherFrame.ts";
+import { launcherTop } from "../shell/ui.tsx";
 
 export interface TrashProps {
   /** Provides the Trash machine, of files.vibe, and Alpha's time, at which `can` is asked. */

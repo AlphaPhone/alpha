@@ -1,0 +1,18 @@
+{
+  "description": "Recorded reasons for shipped or staged items whose licence could not be established from shipped metadata. This file gates nothing (owner decision P-09): each item is listed in the notices and flagged 'unverified' (or, for a font with no record in font-licenses.json, 'proprietary-no-licence-recorded') whether or not it has an entry here, and the reason below is printed as its obligation note. A reason is a record, not legal sign-off. An entry with `requires` names the record that ships the item; it is reported as stale only once that record exists.",
+  "entries": [
+    {
+      "name": "elizaOS local-speech runtime sources (Paradee graph, kokoro layers, eliza-inference FFI, paradee-voice JNI) in libelizainference",
+      "requires": ".eliza/packages/os/android/local-inference/engine.lock.json",
+      "reason": "These sources are compiled into libelizainference from the pinned elizaOS llama.cpp fork recorded in .eliza/packages/os/android/local-inference/engine.lock.json (tools/paradee, tools/kokoro, tools/misaki-g2p, tools/omnivoice) and the JNI bridge from pinned @elizaos/os. elizaOS is MIT, while the fork vendors third-party voice components whose per-file licences are enumerated separately. Flagged, not blocking."
+    },
+    {
+      "name": "On-device elizaOS agent runtime payload",
+      "reason": "The staged runtime ships in standard Android builds (PACKAGED). Bundled agent and workflow-worker npm packages are enumerated from the pinned @elizaos/* source; native payload files (libeliza_node.so, C++ runtime libraries, and local data assets) are recorded separately."
+    },
+    {
+      "name": "pdf.js QuickJS sandbox",
+      "reason": "pdfjs-dist ships quickjs-eval.js/.wasm without a license file. The upstream sandbox build and QuickJS itself are believed to be permissively licensed, but no shipped license text establishes it."
+    }
+  ]
+}

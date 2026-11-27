@@ -1,8 +1,8 @@
 // spec/app/clock/index.md, "Back closes an open sheet before leaving Clock"
 import { Effect } from "effect";
 import * as ClockView from "../../gen/app__clock.effect.vibe";
-import { area } from "../runtime/area.tsx";
-import { together } from "../runtime/reactor.vibe";
+import { area } from "../runtime/ui.tsx";
+import { together } from "../runtime/index.vibe";
 import { Clock } from "./Clock.tsx";
 import { stopwatch } from "./stopwatch.vibe";
 import { ensureClockResident } from "./sync.vibe";

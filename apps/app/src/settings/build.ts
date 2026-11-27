@@ -1,4 +1,4 @@
-import { allowsTestMocks, toolsAsked } from "../platform/build.ts";
+import { allowsTestMocks, toolsAsked } from "../platform/index.vibe";
 
 /**
  * Whether this is a development build: the development server, or a build made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`.

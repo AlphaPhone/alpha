@@ -1,6 +1,6 @@
 // spec/app/calendar/agent.md, "The card shows in Ask Alpha too, under the reply that filed its request, typed or spoken"
 import { use } from "react";
-import type { Area } from "../runtime/area.tsx";
+import type { Area } from "../runtime/ui.tsx";
 import { AskedRequest } from "./asked.ts";
 import { Proposal } from "./Calendar.tsx";
 import calendar from "./index.tsx";

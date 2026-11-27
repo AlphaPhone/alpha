@@ -10,7 +10,7 @@ import { useMachine as useReopen } from "../../gen/app__calendar__reminderReopen
 import { snoozeSelectedReminder } from "../reminders/alerts.vibe";
 import { deleteReminderItem, toggleReminderComplete } from "../reminders/reminders.vibe";
 import { remindersStore } from "../reminders/store.ts";
-import type { Alpha } from "../runtime/area.tsx";
+import type { Alpha } from "../runtime/ui.tsx";
 import type { CalendarProps } from "./Calendar.tsx";
 import { startReminderEdit } from "./editor.vibe";
 import { SourceNote } from "./SourceNote.tsx";

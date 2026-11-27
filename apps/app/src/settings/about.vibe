@@ -3,12 +3,9 @@ import * as Developer from "../../gen/app__settings__developer.effect.vibe"
 import * as Licences from "../../gen/app__settings__licences.effect.vibe"
 import * as Prefs from "../../gen/app__settings__preferences.effect.vibe"
 import * as Pages from "../../gen/app__settings.effect.vibe"
-import { Device, native } from "../platform/device.vibe"
-import { type PhoneReport, type Problem, SystemSettings } from "../platform/systemSettings.vibe"
-import { VoiceBridge } from "../platform/voice.vibe"
-import { type Job, answer, due, following, reacting, run, stop, together, untimed } from "../runtime/reactor.vibe"
-import { type Shelf, createShelf } from "../runtime/shelf.vibe"
-import { Time } from "../runtime/time.vibe"
+import { appVersion, Device, native, type PhoneReport, type Problem, SystemSettings, VoiceBridge } from "../platform/index.vibe"
+import { type Job, answer, due, following, reacting, run, stop, together, untimed, type Shelf, createShelf, Time } from "../runtime/index.vibe"
+import { development } from "./build.ts"
 
 module web {
   let activeDownloadUrl: string | undefined
@@ -49,8 +46,6 @@ module web {
   }
 }
 import { shared, shipped } from web
-import { appVersion } from "../platform/build.ts"
-import { development } from "./build.ts"
 
 schema NoticeObligation { flag: string; note: string }
 

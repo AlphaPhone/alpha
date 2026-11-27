@@ -41,11 +41,11 @@ import { useMachine as useComposer } from "../../gen/app__slack__composer.react.
 import type { Machine as ConversationMachine } from "../../gen/app__slack__conversation.effect.vibe";
 import { useMachine as useConversation } from "../../gen/app__slack__conversation.react.ts";
 import type { Machine as NoticesMachine } from "../../gen/app__slack__notices.effect.vibe";
-import type { SlackChannelSummary, SlackMessage, SlackUser } from "../platform/slack.vibe";
-import { useTimed } from "../runtime/react.ts";
+import type { SlackChannelSummary, SlackMessage, SlackUser } from "../platform/index.vibe";
+import { useTimed } from "../runtime/ui.tsx";
 import { swapComposerTarget } from "../messaging/composer.ts";
-import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
+import { untimed } from "../runtime/index.vibe";
+import type { Time } from "../runtime/index.vibe";
 import {
   type SlackLedgerStore,
   SlackLedger,

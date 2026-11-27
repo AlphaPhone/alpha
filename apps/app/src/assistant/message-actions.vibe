@@ -6,8 +6,8 @@ import type { Machine as OffersMachine } from "../../gen/app__inbox__suggestion.
 import type * as Shell from "../../gen/app__shell.effect.vibe"
 import type { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
 import { useInEmail, type Offers } from "../inbox/suggestion.vibe"
-import { say, type Said } from "../notices/toasts.vibe"
-import { Device } from "../platform/device.vibe"
+import { say, type Said } from "../notices/index.vibe"
+import { Device } from "../platform/index.vibe"
 import { Talk, type Line } from "./talk.vibe"
 import { wordsOf } from "./words.ts"
 
