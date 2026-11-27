@@ -1,0 +1,180 @@
+// spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"; spec/app/control/index.md, "Story: Enforce formal safety guarantees over external app control"
+import * as Control from "../../gen/app__control.effect.vibe"
+import type { Actor, ControlEffect, ControlTier, Event, ExecutionOutcome, ScreenProtection, TargetKind } from "../../gen/app__control.effect.vibe"
+import { Agent, ask, type Failure } from "../platform/index.vibe"
+import { contained, reacting, run, together, type Job } from "../runtime/index.vibe"
+
+schema LeaseWire {
+  leaseId: Schema.Int
+  packageName: string
+  maxOps: Schema.Int
+  usedOps: Schema.Int
+  expiresAtMs: Schema.Int
+  status: "LeaseInactive" | "LeaseActive" | "LeaseRevoked"
+}
+
+schema ForegroundWire {
+  snapId: Schema.Int
+  packageName: string
+  activityName: string
+  webUri: string | null
+  targetKind: "AllowedApp" | "BlockedApp" | "NoTarget"
+  protection: "ScreenClear" | "ScreenLocked" | "SecureFlag" | "PrivateTab" | "SensitiveView"
+  windowCount: Schema.Int
+  observedAtMs: Schema.Int
+}
+
+schema PendingWire {
+  opId: Schema.Int
+  leaseId: Schema.Int
+  boundSnapId: Schema.Int
+  expectedPackage: string
+  createdAtMs: Schema.Int
+}
+
+schema ControlStateWire {
+  tier: "TierNone" | "TierAccessibility" | "TierPrivileged"
+  capabilities: string[]
+  foreground: ForegroundWire
+  lease: LeaseWire
+  pending: PendingWire | null
+  lastResult: "done" | "refused" | "preempted"
+  killed: boolean
+}
+
+schema LeaseGrantedWire {
+  lease: LeaseWire
+}
+
+/** Resident agent HTTP surface for the system overlay's external-app control banner and kill-switch. */
+export service ExternalControl {
+  readState(): ControlStateWire!Failure
+  grantLease(packageName: string, maxOps: number, durationMs: number): LeaseWire!Failure
+  stop(reason?: string): ControlStateWire!Failure
+}
+
+/** Live ExternalControl layer backed by the resident agent's page-admitted control routes. */
+export const agentControl = Layer.effect(ExternalControl, effect {
+  const agent = try Agent
+  const withAgent = Layer.succeed(Agent, agent)
+  return {
+    effect readState(): ControlStateWire!Failure {
+      provide withAgent {
+        return try ask(Agent, HttpClientRequest.get("/api/alpha/control/state"), ControlStateWire)
+      }
+    },
+    effect grantLease(packageName: string, maxOps: number, durationMs: number): LeaseWire!Failure {
+      const request = HttpClientRequest.bodyJsonUnsafe(
+        HttpClientRequest.post("/api/alpha/control/lease"),
+        { packageName, maxOps, durationMs },
+      )
+      provide withAgent {
+        const reply = try ask(Agent, request, LeaseGrantedWire)
+        return reply.lease
+      }
+    },
+    effect stop(reason = "kill_switch"): ControlStateWire!Failure {
+      const request = HttpClientRequest.bodyJsonUnsafe(
+        HttpClientRequest.post("/api/alpha/control/stop"),
+        { reason },
+      )
+      provide withAgent {
+        return try ask(Agent, request, ControlStateWire)
+      }
+    },
+  }
+})
+
+/** Sync a remote control snapshot from `/api/alpha/control/state` into the verified control state machine. */
+export effect function syncControlSnapshot(
+  wire: ControlStateWire,
+  appIdOf: (packageName: string) => number,
+): void!!Control.Machine {
+  const machine = try Control.Machine
+  const current = try machine.get()
+  const tier: ControlTier = wire.tier
+  if (Control.canSetTier(current, tier, "Phone")) {
+    try contained(machine.send({ type: "setTier", tier }, "Phone"), "syncing control tier")
+  }
+  const afterTier = try machine.get()
+  const targetKind: TargetKind = wire.foreground.targetKind
+  const protection: ScreenProtection = wire.foreground.protection
+  const appId = wire.foreground.packageName === "" ? 0 : Math.max(1, appIdOf(wire.foreground.packageName))
+  if (Control.canObserve(afterTier, wire.foreground.snapId, appId, targetKind, protection, "Phone")) {
+    try contained(
+      machine.send({ type: "observe", snapId: wire.foreground.snapId, appId, targetKind, protection }, "Phone"),
+      "syncing foreground control observation",
+    )
+  }
+  if (wire.killed) {
+    const latest = try machine.get()
+    if (Control.canKillSwitch(latest, "Phone")) {
+      try contained(machine.send({ type: "killSwitch" }, "Phone"), "syncing control kill-switch")
+    }
+  }
+}
+
+/** Request an owner-approved bounded lease on the resident agent and mirror it in the verified machine. */
+export effect function approveControlLease(input: {
+  readonly packageName: string
+  readonly appId: number
+  readonly maxOps: number
+  readonly durationMs: number
+  readonly nowMs: number
+}): (LeaseWire | undefined)!!(Control.Machine | ExternalControl) {
+  const remote = try ExternalControl
+  const machine = try Control.Machine
+  const granted = remote.grantLease(input.packageName, input.maxOps, input.durationMs) catch () => undefined
+  if (granted === undefined) return undefined
+  const current = try machine.get()
+  if (Control.canGrantLease(current, granted.leaseId, input.appId, granted.maxOps, granted.expiresAtMs, input.nowMs, "Owner")) {
+    try contained(
+      machine.send({
+        type: "grantLease",
+        leaseId: granted.leaseId,
+        appId: input.appId,
+        maxOps: granted.maxOps,
+        expiresAt: granted.expiresAtMs,
+        now: input.nowMs,
+      }, "Owner"),
+      "recording granted control lease",
+    )
+  }
+  return granted
+}
+
+/** Engage the owner kill-switch immediately in both the verified machine and the resident agent. */
+export effect function triggerControlKillSwitch(reason = "kill_switch"): boolean!!(Control.Machine | ExternalControl) {
+  const machine = try Control.Machine
+  const remote = try ExternalControl
+  const current = try machine.get()
+  if (Control.canKillSwitch(current, "Owner")) {
+    try contained(machine.send({ type: "killSwitch" }, "Owner"), "engaging owner control kill-switch")
+  }
+  const stopped = remote.stop(reason) catch () => undefined
+  return stopped !== undefined
+}
+
+/** Report a finished native operation back into the verified control machine. */
+export effect function reportControlOutcome(opId: number, verdict: ExecutionOutcome): boolean!!Control.Machine {
+  const machine = try Control.Machine
+  if (!Control.canFinish(try machine.get(), opId, verdict, "Phone")) return false
+  return try contained(machine.send({ type: "finish", opId, verdict }, "Phone"), "finishing external control op")
+}
+
+function carry(fx: ControlEffect): Job<Event, ExternalControl, [Actor]> {
+  return match (fx) {
+    when { tag: "HaltBridge", let reason }: run("halt-bridge", effect {
+      const remote = try ExternalControl
+      try ignore(remote.stop(reason))
+    }, "Phone" as Actor);
+    when { tag: "DispatchOp" }: run("dispatch-noop", Effect.void, "Phone" as Actor);
+    when { tag: "ClearOverlay" }: run("clear-overlay", Effect.void, "Phone" as Actor);
+  }
+}
+
+/** Reactive external-app control layer combining the verified Quint machine with the resident agent client. */
+export const externalControl = together(
+  agentControl,
+  reacting(Control, { carry }),
+)
