@@ -24,11 +24,14 @@ for the event it was for. The number of an event long unseen may be let
 go, and then names no event. A deletion reaches its event, the series from
 this occurrence on, or the whole series, as the owner chose, at the
 revision the owner confirmed it from; the occurrences of a repeating event
-on the phone share one revision, which changes with the series and not with
-when they fall. It also holds Android's timeout scale, a percentage never
-under a hundred, whether a restart paused it, and the event a deletion was
-dropped or refused for, and whether it was refused because the event
-changed, so the owner is told it was not deleted and why. Times are milliseconds, passed in by the shell.
+on the phone share one revision, counted from the series' title, place, notes
+and whether it is all day, and not from when they fall: moving the series
+leaves it as it was, and the phone itself refuses to delete an occurrence
+that is no longer where the owner confirmed it. It also holds Android's
+timeout scale, a percentage never under a hundred, whether a restart paused
+it, and the event a deletion was dropped or refused for, and whether it was
+refused because the event changed, so the owner is told it was not deleted
+and why. Times are milliseconds, passed in by the shell.
 
 ```quint
 import undo as U from "../../kit/undo"

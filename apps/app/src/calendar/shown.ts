@@ -155,11 +155,14 @@ export interface KeptNumbers {
   readonly numbers: ReadonlyArray<readonly [string, number]>;
 }
 
-/** Where numbering starts on a phone that kept no numbers: past any number a build that kept none gave in one run. */
-const unkeptFloor = 2 ** 32;
-
-/** What numbering goes on from where the kept numbers can no longer be read: past any number given before, and holding none. */
-export const unreadableNumbers: KeptNumbers = { last: 2 ** 52, numbers: [] };
+/**
+ * What numbering goes on from at `now`, Alpha's time, where no kept numbers can be read: past any number an earlier build
+ * gave, and past those of every earlier start, a thousand and twenty-four numbers for each millisecond between them.
+ * @throws {never}
+ */
+export function unreadNumbers(now: number): KeptNumbers {
+  return { last: 2 ** 52 + Math.floor(now) * 2 ** 10, numbers: [] };
+}
 
 /** How far numbering moves on at each start past the last number kept, so a number given after the last one kept is never given again. */
 const startGap = 2 ** 20;
@@ -192,7 +195,7 @@ function makeShownStore(onReset?: () => void, kept?: KeptNumbers, keepNumbers?: 
   const names = new Map<string, string>();
   let ownName = "";
   const version = createShelf(0);
-  let nextNumber = keepNumbers === undefined ? 0 : kept === undefined ? unkeptFloor : kept.last + startGap;
+  let nextNumber = kept === undefined ? 0 : kept.last + startGap;
   let present = false;
   let unkept = keepNumbers !== undefined;
   let open = true;
@@ -380,8 +383,8 @@ function currentStore(): ShownStore {
 }
 
 /**
- * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. Given
- * `keepNumbers`, it numbers events on from `kept`, what an earlier run kept, and hands it each change to keep. @throws {never}
+ * Create a scoped Calendar row store backed by a reactive shelf, registered for sibling readers while active. It numbers
+ * events on from `kept`, what an earlier run kept, and, given `keepNumbers`, hands it each change to keep. @throws {never}
  */
 export function createShownStore(kept?: KeptNumbers, keepNumbers?: (numbers: KeptNumbers) => void): ShownStore {
   const store = makeShownStore(() => {

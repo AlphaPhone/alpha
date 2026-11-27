@@ -632,6 +632,16 @@ function carry(fx: Out) {
 }
 
 // spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is"
+/** A change in doubt whose number names no event Calendar kept a number for, as one an earlier build kept, can never be read back: its doubt is let go, as an event gone lets it go. */
+const unnamed = started(effect {
+  const editor = try Editor.Machine
+  const shown = try Shown
+  try Stream.runForEach(editor.changes, effect (form) => {
+    for (const id of form.latched) if (!shown.known(id)) try contained(editor.send({ type: "eventMissing", id, whole: true }), "letting go a doubt Calendar cannot name")
+  })
+}, "letting go the doubts Calendar cannot name")
+
+// spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is"
 /** Each read of either calendar tells the form what it found of the event it edits or holds in doubt. */
 const reread = started(effect {
   const view = try View.Machine
@@ -714,6 +724,7 @@ function storedEditor(key: string, start = Editor.initial) {
 export const editor = together(
   reacting({ ...Editor, stored: storedEditor }, { keep: 1, open: [{ type: "restart" }], carry }),
   reread,
+  unnamed,
   elsewhere,
   scanned,
   left,

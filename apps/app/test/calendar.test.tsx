@@ -28,7 +28,7 @@ import { civilDay, dateOf, dayStart, localWallTime, shiftDays, utcDate, wallDate
 import { createReminderItem } from "../src/reminders/reminders.vibe";
 import { DEFAULT_LIST_ID, remindersStore } from "../src/reminders/store.ts";
 import type { Alpha } from "../src/runtime/area.tsx";
-import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
+import { asleep, button, closeAll, drawn, fill, hardware, later, only, open, press, seen, underAct, until } from "./alpha.tsx";
 import { agentEvent, agentRequest } from "./fakes/calendar.ts";
 import { type Scene, scene } from "./fakes/scene.ts";
 
@@ -904,15 +904,19 @@ describe("on a phone", () => {
     await until(alpha, runtime, Held, (d) => d.asked !== 0);
     await press("Yes");
     await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    const form = await runtime.runPromise(Editor.use((e) => e.get()));
     await second.close();
     const kept = "alpha/app/calendar/deletions@1";
     localStorage.setItem(kept, JSON.stringify({ ...JSON.parse(localStorage.getItem(kept) ?? "{}"), waiting: 1 }));
+    localStorage.setItem("alpha/app/calendar/editor@1", JSON.stringify({ ...form, latched: [7] }));
     localStorage.removeItem("alpha.calendar.numbers");
     const upgraded = await open(world, only("view:Calendar", "notice"));
     const after = calendar.runtime(upgraded.alpha);
     await until(upgraded.alpha, after, View, (s) => s.front && s.phoneRows === 2 && s.google.status === "Loaded");
     await until(upgraded.alpha, after, Held, (d) => d.waiting === 0 && d.undo.holding === "Undone" && !d.paused);
     expect([document.body.textContent?.includes("Alpha restarted before deleting"), Boolean(button(/^Piano/)), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([false, true, ["Piano", "Walk"]]);
+    // spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is": a doubt kept under a number that names no event can never be read back, so it is let go.
+    expect((await after.runPromise(Editor.use((e) => e.get()))).latched).toEqual([]);
 
     // spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged": Walk changed on the phone after the owner confirmed its deletion, so it is not deleted.
     await tap("Walk");
@@ -941,6 +945,81 @@ describe("on a phone", () => {
     const unread = await open(world, only("view:Calendar", "notice"));
     await until(unread.alpha, calendar.runtime(unread.alpha), View, (s) => s.front && s.phoneRows === 2);
     expect([localStorage.getItem("alpha.calendar.numbers.unreadable"), Boolean(button(/^Piano/))]).toEqual(["{", true]);
+
+    // spec/app/calendar/deletions.md, "Deletions hold the owner they are for, the deletion under review, the one waiting with its Undo window and whether its notice shows, the one being sent, and the one sent that a read has yet to confirm": kept numbers the store failed to read are never written over.
+    await unread.close();
+    const numbers = localStorage.getItem("alpha.calendar.numbers");
+    const getItem = localStorage.getItem.bind(localStorage);
+    const failing = vi.spyOn(localStorage, "getItem").mockImplementation((key: string) => {
+      if (key === "alpha.calendar.numbers") throw new Error("the store could not be read");
+      return getItem(key);
+    });
+    asleep(world, 60_000);
+    const failed = await open(world, only("view:Calendar", "notice"));
+    await until(failed.alpha, calendar.runtime(failed.alpha), View, (s) => s.front && s.phoneRows === 2);
+    failing.mockRestore();
+    expect([localStorage.getItem("alpha.calendar.numbers"), Boolean(button(/^Piano/))]).toEqual([numbers, true]);
+  });
+
+  it("Two starts that cannot read the kept numbers never give one number to two events (spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    localStorage.setItem("alpha.calendar.numbers", "{");
+    const first = await open(world, only("view:Calendar", "notice"));
+    const before = calendar.runtime(first.alpha);
+    await openCalendar(first.alpha);
+    await until(first.alpha, before, View, (s) => s.front && s.phoneRows === 1 && s.google.status === "Loaded");
+    await tap("Gym");
+    await until(first.alpha, before, View, (s) => s.open !== 0);
+    await chooseEventAction("Edit event");
+    await until(first.alpha, before, Editor, (e) => e.shown && e.form === "EditEvent");
+    await fill("Title", "Gym class");
+    await until(first.alpha, before, Editor, (e) => e.draft.edits >= 1 && e.kept);
+    await hardware("home");
+    await later(first.alpha, 100);
+    await until(first.alpha, before, Editor, (e) => !e.shown && e.banner === "Available");
+    await first.close();
+
+    localStorage.setItem("alpha.calendar.numbers", "{");
+    asleep(world, 60_000);
+    world.calendar.phoneEvents.unshift(
+      { id: "p2", calendarId: "local", title: "Piano", begin: world.at(0, 16), end: world.at(0, 17), allDay: false, recurring: false },
+      { id: "p3", calendarId: "local", title: "Walk", begin: world.at(0, 17), end: world.at(0, 18), allDay: false, recurring: false },
+    );
+    const second = await open(world, only("view:Calendar", "notice"));
+    const runtime = calendar.runtime(second.alpha);
+    await openCalendar(second.alpha);
+    await until(second.alpha, runtime, View, (s) => s.front && s.phoneRows === 3 && s.google.status === "Loaded");
+    await press("Resume event draft");
+    await until(second.alpha, runtime, Editor, (e) => e.shown && e.form === "EditEvent");
+    await press("Save event");
+    await until(second.alpha, runtime, Editor, (e) => e.write.id !== 0 && e.write.outcome !== "Sent");
+    expect(world.calendar.phoneEvents.map((event) => event.title)).toEqual(["Piano", "Walk", "Gym"]);
+  });
+
+  it("A repeating event that moved after the owner confirmed deleting one occurrence is not deleted (spec/app/calendar/deletions.md, \"A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.phoneEvents.push(...[-7, 0, 7].map((day) => ({ id: "p5", calendarId: "local", title: "Piano", begin: world.at(day, 16), end: world.at(day, 17), allDay: false, recurring: true })));
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 2 && s.google.status === "Loaded");
+    await tap("Piano");
+    await until(alpha, runtime, View, (s) => s.open !== 0);
+    await chooseEventAction("Delete this one");
+    await until(alpha, runtime, Held, (d) => d.asked !== 0);
+    await press("Yes");
+    await until(alpha, runtime, Held, (d) => d.waiting !== 0 && d.notice);
+    for (const event of world.calendar.phoneEvents) if (event.id === "p5") Object.assign(event, { begin: event.begin + hour, end: event.end + hour });
+    await runtime.runPromise(View.use((view) => view.send({ type: "refresh" })));
+    await until(alpha, runtime, View, (s) => s.phone.status === "Loaded");
+    vi.useFakeTimers({ toFake: ["performance"] });
+    await later(alpha, 6_000);
+    await later(alpha, 10_000);
+    await drawn(() => {});
+    vi.advanceTimersByTime(20_000);
+    await later(alpha, 10_000);
+    vi.useRealTimers();
+    await until(alpha, runtime, Held, (d) => d.sending === 0 && d.failed !== 0 && d.changed);
+    expect(world.calendar.phoneEvents.filter((event) => event.id === "p5").map((event) => event.begin)).toEqual([world.at(-7, 17), world.at(0, 17), world.at(7, 17)]);
   });
 
   it("A deletion and an edit of the agent's events kept across a restart are for the event they were for (spec/app/calendar/deletions.md, \"A restart pauses a deletion still in its window; the owner sends it or keeps the event\"; spec/app/calendar/editor.md, \"Story: Keep my draft through a restart\")", async () => {
