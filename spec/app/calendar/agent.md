@@ -116,10 +116,10 @@ Calendar, Back, a hidden page or a locked screen leave it waiting, in
 Calendar and under the reply that filed it. A card shows only with the
 request Calendar read for it: a changed owner drops the requests Calendar
 read, so a card still waiting for them ends unsent and the list is read
-again at once. Each read of the list is for the owner it began under: its
-answer is refused if another owner, or none, is signed in when it answers,
-so a read begun for one owner never shows that owner's requests to another
-owner, or to no one. A change the
+again at once. Each read of the list is for the owner Calendar last read
+when it began, signed out counting as one: its answer is refused if
+Calendar has read another since, so a read begun for one owner never shows
+that owner's requests once Calendar holds another, or no one. A change the
 owner declined, the agent withdrew or Google refused reads the list again at once, so the next
 pending request's card shows without waiting for Calendar's next read; the
 request just declined is not proposed again while its decline is on its
@@ -232,9 +232,10 @@ make it. Where the request or its event moved on since the card showed it,
 the approval is spent unsent and the card shows the change again at its
 new revision, marked updated, for the owner to approve or decline once
 more. A decision whose answer was lost is never sent again. Approving is
-for the owner signed in at the tap: if another owner, or none, is signed in
-when the agent would be asked, nothing is sent and the card ends as a change
-the agent did not make.
+for the owner Calendar last read when the tap began, signed out counting as
+one: if Calendar has read another by the time the agent would be asked,
+nothing is sent and the card ends quietly, as one the agent withdrew, with
+no words for the owner Calendar holds now; the request stays the agent's.
 
 ```quint
 pure def canStaleAtTap(s: AgentCalendar, attempt: int, revision: int, complete: bool, by: Actor): bool =
@@ -245,6 +246,13 @@ pure def staleAtTap(s: AgentCalendar, attempt: int, revision: int, complete: boo
     updated: true, card: V::present(V::revise(s.card)) }
 
 pure def sometimesStaleAtTap(s: AgentCalendar): bool = s.stage == Awaiting and s.updated and s.write.outcome == A::Refused
+
+pure def canOwnerChangedAtTap(s: AgentCalendar, attempt: int, by: Actor): bool =
+  by == World and s.stage == Sending and A::canConclude(s.write, attempt)
+
+pure def ownerChangedAtTap(s: AgentCalendar, attempt: int, by: Actor): Acted =
+  { state: { ...s, write: A::conclude(s.write, false, true), stage: Idle, card: V::dismiss(s.card), result: Withdrawn },
+    out: List(Report({ result: Withdrawn })) }
 ```
 
 ### The owner declines, or the agent withdraws, and nothing is sent
