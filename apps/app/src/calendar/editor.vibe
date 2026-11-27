@@ -20,7 +20,7 @@ import { Attempts, fresh } from "../runtime/index.vibe"
 import { civilDateAt, formatCivilDate } from "../reminders/recurrence.ts"
 import { type DatedReminderFields, createReminderItem, editDatedReminder, needsReschedule } from "../reminders/reminders.vibe"
 import { DEFAULT_LIST_ID, remindersStore } from "../reminders/store.ts"
-import { answer, contained, filledStore, hearing, reacting, run, started, together } from "../runtime/index.vibe"
+import { answer, contained, filledStore, hearing, reacting, run, started, stream, together } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { calendarInFront } from "./calendar.vibe"
 import { type Target, eventKey, originOwner, storeOrigin } from "./noteOrigin.vibe"
@@ -585,15 +585,38 @@ effect function handOff() {
   try (try PhoneCalendar).handOff({ ...fieldsOf(fields), ...providerTimes(fields), allDay: fields.allDay, attendees: people, alerts, rrule })
 }
 
+type SavedDay = { readonly owner: number; readonly attempt: number; readonly route: number; readonly anchor: number; readonly day: number }
+
+// spec/app/calendar/editor.md, "A saved form closes; a refused one keeps its edits to save again"
+effect function showSavedDay(saved: SavedDay) {
+  const editor = try Editor.Machine
+  const view = try View.Machine
+  const shell = try Shell.Machine
+  const current = (form: Editor.Editor, calendar: View.Calendar, route: Shell.Shell) =>
+    form.owner === saved.owner && form.write.id === saved.attempt && form.write.outcome === "Confirmed" && !form.shown &&
+    calendar.owner === saved.owner && calendar.anchor === saved.anchor && calendar.front &&
+    route.route === saved.route && Shell.showing(route, "Calendar")
+  const changes = Stream.zipLatest(Stream.zipLatest(editor.changes, view.changes), shell.changes)
+  try Stream.runHead(Stream.filter(changes, ([[form, calendar], route]) =>
+    !current(form, calendar, route) || calendar.form === "NoFormShown"))
+  const calendar = try view.get()
+  if (current(try editor.get(), calendar, try shell.get()) && View.canPickDay(calendar, saved.day)) {
+    try contained(view.send({ type: "pickDay", day: saved.day }), "showing the saved day")
+  }
+}
+
 // spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged"
 /** How write `attempt` ended; the calendar asks to read its day again, which waits for the write and then shows it or releases its doubt. */
-effect function written(attempt: number, kind: Write, id: number, scope: Scope, going: boolean, base: number) {
+effect function writeAnswers(attempt: number, kind: Write, id: number, scope: Scope, going: boolean, base: number) {
   const owning = try owner()
+  const view = try View.Machine
+  const anchor = (try view.get()).anchor
+  const route = (try (try Shell.Machine).get()).route
   const draft = try readKept(owning)
   const changingReminder = kind === "UpdateReminder" || kind === "RescheduleReminder"
   if (kind === "Create" || kind === "CreateReminder") {
     if (Option.isNone(draft) || !(try sourceStillOwned(draft.value)) || (try owner()) !== owning) {
-      return { type: "written", attempt, confirmed: false, known: true, filed: false } satisfies Event
+      return Stream.succeed<Event>({ type: "written", attempt, confirmed: false, known: true, filed: false })
     }
   }
   const outcome: Written = kind === "CreateReminder"
@@ -601,21 +624,22 @@ effect function written(attempt: number, kind: Write, id: number, scope: Scope, 
     : changingReminder
       ? (Option.isSome(draft) ? try updateCalendarReminder(draft.value, owning, id, attempt, kind === "RescheduleReminder") : refused)
       : try send(attempt, kind, id, scope, going, base)
-  const view = try View.Machine
   if (kind !== "CreateReminder" && !changingReminder) try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
-  if ((kind === "Create" || kind === "CreateReminder" || kind === "Update") && outcome.confirmed && !("filed" in outcome) && Option.isSome(draft)) {
-    try contained(view.send({ type: "pickDay", day: civilDay(draft.value.begin) }), "showing the saved day")
-  }
   if (kind === "Remove") try contained((try Held.Machine).send({ type: "ended", id, done: outcome.confirmed && !("filed" in outcome), changed: "changed" in outcome }), "telling the deletions how one ended")
-  return { type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true } satisfies Event
+  const result = Stream.succeed<Event>({ type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true })
+  if ((kind === "Create" || kind === "CreateReminder" || kind === "Update") && outcome.confirmed && !("filed" in outcome) && Option.isSome(draft)) {
+    const day = civilDay(draft.value.begin)
+    if (day !== anchor) return Stream.concat(result, Stream.fromEffectDrain(showSavedDay({ owner: owning, attempt, route, anchor, day })))
+  }
+  return result
 }
 
 function carry(fx: Out) {
   return match (fx) {
     when { tag: "Send", let attempt, let kind, let id, let scope, let base }:
-      answer(`write ${attempt}`, written(attempt, kind, id, scope, false, base), { type: "written", attempt, confirmed: false, known: false, filed: false });
+      stream(`write ${attempt}`, Stream.unwrap(writeAnswers(attempt, kind, id, scope, false, base)), { type: "written", attempt, confirmed: false, known: false, filed: false });
     when { tag: "Answer", let attempt, let id, let going, let base }:
-      answer(`answer ${attempt}`, written(attempt, "Reply", id, "ThisOne", going, base), { type: "written", attempt, confirmed: false, known: false, filed: false });
+      stream(`answer ${attempt}`, Stream.unwrap(writeAnswers(attempt, "Reply", id, "ThisOne", going, base)), { type: "written", attempt, confirmed: false, known: false, filed: false });
     when { tag: "HandOff" }: run("hand off", Effect.ignore(handOff()));
     when { tag: "CheckReceipts", let ticket }: answer("receipts", receipts(ticket), { type: "receiptsChecked", ticket, found: false });
     when { tag: "ResetSlot" }:
