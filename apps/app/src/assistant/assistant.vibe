@@ -46,7 +46,7 @@ import { Attempts, fresh } from "../runtime/index.vibe"
 import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
-import { type Job, answer, applying, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields, withoutFields } from "../runtime/index.vibe"
+import { type Job, answer, applying, asides, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields, withoutFields } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
 import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
@@ -54,7 +54,7 @@ import { MapsContext } from "./maps-context.vibe"
 import { MediaReview, mediaReview, noted, ranDirect, standing } from "./media-review.vibe"
 import { agentWarmUp } from "./warm-up.vibe"
 import { type ContactAttachmentScope, contactFileSendCurrent, contactFileTargetCurrent } from "./contact-attachments.vibe"
-import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type PostedMessage, type StoredNotice, Talk, talk } from "./talk.vibe"
+import { type Attached, type Board, type CommsRequest, type DraftSeat, type HistoryBounds, type Line, type Mending, type PostedMessage, type StoredNotice, Talk, talk } from "./talk.vibe"
 import { Views, carried, carriedAloud, delivery, handoffs, pageIn, preparedIn, resendWithoutMode } from "./views.vibe"
 import { attachmentAuthority, dropFiles, readFiles, rememberFiles, retireTranscript, sameBinding, stageFiles } from "./attachments.vibe"
 import { readMessage } from "./read-aloud.vibe"
@@ -112,6 +112,24 @@ const slotted = Schema.fromJsonString(Schema.Struct({
   lastSentId: Schema.optionalKey(Schema.String),
   lastSentWire: Schema.optionalKey(Schema.String),
 }))
+
+/** Bytes that are no longer a slot but still read as an object with a draft's text. */
+const readable = Schema.fromJsonString(Schema.Struct({ text: Schema.String, sending: Schema.optionalKey(Schema.Unknown) }))
+const jsonText = Schema.fromJsonString(Schema.String)
+
+/**
+ * The draft's text that bytes which are no longer a slot still hold, whole or cut short, and whether it may have been
+ * sending: only bytes that said `"sending": false` are an ordinary draft. Nothing comes back from bytes with no text.
+ */
+function salvaged(raw: string): { text: string; sending: boolean } | undefined {
+  const whole = Schema.decodeUnknownOption(readable)(raw)
+  const cut = /"text"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(raw)?.[1]
+  const text = Option.isSome(whole) ? whole.value.text
+    : cut === undefined ? undefined
+    : Option.getOrUndefined(Schema.decodeUnknownOption(jsonText)(`"${cut.replace(/\\(u[0-9a-fA-F]{0,3})?$/, "")}"`))
+  if (text === undefined || text.trim() === "") return undefined
+  return { text, sending: Option.isSome(whole) ? whole.value.sending !== false : !/"sending"\s*:\s*false/.test(raw) }
+}
 
 const pageSize = 20
 
@@ -1026,13 +1044,36 @@ effect function arrived(recorded: boolean): void!!(Composer.Machine | Talk) {
   const before = try composer.get()
   if (!Composer.canArrived(before, recorded)) return
   const { typed, saved } = board.snapshot()
-  if (!recorded) board.change({ typed: saved === "" ? typed : typed === "" ? saved : `${saved}\n${typed}`, saved: "" })
+  if (!recorded) board.change({ typed: bothTexts(saved, typed), saved: "" })
   const accepted = try contained(composer.send({ type: "arrived", recorded }), "telling the composer")
   if (!accepted) {
     if (!recorded) board.change({ typed, saved })
     return
   }
   if (recorded) board.change({ saved: "" })
+}
+
+/** The saved copy and what the owner typed, kept together: the copy first, then the typed text on a new line, unless one already holds the other. */
+function bothTexts(saved: string, typed: string): string {
+  return typed.includes(saved) ? typed : saved.includes(typed) ? saved : `${saved}\n${typed}`
+}
+
+// spec/app/assistant/composer.md, "A conflict keeps the saved copy and the current text together, and saves them"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+/** Put the saved copy and what the owner typed together in the editor and save them, as a conflict is settled or the owner puts back a message under review. */
+export effect function keepBoth(): boolean!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  if (!Composer.canRestoreSaved(try composer.get())) return false
+  const { typed, saved } = board.snapshot()
+  const both = bothTexts(saved, typed)
+  board.change({ typed: both, saved: "" })
+  if (!(try contained(composer.send({ type: "restoreSaved" }), "keeping both drafts"))) {
+    board.change({ typed, saved })
+    return false
+  }
+  const tooLong: Composer.Event = { type: "edit", blank: both.trim() === "", long: true }
+  if (both.length > Composer.textLimit && Composer.enabled(try composer.get(), tooLong)) try contained(composer.send(tooLong), "marking the kept draft's length")
+  return true
 }
 
 function giveBack(board: Board) {
@@ -1396,8 +1437,36 @@ effect function putSlot(board: Board, slot: DraftSlot, expected: string | undefi
   return landed && slot.seat === board.draftSeat
 }
 
+/** Whether bytes of a damaged slot can be set aside beside it: in the store a slot of a browser build is kept in, never on the phone. */
+export function damagedCopyKept(): boolean {
+  return !native()
+}
+
+/** Copy the bytes of a damaged slot to the first place beside it that holds nothing, never over another copy. */
+effect function setAside(slot: DraftSlot, raw: string): boolean!!KeyValueStore.KeyValueStore {
+  if (slot.phone !== undefined) return false
+  const store = try KeyValueStore.KeyValueStore
+  return effect {
+    for (const at of asides(slot.key)) {
+      if ((try store.get(at)) !== undefined) continue
+      try store.set(at, raw)
+      return true
+    }
+    return false
+  } catch () => false
+}
+
+/** A damaged slot whose bytes still hold a draft's text, written back in their place as that draft; as it was where nothing can be read or the write did not land. */
+effect function repaired(board: Board, slot: DraftSlot, held: SlotReading): SlotReading!!(Agent | KeyValueStore.KeyValueStore) {
+  const draft = held.found === "Corrupt" && held.raw !== undefined ? salvaged(held.raw) : undefined
+  if (draft === undefined) return held
+  const raw = JSON.stringify({ revision: 1, text: draft.text, sending: draft.sending })
+  const landed = try putSlot(board, slot, held.raw, raw)
+  return landed ? { found: draft.sending ? "Sending" : "Saved", revision: 1, text: draft.text, raw } : emptySlot("Failure")
+}
+
 // spec/app/assistant/composer.md, "The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable"; spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"; spec/app/assistant/composer.md, "A draft the earlier Alpha kept for the conversation is taken once into an unused slot, and one it was sending comes back for review"
-effect function slotRead(ticket: number, binding: Composer.Binding, recover: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
+effect function slotRead(ticket: number, binding: Composer.Binding, recover: boolean, keep: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
   const machine = try Composer.Machine
   const slot = draftSlot(board, binding)
@@ -1406,9 +1475,11 @@ effect function slotRead(ticket: number, binding: Composer.Binding, recover: boo
   if (!sameBinding(live.binding, binding) || !Composer.canSlotRead(live, ticket, held.revision) || slot?.key !== draftSlot(board, binding)?.key) {
     return { type: "slotRead", ticket, found: "Failure", revision: 0 }
   }
-  if (recover && slot !== undefined && held.found !== "Failure") {
-    const removed = try putSlot(board, slot, held.raw, undefined)
-    held = removed ? emptySlot("Nothing") : emptySlot("Failure")
+  if (slot !== undefined) held = try repaired(board, slot, held)
+  if (recover && slot !== undefined && held.found === "Corrupt" && held.raw !== undefined) {
+    const kept = !keep || (try setAside(slot, held.raw))
+    const removed = kept && (try putSlot(board, slot, held.raw, undefined))
+    held = removed ? emptySlot("Nothing") : kept ? emptySlot("Failure") : held
   }
   if (!recover && slot !== undefined && held.found === "Nothing") {
     const services = try Effect.context<Agent | KeyValueStore.KeyValueStore>()
@@ -1432,7 +1503,7 @@ effect function slotRead(ticket: number, binding: Composer.Binding, recover: boo
   return { type: "slotRead", ticket, found, revision }
 }
 
-// spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops for the owner to choose"
+// spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept"
 effect function wrote(ticket: number, binding: Composer.Binding, sending: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
   const machine = try Composer.Machine
@@ -1495,7 +1566,7 @@ effect function asked(hold: number, attachments: number): void!!(Conversation.Ma
 
 function carryComposer(fx: Composer.Effect): Job<Composer.Event, Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine, []> {
   return match (fx) {
-    when { tag: "ReadSlot", let ticket, let binding, let recover }: answer("slot", slotRead(ticket, binding, recover), { type: "slotRead", ticket, found: "Failure", revision: 0 });
+    when { tag: "ReadSlot", let ticket, let binding, let recover, let keep }: answer("slot", slotRead(ticket, binding, recover, keep), { type: "slotRead", ticket, found: "Failure", revision: 0 });
     when { tag: "Write", let ticket, let binding, let sending }: answer(`write ${ticket}`, wrote(ticket, binding, sending), { type: "wrote", ticket, result: "Lost", revision: 0 });
     when { tag: "Clear", let attempt, let binding, let revision }: answer("clear", cleared(attempt, binding, revision), { type: "cleared", attempt, ok: false, known: false });
     when { tag: "Ask", let hold, let attachments }: run(`ask ${hold}`, asked(hold, attachments));
@@ -1677,6 +1748,81 @@ const opening = following(Composer.Machine, (composer) => (composer.slot === "Cl
 
 // spec/app/assistant/composer.md, "Edits are saved while no send is in hand and storage has not failed"
 const saving = following(Composer.Machine, (composer) => (Composer.canSave(composer) ? composer.draft.edits : undefined), Composer.Machine, (edits): Composer.Event | undefined => (edits === undefined ? undefined : { type: "save" }))
+
+// spec/app/assistant/composer.md, "A conflict keeps the saved copy and the current text together, and saves them"
+const merging = started(effect {
+  const composer = try Composer.Machine
+  try Stream.runForEach(composer.changes, effect (writing) => {
+    if (!writing.unsettled && Composer.canRestoreSaved(writing)) try keepBoth()
+  })
+}, "keeping both drafts")
+
+/** How long Alpha waits before each try it makes by itself; once they are spent, the conversation tells the owner. */
+const mendingMs: Readonly<Record<Mending, readonly number[]>> = { Unkept: [1000, 5000, 30000], Unread: [1000, 5000, 30000], Unchecked: [0, 1000, 5000, 30000] }
+const mendings = ["Unkept", "Unread", "Unchecked"] as const
+const checkForReply = { type: "checkForReply" } as const
+
+/** What Alpha is still settling about the draft by itself: a save that failed, a slot that could not be read, a message that may already have been sent. */
+function mendingOf(writing: Composer.Composer): Mending | undefined {
+  if (writing.slot === "Unreadable") return "Unread"
+  if (writing.slot === "Open" && writing.failing) return "Unkept"
+  return writing.unsettled ? "Unchecked" : undefined
+}
+
+/** Whether what Alpha was settling is settled: a save that landed, a slot that opened, a message no longer under review. */
+function mended(kind: Mending, writing: Composer.Composer): boolean {
+  if (kind === "Unkept") return !writing.failing && writing.draft.sync !== "Saving"
+  if (kind === "Unread") return writing.slot !== "Unreadable" && !Composer.opening(writing)
+  return !writing.unsettled
+}
+
+/** The try that settles `kind`, where the rules allow it now. */
+function mendingTry(kind: Mending, writing: Composer.Composer, talking: Conversation.Conversation): { to: "composer"; event: Composer.Event } | { to: "conversation"; event: Conversation.Event } | undefined {
+  if (mendingOf(writing) !== kind) return undefined
+  if (kind === "Unkept") return Composer.canRetry(writing) ? { to: "composer", event: { type: "retry" } } : undefined
+  if (kind === "Unread") return Composer.canOpen(writing) ? { to: "composer", event: { type: "open" } } : undefined
+  return Conversation.enabled(talking, checkForReply) ? { to: "conversation", event: checkForReply } : undefined
+}
+
+// spec/app/assistant/composer.md, "Retry writes the draft again after storage failed"; spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+const mending = started(effect {
+  const composer = try Composer.Machine
+  const conversation = try Conversation.Machine
+  const time = try Time
+  const device = try Device
+  const { board } = try Talk
+  const tries: Record<Mending, number> = { Unkept: 0, Unread: 0, Unchecked: 0 }
+  let typedAt: number | undefined
+  const mend = effect (kind: Mending | undefined) => {
+    const next = kind === undefined ? undefined : mendingTry(kind, try composer.get(), try conversation.get())
+    if (next === undefined) return false
+    if (next.to === "composer") return try contained(composer.send(next.event), "trying the draft again")
+    return try contained(conversation.send(next.event), "checking whether the message arrived")
+  }
+  const due = Stream.zipLatest(composer.changes, conversation.changes) |> Stream.mapEffect(%, effect ([writing, talking]) => {
+    for (const kind of mendings) if (mended(kind, writing)) tries[kind] = 0
+    const kind = mendingOf(writing)
+    if (kind === "Unkept" && typedAt !== undefined && writing.draft.edits !== typedAt) try mend(kind)
+    if (kind === "Unkept") typedAt = writing.draft.edits
+    else if (mended("Unkept", writing)) typedAt = undefined
+    const stuck = kind !== undefined && tries[kind] >= mendingMs[kind].length ? kind : undefined
+    if (board.snapshot().mending !== stuck) board.change({ mending: stuck })
+    return kind === undefined || stuck !== undefined || mendingTry(kind, writing, talking) === undefined
+      ? undefined : `${kind} ${writing.writing} ${writing.read.ticket} ${talking.recheck.ticket}`
+  }) |> Stream.changes(%)
+  const timed = Stream.switchMap(due, (at) => at === undefined ? Stream.empty : Stream.fromEffect(effect {
+    const kind = mendingOf(try composer.get())
+    if (kind === undefined) return
+    try time.until((try time.now()) + (mendingMs[kind][tries[kind]] ?? 0))
+    try Effect.uninterruptible(effect {
+      if (try mend(kind)) tries[kind] += 1
+    })
+  }))
+  const shown = Stream.filter(device.visible, (visible) => visible) |> Stream.mapEffect(%, () => effect {
+    try mend(mendingOf(try composer.get()))
+  })
+  try Stream.runDrain(Stream.merge(timed, shown))
+}, "settling the draft by itself")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"; spec/app/assistant/composer.md, "Another conversation showing closes the slot and opens that conversation's, once nothing waits in this one"; spec/app/assistant/composer.md, "A message written before its conversation existed moves into the new one, then its old slot is cleared on the exact revision read"; spec/app/assistant/composer.md, "A typed draft in a conversation that vanished moves into the new chat"
 const bound = started(effect {
@@ -2080,7 +2226,7 @@ export const assisting = Layer.provideMerge(
     reacting(Dock, { carry: carryDock }),
     picker,
     reacting(Locator, { carry: carryLocator }),
-    reached, looked, opening, saving, bound, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
+    reached, looked, opening, saving, merging, mending, bound, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
   ),
   Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
 )

@@ -33,7 +33,7 @@ export type AssistantComposerProps = Omit<ComponentProps<"div">, "children" | "o
   closed?: boolean;
   /** The bar or pill is already in place, as after a drag: it changes between the two without an entrance (v119 45f6bed30 chat-overlay-motion-adapter.ts:637-646). */
   still?: boolean;
-  /** Something to tell or ask about the saved draft, above the field. */
+  /** The draft's slot opening, or a draft too long to send, above the field and with no words on show. */
   notice?: AssistantDraftNoticeProps;
   /** Why nothing can be sent now: Alpha cannot be reached, or the screen is sensitive and is never sent. Said to a screen reader only; no text is written by the composer. */
   unavailable?: "away" | "sensitive";

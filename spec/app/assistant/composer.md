@@ -12,8 +12,9 @@ in [attachments](./attachments.md).
 ## Story: Keep what I am writing
 
 > As the owner, I want my unsent message kept through a restart or an app
-> update, never lost to a save that came at the wrong time, and to be told
-> when storage fails, with a way to try again.
+> update, never lost to a save that came at the wrong time, and storage that
+> fails tried again without a word by the field: told in the conversation
+> only when it stays broken, with a way to try again.
 
 ### The composer holds the slot it is bound to, the draft, the editor, the send in hand, and the message moved from a new conversation
 
@@ -60,7 +61,7 @@ moved, and a held message asked of the conversation under its hold number.
 
 ```quint
 type Effect =
-  | ReadSlot({ ticket: int, binding: Binding, recover: bool })
+  | ReadSlot({ ticket: int, binding: Binding, recover: bool, keep: bool })
   | Write({ ticket: int, binding: Binding, sending: bool })
   | Clear({ attempt: int, binding: Binding, revision: int })
   | Ask({ hold: int, attachments: int })
@@ -100,29 +101,43 @@ pure val weight_release = 2
 
 ### The slot is opened when the composer is shown, and opened again after it could not be read
 
+A slot that could not be read is opened again by itself, after one, five
+and thirty seconds and each time Alpha comes back to the front, with no
+words while it opens. Once those three tries have failed, the conversation
+shows one card that the draft cannot be opened, with Try again.
+
 ```quint
 pure def canOpen(c: Composer): bool = (c.slot == Closed or c.slot == Unreadable) and not(opening(c))
 
 pure def open(c: Composer): Moved =
   val read = R::ask(c.read)
-  { state: { ...c, slot: Closed, read: read }, out: List(ReadSlot({ ticket: read.ticket, binding: c.binding, recover: false })) }
+  { state: { ...c, slot: Closed, read: read }, out: List(ReadSlot({ ticket: read.ticket, binding: c.binding, recover: false, keep: false })) }
 ```
 
 ### A damaged slot is recovered on the owner's word
 
-```quint
-pure def canRecover(c: Composer): bool = c.slot == Damaged
+Only a slot whose bytes hold no readable text is damaged. The conversation,
+never the field, shows one card with Keep a copy, where the slot's store
+can hold one, and Discard. Keep a copy sets the bytes aside beside the slot
+first, and recovers only once they are kept; recovering removes only the
+exact damaged bytes it read, and never a draft that can be read.
 
-pure def recover(c: Composer): Moved =
+```quint
+pure def canRecover(c: Composer, keep: bool): bool = c.slot == Damaged
+
+pure def recover(c: Composer, keep: bool): Moved =
   val read = R::ask(c.read)
-  { state: { ...c, slot: Closed, read: read }, out: List(ReadSlot({ ticket: read.ticket, binding: c.binding, recover: true })) }
+  { state: { ...c, slot: Closed, read: read }, out: List(ReadSlot({ ticket: read.ticket, binding: c.binding, recover: true, keep: keep })) }
 ```
 
 ### The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable
 
 A saved draft is put in the editor as the owner left it. A draft the slot
-marks as sending may already have been sent: it is shown for review, never
-put in the editor by itself.
+marks as sending may already have been sent: it is held for review, never
+put in the editor by itself. Bytes that are no longer a slot but still hold
+a draft's text are written back in their place, as a draft with that text,
+marked as sending unless they said it was not, and read as that draft; only
+bytes with no readable text are reported damaged.
 
 ```quint
 type Found = Nothing | Saved | Sending | Corrupt | Failure
@@ -186,9 +201,9 @@ pure def canSave(c: Composer): bool = c.slot == Open and c.away == Free and not(
 pure def save(c: Composer): Moved = written(false, c)
 ```
 
-### A write that lands clears any sending mark, and one that finds another revision stops for the owner to choose
+### A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept
 
-A write that fails keeps the edits unsaved and says so, with Retry. A
+A write that fails keeps the edits unsaved, to be written again. A
 message whose mark could not be written goes back into the composer: it
 was never asked. The first write that lands in a new conversation's slot
 lets the slot the message came from be cleared.
@@ -218,6 +233,12 @@ pure def wrote(c: Composer, ticket: int, result: Wrote, revision: int): Moved =
 ```
 
 ### Retry writes the draft again after storage failed
+
+Alpha tries again by itself, with no words by the field: at the owner's
+next edit, after one, five and thirty seconds, and each time it comes back
+to the front. Once those three timed tries have failed, Send stays
+blocked and the conversation shows one card that the draft cannot be
+kept, with Try again.
 
 ```quint
 pure def canRetry(c: Composer): bool = c.failing and c.slot == Open and c.away == Free and D::canSave(c.draft)
@@ -395,47 +416,53 @@ pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
   c.binding.conversation == 0 and c.slot == Open and c.editor.text and c.draft.sync == D::Saving
 ```
 
-## Story: Choose between my text and the saved copy
+## Story: Keep both my text and the saved copy
 
-> As the owner, when the slot holds a copy I did not expect, I want to see
-> it and choose: restore the saved copy, or keep my current text and save
-> it over the saved one.
+> As the owner, when the slot holds a copy I did not expect, I want neither
+> it nor my text lost: both kept in the field and saved, without being asked
+> and without a word by the field.
 
-### A conflict offers the saved copy to restore, or the current text to save over it
+### A conflict keeps the saved copy and the current text together, and saves them
 
-Keep current and replace saved are one choice: what the editor holds is
-saved over the slot's copy. Restoring a message the slot marked as sending
-makes it an ordinary draft again, and the mark is written away.
+Alpha settles a conflict by itself. Where the current text already holds
+the saved copy, it is saved over the copy (replace saved). Otherwise the
+editor takes the saved copy, followed on a new line by the current text
+unless the copy already holds it, and that text is written to the slot as
+a new revision (restore saved). Restoring a message the slot marked as
+sending makes it an ordinary draft again, and the mark is written away.
 
 ```quint
-pure def restored(marked: bool, c: Composer): Moved =
-  val taken = { ...c, draft: D::takeSaved(c.draft), editor: { ...c.editor, text: true }, unsettled: false }
-  if (marked) written(false, { ...taken, draft: D::edit(taken.draft) }) else { state: taken, out: List() }
+pure def restored(saved: D::Draft, c: Composer): Moved =
+  written(false, { ...c, draft: D::edit(D::takeSaved(saved)), editor: { ...c.editor, text: true }, unsettled: false })
 
 pure def canRestoreSaved(c: Composer): bool = c.slot == Open and c.away == Free and D::canChoose(c.draft)
 
-pure def restoreSaved(c: Composer): Moved = restored(c.marked, c)
+pure def restoreSaved(c: Composer): Moved = restored(c.draft, c)
 
 pure def canReplaceSaved(c: Composer): bool = c.slot == Open and c.away == Free and D::canChoose(c.draft)
 
 pure def replaceSaved(c: Composer): Composer = { ...c, draft: D::keepMine(c.draft), unsettled: false }
 ```
 
-### A message that may already have been sent offers Check for reply, and what the read found settles it
+### A message that may already have been sent is checked by itself, and what the read found settles it
 
-The conversation's one read says whether the message arrived. If it did,
-the mark is written away and the message is not offered again; if it was
-never recorded, it goes back into the editor to send. Restoring it without
-a check stays the owner's own choice.
+Alpha asks the conversation's one read by itself as soon as the agent can
+answer, then after one, five and thirty seconds and each time it comes back
+to the front. If the message arrived, the mark is written away and nothing
+is shown; if it was never recorded, it goes back into the editor, ahead of
+what the owner typed since, for the owner to send. Nothing is ever sent by
+itself. Once those tries cannot tell, the conversation shows one card that
+the message may not have arrived, with Check again and Put back in the
+field; putting it back unchecked stays the owner's own choice.
 
 ```quint
 pure def canArrived(c: Composer, recorded: bool): bool = c.unsettled and c.away == Free
 
 pure def arrived(c: Composer, recorded: bool): Moved =
-  if (recorded) { state: { ...c, draft: D::keepMine(c.draft), unsettled: false }, out: List() } else restored(c.marked, c)
+  if (recorded) { state: { ...c, draft: D::keepMine(c.draft), unsettled: false }, out: List() } else restored(c.draft, c)
 ```
 
-### A message that may already have been sent is under review until the owner chooses
+### A message that may already have been sent is under review until a check or the owner settles it
 
 ```quint
 pure def alwaysAnUnsettledMessageIsUnderReview(c: Composer): bool =
@@ -450,7 +477,7 @@ pure def stepAReviewEndsOnlyByAChoice(before: Composer, via: str, after: Compose
     (via == "restoreSaved" or via == "replaceSaved" or via == "arrived" or via == "bind" or via == "switchOwner" or via == "reopen")
 ```
 
-### The owner can be choosing between two copies
+### Two copies can meet
 
 ```quint
 pure def sometimesTwoCopiesAreOffered(c: Composer): bool = c.draft.sync == D::Conflicted and not(c.unsettled)
