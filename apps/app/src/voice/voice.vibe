@@ -1253,7 +1253,9 @@ const bridgeEvents = hearing(
     const { memory } = try VoiceWords
     return Stream.mapEffect(bridge.events, effect (event: VoiceEvent): (Voice.Event | undefined)!!(Device | Layers.Machine | VoiceBridge) => {
       if (event.kind === "speechEnd" && event.text !== "") {
-        const state = try voice.get()
+        // spec/app/voice/index.md, "When the owner finishes speaking, the microphone closes, and only then is the turn sent, once and automatically": a gap that ends while the microphone Unmute reopened is still opening ends the turn as soon as it is open.
+        const settled = try Stream.runHead(Stream.filter(voice.changes, (live) => !Voice.turnEndWaits(live, event.session)))
+        const state = Option.isSome(settled) ? settled.value : try voice.get()
         if (Voice.canTurnEnded(state, event.session)) {
           memory.setHeard({ session: state.session, turn: state.turn, text: event.text })
           // spec/app/voice/index.md, "What the owner said shows at once as their message, with Alpha's working dots and then its reply under it, until the conversation records it"

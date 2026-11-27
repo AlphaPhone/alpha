@@ -126,6 +126,8 @@ export interface ShownStore {
   readonly listed: (calendars: ReadonlyArray<{ readonly calendarId: string; readonly summary?: string; readonly primary?: boolean }>) => void;
   /** The summary the agent listed for `calendarId`, or else its primary calendar's, or "" where it listed none. @throws {never} */
   readonly listedName: (calendarId: string) => string;
+  /** The summary the agent listed for `calendarId` itself, or "" where it listed none for it. @throws {never} */
+  readonly listedSummary: (calendarId: string) => string;
   /** Clear every cached row, revision, and id mapping when the runtime scope closes. @throws {never} */
   readonly reset: () => void;
 }
@@ -277,6 +279,7 @@ export function createShownStore(): ShownStore {
       told();
     },
     listedName: (calendarId) => names.get(calendarId) ?? primaryName,
+    listedSummary: (calendarId) => names.get(calendarId) ?? "",
     reset() {
       names.clear();
       primaryName = "";
