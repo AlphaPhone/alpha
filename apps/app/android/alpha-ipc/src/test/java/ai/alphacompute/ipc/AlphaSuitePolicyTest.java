@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import android.content.pm.PackageManager;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.Test;
@@ -42,8 +43,36 @@ public final class AlphaSuitePolicyTest {
         assertNull(AlphaSuitePolicy.normalizePath("/api//notes/state"));
         assertNull(AlphaSuitePolicy.normalizePath("api/notes/state"));
         assertNull(AlphaSuitePolicy.normalizePath("/api/notes/state\u0000"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/state?q=ok\r\nX-Injected: 1"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/state?q=\u0000"));
+        assertNull(AlphaSuitePolicy.normalizePath("/api/notes/state#frag\u007f"));
         assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/../wallet"));
         assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/%2e%2e/wallet"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/notes/state?q=ok\r\nInjected: 1"));
+        assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/maps/routes?q=ok\n"));
+    }
+
+    @Test public void signatureMatchHelperEnforcesNonEmptyAndMatchResult() {
+        assertTrue(AlphaIpcContract.isSignatureMatchForCore(
+            "ai.alphacompute.notes",
+            AlphaIpcContract.CORE_PACKAGE,
+            PackageManager.SIGNATURE_MATCH
+        ));
+        assertFalse(AlphaIpcContract.isSignatureMatchForCore(
+            "ai.alphacompute.notes",
+            AlphaIpcContract.CORE_PACKAGE,
+            PackageManager.SIGNATURE_NO_MATCH
+        ));
+        assertFalse(AlphaIpcContract.isSignatureMatchForCore(
+            "",
+            AlphaIpcContract.CORE_PACKAGE,
+            PackageManager.SIGNATURE_MATCH
+        ));
+        assertFalse(AlphaIpcContract.isSignatureMatchForCore(
+            null,
+            AlphaIpcContract.CORE_PACKAGE,
+            PackageManager.SIGNATURE_MATCH
+        ));
     }
 
     @Test public void enforcesCloudRoutesAndSecureStoreSlots() {

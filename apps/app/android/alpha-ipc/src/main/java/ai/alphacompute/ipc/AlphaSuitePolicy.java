@@ -186,16 +186,16 @@ public final class AlphaSuitePolicy {
         return PRIV_PREFERENCE_WRITERS.contains(packageName);
     }
 
-    /** Validates and strips query/fragment from a request path, rejecting traversal or control characters. */
+    /** Validates and strips query/fragment from a request path, rejecting traversal or control characters anywhere in {@code rawPath}. */
     public static String normalizePath(String rawPath) {
-        if (rawPath == null || rawPath.isEmpty() || rawPath.length() > 2048) return null;
+        if (rawPath == null || rawPath.isEmpty() || rawPath.length() > 2048 || hasUnsafeChars(rawPath)) return null;
         int cut = rawPath.length();
         int query = rawPath.indexOf('?');
         if (query >= 0 && query < cut) cut = query;
         int hash = rawPath.indexOf('#');
         if (hash >= 0 && hash < cut) cut = hash;
         String path = rawPath.substring(0, cut);
-        if (!path.startsWith("/") || path.contains("\\") || path.contains("//") || hasUnsafeChars(path)) {
+        if (!path.startsWith("/") || path.contains("\\") || path.contains("//")) {
             return null;
         }
         String lower = path.toLowerCase(Locale.ROOT);

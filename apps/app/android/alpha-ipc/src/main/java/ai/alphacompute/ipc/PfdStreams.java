@@ -42,6 +42,15 @@ public final class PfdStreams {
 
     private PfdStreams() {}
 
+    /** Closes {@code fd} without throwing, safe on {@code null} or already-closed descriptors. */
+    public static void closeQuietly(ParcelFileDescriptor fd) {
+        if (fd == null) return;
+        try {
+            fd.close();
+        } catch (IOException ignored) {
+        }
+    }
+
     /** Whether {@code data} exceeds {@link AlphaIpcContract#INLINE_BODY_LIMIT_BYTES} and must stream over a pipe FD. */
     public static boolean shouldUsePfd(byte[] data) {
         return data != null && data.length > AlphaIpcContract.INLINE_BODY_LIMIT_BYTES;

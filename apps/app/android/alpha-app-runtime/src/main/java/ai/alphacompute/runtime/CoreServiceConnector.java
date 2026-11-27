@@ -97,7 +97,7 @@ public final class CoreServiceConnector<T extends IInterface> implements Closeab
 
     /** Returns an active verified Binder proxy within {@code timeoutMs}, or {@code null} when unavailable. */
     public T connect(long timeoutMs) {
-        if (!AlphaIpcContract.hasCoreSignature(context, AlphaIpcContract.CORE_PACKAGE)) {
+        if (!AlphaIpcContract.hasSameSignatureAsCore(context)) {
             return null;
         }
         CountDownLatch latch;
@@ -143,7 +143,7 @@ public final class CoreServiceConnector<T extends IInterface> implements Closeab
 
     /** Proactively triggers asynchronous binding without blocking the calling thread. */
     public void warmUp() {
-        if (!AlphaIpcContract.hasCoreSignature(context, AlphaIpcContract.CORE_PACKAGE)) return;
+        if (!AlphaIpcContract.hasSameSignatureAsCore(context)) return;
         synchronized (lock) {
             if (closed || bound) return;
             pending = new CountDownLatch(1);

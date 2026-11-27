@@ -21,6 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -144,42 +145,51 @@ public final class RemoteAgentPlugin extends Plugin {
         byte[] bodyBytes = serializeBody(call.getData().opt("body"));
         String headersJson = serializeHeaders(call.getData().opt("headers"));
 
-        workers.execute(() -> {
-            IAlphaAgentBroker broker = connector.connect();
-            if (broker == null) {
-                reject(call, AlphaIpcContract.FAIL_NOT_READY);
-                return;
-            }
-            activeCalls.add(id);
-            try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
-                broker.request(id, method, path, payload.inlineBody(), payload.bodyFd(), headersJson, new IAlphaRequestCallback.Stub() {
-                    @Override public void onResponse(String callId, int status, byte[] inlineBody, ParcelFileDescriptor bodyFd) {
-                        activeCalls.remove(callId);
-                        workers.execute(() -> {
+        try {
+            workers.execute(() -> {
+                IAlphaAgentBroker broker = connector.connect();
+                if (broker == null) {
+                    reject(call, AlphaIpcContract.FAIL_NOT_READY);
+                    return;
+                }
+                activeCalls.add(id);
+                try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
+                    broker.request(id, method, path, payload.inlineBody(), payload.bodyFd(), headersJson, new IAlphaRequestCallback.Stub() {
+                        @Override public void onResponse(String callId, int status, byte[] inlineBody, ParcelFileDescriptor bodyFd) {
+                            activeCalls.remove(callId);
                             try {
-                                byte[] bytes = PfdStreams.unpack(inlineBody, bodyFd, AlphaIpcContract.MAX_PFD_BODY_BYTES);
-                                call.resolve(decodeResponse(status, bytes));
-                            } catch (IOException failed) {
-                                reject(call, failed instanceof PfdStreams.PayloadTooLargeException
-                                    ? AlphaIpcContract.FAIL_TOO_LARGE
-                                    : AlphaIpcContract.FAIL_BROKEN);
+                                workers.execute(() -> {
+                                    try {
+                                        byte[] bytes = PfdStreams.unpack(inlineBody, bodyFd, AlphaIpcContract.MAX_PFD_BODY_BYTES);
+                                        call.resolve(decodeResponse(status, bytes));
+                                    } catch (IOException failed) {
+                                        reject(call, failed instanceof PfdStreams.PayloadTooLargeException
+                                            ? AlphaIpcContract.FAIL_TOO_LARGE
+                                            : AlphaIpcContract.FAIL_BROKEN);
+                                    }
+                                });
+                            } catch (RejectedExecutionException closed) {
+                                PfdStreams.closeQuietly(bodyFd);
+                                reject(call, AlphaIpcContract.FAIL_BROKEN);
                             }
-                        });
-                    }
+                        }
 
-                    @Override public void onError(String callId, String failCode, String message) {
-                        activeCalls.remove(callId);
-                        reject(call, failCode == null || failCode.isEmpty() ? AlphaIpcContract.FAIL_BROKEN : failCode);
-                    }
-                });
-            } catch (PfdStreams.PayloadTooLargeException tooLarge) {
-                activeCalls.remove(id);
-                reject(call, AlphaIpcContract.FAIL_TOO_LARGE);
-            } catch (IOException | RemoteException | SecurityException failed) {
-                activeCalls.remove(id);
-                reject(call, failed instanceof SecurityException ? AlphaIpcContract.FAIL_ROUTE_REFUSED : AlphaIpcContract.FAIL_BROKEN);
-            }
-        });
+                        @Override public void onError(String callId, String failCode, String message) {
+                            activeCalls.remove(callId);
+                            reject(call, failCode == null || failCode.isEmpty() ? AlphaIpcContract.FAIL_BROKEN : failCode);
+                        }
+                    });
+                } catch (PfdStreams.PayloadTooLargeException tooLarge) {
+                    activeCalls.remove(id);
+                    reject(call, AlphaIpcContract.FAIL_TOO_LARGE);
+                } catch (IOException | RemoteException | SecurityException failed) {
+                    activeCalls.remove(id);
+                    reject(call, failed instanceof SecurityException ? AlphaIpcContract.FAIL_ROUTE_REFUSED : AlphaIpcContract.FAIL_BROKEN);
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            reject(call, AlphaIpcContract.FAIL_NOT_READY);
+        }
     }
 
     @PluginMethod public void requestStream(PluginCall call) {
@@ -193,52 +203,56 @@ public final class RemoteAgentPlugin extends Plugin {
         byte[] bodyBytes = serializeBody(call.getData().opt("body"));
         String headersJson = serializeHeaders(call.getData().opt("headers"));
 
-        workers.execute(() -> {
-            IAlphaAgentBroker broker = connector.connect();
-            if (broker == null) {
-                reject(call, AlphaIpcContract.FAIL_NOT_READY);
-                return;
-            }
-            activeCalls.add(id);
-            try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
-                broker.requestStream(id, method, path, payload.inlineBody(), payload.bodyFd(), headersJson, new IAlphaStreamCallback.Stub() {
-                    @Override public void onHead(String callId, long index, int status, String responseHeadersJson) {
-                        JSObject head = new JSObject()
-                            .put("id", callId)
-                            .put("kind", "head")
-                            .put("index", index)
-                            .put("status", status)
-                            .put("headers", parseObject(responseHeadersJson, new JSObject()));
-                        notifyListeners("streamData", head);
-                    }
-
-                    @Override public void onChunk(String callId, long index, byte[] chunk) {
-                        JSObject frame = new JSObject()
-                            .put("id", callId)
-                            .put("kind", "chunk")
-                            .put("index", index)
-                            .put("dataBase64", Base64.encodeToString(chunk == null ? new byte[0] : chunk, Base64.NO_WRAP));
-                        notifyListeners("streamData", frame);
-                    }
-
-                    @Override public void onEnd(String callId, String kind, String failCode) {
-                        activeCalls.remove(callId);
-                        JSObject end = new JSObject().put("id", callId).put("kind", kind == null ? "end" : kind);
-                        if ("failed".equals(kind) && failCode != null && !failCode.isEmpty()) {
-                            end.put("code", failCode);
+        try {
+            workers.execute(() -> {
+                IAlphaAgentBroker broker = connector.connect();
+                if (broker == null) {
+                    reject(call, AlphaIpcContract.FAIL_NOT_READY);
+                    return;
+                }
+                activeCalls.add(id);
+                try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
+                    broker.requestStream(id, method, path, payload.inlineBody(), payload.bodyFd(), headersJson, new IAlphaStreamCallback.Stub() {
+                        @Override public void onHead(String callId, long index, int status, String responseHeadersJson) {
+                            JSObject head = new JSObject()
+                                .put("id", callId)
+                                .put("kind", "head")
+                                .put("index", index)
+                                .put("status", status)
+                                .put("headers", parseObject(responseHeadersJson, new JSObject()));
+                            notifyListeners("streamData", head);
                         }
-                        notifyListeners("streamEnd", end);
-                    }
-                });
-                call.resolve(new JSObject().put("id", id));
-            } catch (PfdStreams.PayloadTooLargeException tooLarge) {
-                activeCalls.remove(id);
-                reject(call, AlphaIpcContract.FAIL_TOO_LARGE);
-            } catch (IOException | RemoteException | SecurityException failed) {
-                activeCalls.remove(id);
-                reject(call, failed instanceof SecurityException ? AlphaIpcContract.FAIL_ROUTE_REFUSED : AlphaIpcContract.FAIL_BROKEN);
-            }
-        });
+
+                        @Override public void onChunk(String callId, long index, byte[] chunk) {
+                            JSObject frame = new JSObject()
+                                .put("id", callId)
+                                .put("kind", "chunk")
+                                .put("index", index)
+                                .put("dataBase64", Base64.encodeToString(chunk == null ? new byte[0] : chunk, Base64.NO_WRAP));
+                            notifyListeners("streamData", frame);
+                        }
+
+                        @Override public void onEnd(String callId, String kind, String failCode) {
+                            activeCalls.remove(callId);
+                            JSObject end = new JSObject().put("id", callId).put("kind", kind == null ? "end" : kind);
+                            if ("failed".equals(kind) && failCode != null && !failCode.isEmpty()) {
+                                end.put("code", failCode);
+                            }
+                            notifyListeners("streamEnd", end);
+                        }
+                    });
+                    call.resolve(new JSObject().put("id", id));
+                } catch (PfdStreams.PayloadTooLargeException tooLarge) {
+                    activeCalls.remove(id);
+                    reject(call, AlphaIpcContract.FAIL_TOO_LARGE);
+                } catch (IOException | RemoteException | SecurityException failed) {
+                    activeCalls.remove(id);
+                    reject(call, failed instanceof SecurityException ? AlphaIpcContract.FAIL_ROUTE_REFUSED : AlphaIpcContract.FAIL_BROKEN);
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            reject(call, AlphaIpcContract.FAIL_NOT_READY);
+        }
     }
 
     @PluginMethod public void abort(PluginCall call) {

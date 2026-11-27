@@ -115,10 +115,28 @@ public final class AlphaIpcContract {
         return null;
     }
 
-    /** Verifies that {@code packageName} matches the signing certificate of {@code AlphaCore}. */
+    /** Verifies that the calling app package itself shares the signing certificate of {@code AlphaCore}. */
+    public static boolean hasSameSignatureAsCore(Context context) {
+        if (context == null) return false;
+        String ownPackage = context.getPackageName();
+        PackageManager packages = context.getPackageManager();
+        if (packages == null || ownPackage == null || ownPackage.isEmpty()) return false;
+        return isSignatureMatchForCore(ownPackage, CORE_PACKAGE, packages.checkSignatures(ownPackage, CORE_PACKAGE));
+    }
+
+    /** Verifies that both the current app and {@code packageName} match the signing certificate of {@code AlphaCore}. */
     public static boolean hasCoreSignature(Context context, String packageName) {
         if (context == null || packageName == null || packageName.isEmpty()) return false;
+        if (!hasSameSignatureAsCore(context)) return false;
         PackageManager packages = context.getPackageManager();
         return packages != null && packages.checkSignatures(CORE_PACKAGE, packageName) == PackageManager.SIGNATURE_MATCH;
+    }
+
+    /** Evaluates a {@link PackageManager#checkSignatures} result between {@code ownPackage} and {@code corePackage}. */
+    public static boolean isSignatureMatchForCore(String ownPackage, String corePackage, int signatureResult) {
+        if (ownPackage == null || ownPackage.isEmpty() || corePackage == null || corePackage.isEmpty()) {
+            return false;
+        }
+        return signatureResult == PackageManager.SIGNATURE_MATCH;
     }
 }

@@ -19,7 +19,7 @@ public final class AlphaPreferencesPlugin extends Plugin {
     private ContentObserver observer;
 
     @Override public void load() {
-        if (!AlphaIpcContract.hasCoreSignature(getContext(), AlphaIpcContract.CORE_PACKAGE)) return;
+        if (!AlphaIpcContract.hasSameSignatureAsCore(getContext())) return;
         observer = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange, Uri uri) {
                 String key = uri == null ? null : uri.getLastPathSegment();
@@ -113,7 +113,7 @@ public final class AlphaPreferencesPlugin extends Plugin {
     }
 
     private Bundle callProvider(String method, String key, Bundle extras) {
-        if (!AlphaIpcContract.hasCoreSignature(getContext(), AlphaIpcContract.CORE_PACKAGE)) return null;
+        if (!AlphaIpcContract.hasSameSignatureAsCore(getContext())) return null;
         try {
             return getContext().getContentResolver().call(
                 Uri.parse(AlphaIpcContract.PREFERENCES_URI_STRING),

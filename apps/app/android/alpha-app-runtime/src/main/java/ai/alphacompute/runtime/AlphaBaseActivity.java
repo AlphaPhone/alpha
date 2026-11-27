@@ -204,7 +204,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     }
 
     private void registerPreferencesObserver() {
-        if (preferencesObserver != null || !AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return;
+        if (preferencesObserver != null || !AlphaIpcContract.hasSameSignatureAsCore(this)) return;
         preferencesObserver = new ContentObserver(mainHandler) {
             @Override public void onChange(boolean selfChange, Uri uri) {
                 syncSharedAppearanceAndTextScale();
@@ -231,7 +231,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     }
 
     private void syncSharedAppearanceAndTextScale() {
-        if (!AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return;
+        if (!AlphaIpcContract.hasSameSignatureAsCore(this)) return;
         Bundle snapshot;
         try {
             snapshot = getContentResolver().call(
@@ -289,35 +289,52 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
 
     private void captureAgentIntent(Intent intent) {
         if (intent == null || !AlphaIpcContract.ACTION_AGENT_OPEN.equals(intent.getAction())) return;
-        if (!isVerifiedCoreCaller()) {
-            Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=unverified_caller");
-            rejectUnverifiedCallback(intent);
-            return;
-        }
-        String claimId = intent.getStringExtra(AlphaIpcContract.EXTRA_CLAIM_ID);
-        int ticket = intent.getIntExtra(AlphaIpcContract.EXTRA_TICKET, 0);
-        String nonce = intent.getStringExtra(AlphaIpcContract.EXTRA_NONCE);
-        String payload = intent.getStringExtra(AlphaIpcContract.EXTRA_PAYLOAD);
-        if (payload != null && payload.getBytes(StandardCharsets.UTF_8).length > AlphaIpcContract.MAX_INTENT_PAYLOAD_BYTES) {
-            Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=payload_too_large");
-            rejectCallbackFromExtras(intent.getExtras(), claimId, AlphaIpcContract.FAIL_TOO_LARGE);
-            return;
+        AlphaAgentOpenActivity.VerifiedOpen handoff = AlphaAgentOpenActivity.consumeHandoff(
+            intent.getStringExtra(AlphaAgentOpenActivity.EXTRA_INTERNAL_HANDOFF)
+        );
+        String uriString;
+        String claimId;
+        int ticket;
+        String nonce;
+        String payload;
+        IAlphaActionCallback callback;
+        if (handoff != null) {
+            uriString = handoff.uri();
+            claimId = handoff.claimId();
+            ticket = handoff.ticket();
+            nonce = handoff.nonce();
+            payload = handoff.payload();
+            callback = handoff.callback();
+        } else {
+            if (!isVerifiedCoreCaller()) {
+                Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=unverified_caller");
+                rejectUnverifiedCallback(intent);
+                return;
+            }
+            uriString = intent.getDataString();
+            claimId = intent.getStringExtra(AlphaIpcContract.EXTRA_CLAIM_ID);
+            ticket = intent.getIntExtra(AlphaIpcContract.EXTRA_TICKET, 0);
+            nonce = intent.getStringExtra(AlphaIpcContract.EXTRA_NONCE);
+            payload = intent.getStringExtra(AlphaIpcContract.EXTRA_PAYLOAD);
+            if (payload != null && payload.getBytes(StandardCharsets.UTF_8).length > AlphaIpcContract.MAX_INTENT_PAYLOAD_BYTES) {
+                Log.w(TAG, "event=agent_open_rejected app=" + alphaAppId() + " view=" + alphaViewName() + " reason=payload_too_large");
+                rejectCallbackFromExtras(intent.getExtras(), claimId, AlphaIpcContract.FAIL_TOO_LARGE);
+                return;
+            }
+            Bundle extras = intent.getExtras();
+            IBinder binder = extras == null ? null : extras.getBinder(AlphaIpcContract.EXTRA_CALLBACK);
+            callback = binder == null ? null : IAlphaActionCallback.Stub.asInterface(binder);
         }
         Log.i(TAG, "event=agent_open app=" + alphaAppId() + " view=" + alphaViewName() + " verified=true claimId=" + (claimId == null ? "" : claimId));
-        Bundle extras = intent.getExtras();
-        if (extras != null && claimId != null && !claimId.isEmpty()) {
-            IBinder binder = extras.getBinder(AlphaIpcContract.EXTRA_CALLBACK);
-            if (binder != null) {
-                IAlphaActionCallback callback = IAlphaActionCallback.Stub.asInterface(binder);
-                if (callback != null) pendingActions.put(claimId, callback);
-            }
+        if (callback != null && claimId != null && !claimId.isEmpty()) {
+            pendingActions.put(claimId, callback);
         }
         JSONObject detail = new JSONObject();
         try {
             detail.put("action", AlphaIpcContract.ACTION_AGENT_OPEN);
             detail.put("appId", alphaAppId());
             detail.put("view", alphaViewName());
-            detail.put("uri", intent.getDataString() == null ? JSONObject.NULL : intent.getDataString());
+            detail.put("uri", uriString == null ? JSONObject.NULL : uriString);
             detail.put("claimId", claimId == null ? JSONObject.NULL : claimId);
             detail.put("ticket", ticket);
             detail.put("nonce", nonce == null ? JSONObject.NULL : nonce);
@@ -335,15 +352,11 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     }
 
     private boolean isVerifiedCoreCaller() {
-        if (!AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE)) return false;
+        if (!AlphaIpcContract.hasSameSignatureAsCore(this)) return false;
         if (Build.VERSION.SDK_INT >= 34) {
-            String launchedFrom = getLaunchedFromPackage();
-            if (launchedFrom != null) return AlphaIpcContract.CORE_PACKAGE.equals(launchedFrom);
+            return AlphaIpcContract.CORE_PACKAGE.equals(getLaunchedFromPackage());
         }
-        Uri referrer = getReferrer();
-        return referrer != null
-            && "android-app".equals(referrer.getScheme())
-            && AlphaIpcContract.CORE_PACKAGE.equals(referrer.getHost());
+        return false;
     }
 
     private void rejectUnverifiedCallback(Intent intent) {
@@ -384,7 +397,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         Uri data = intent == null ? null : intent.getData();
         String uriSummary = data == null ? "none" : (data.getScheme() + "://" + data.getHost() + (data.getPath() == null ? "" : data.getPath()));
         diagnosticWorker.execute(() -> {
-            boolean coreSignature = AlphaIpcContract.hasCoreSignature(this, AlphaIpcContract.CORE_PACKAGE);
+            boolean coreSignature = AlphaIpcContract.hasSameSignatureAsCore(this);
             boolean prefsConnected = false;
             int prefsKeys = 0;
             if (coreSignature) {

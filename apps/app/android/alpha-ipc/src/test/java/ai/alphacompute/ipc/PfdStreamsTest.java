@@ -49,4 +49,11 @@ public final class PfdStreamsTest {
         }
         assertArrayEquals(source, reassembled.toByteArray());
     }
+
+    @Test public void closeQuietlyAndNullPayloadCloseAreSafe() {
+        PfdStreams.closeQuietly(null);
+        PfdStreams.Payload payload = new PfdStreams.Payload(new byte[] { 1, 2, 3 }, null);
+        payload.close();
+        assertEquals(3, payload.inlineBody().length);
+    }
 }

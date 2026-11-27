@@ -2,6 +2,8 @@ package ai.alphacompute.runtime;
 
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.IAlphaContextRegistry;
+import android.os.Binder;
+import android.os.IBinder;
 import android.os.RemoteException;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -17,6 +19,7 @@ import org.json.JSONObject;
 /** Capacitor bridge publishing bounded foreground UI context to {@link IAlphaContextRegistry} and settling signed agent intents. */
 @CapacitorPlugin(name = "AlphaContext")
 public final class AlphaContextPlugin extends Plugin {
+    private final Binder clientToken = new Binder();
     private final ExecutorService workers = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "AlphaContextClient");
         thread.setDaemon(true);
@@ -24,16 +27,32 @@ public final class AlphaContextPlugin extends Plugin {
     });
 
     private CoreServiceConnector<IAlphaContextRegistry> connector;
+    private volatile IBinder registeredBinder;
 
     @Override public void load() {
         connector = new CoreServiceConnector<>(getContext(), AlphaIpcContract.ACTION_CONTEXT_REGISTRY, IAlphaContextRegistry.Stub::asInterface);
         connector.warmUp();
+        workers.execute(() -> {
+            IAlphaContextRegistry registry = connector.connect();
+            if (registry != null) ensureClientRegistered(registry);
+        });
     }
 
     @Override protected void handleOnDestroy() {
+        registeredBinder = null;
         if (connector != null) connector.close();
         workers.shutdownNow();
         super.handleOnDestroy();
+    }
+
+    private void ensureClientRegistered(IAlphaContextRegistry registry) {
+        IBinder remote = registry.asBinder();
+        if (remote == null || remote == registeredBinder) return;
+        try {
+            registry.registerClient(clientToken);
+            registeredBinder = remote;
+        } catch (RemoteException | SecurityException ignored) {
+        }
     }
 
     /** Clears a foreground view context from native lifecycle callbacks such as {@code onPause}. */
@@ -72,6 +91,7 @@ public final class AlphaContextPlugin extends Plugin {
                 return;
             }
             try {
+                ensureClientRegistered(registry);
                 registry.publishContext(view, route, snapshotJson, sensitive, leaseMs);
                 call.resolve(new JSObject().put("published", true));
             } catch (RemoteException | SecurityException failed) {

@@ -26,6 +26,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -91,46 +92,55 @@ public final class RemoteCloudPlugin extends Plugin {
             return;
         }
         String finalCallId = callId;
-        workers.execute(() -> {
-            IAlphaPlatformBroker broker = connector.connect();
-            if (broker == null) {
-                reject(call, AlphaIpcContract.CLOUD_NOT_CONFIGURED);
-                return;
-            }
-            try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
-                broker.cloudRequest(
-                    finalCallId,
-                    method,
-                    parsed.path,
-                    parsed.queryJson,
-                    headersJson,
-                    payload.inlineBody(),
-                    payload.bodyFd(),
-                    expectedCredentialId,
-                    expectedSessionCredentialId,
-                    new IAlphaCloudCallback.Stub() {
-                        @Override public void onResponse(String id, int status, String replyHeadersJson, byte[] inlineBody, ParcelFileDescriptor bodyFd) {
-                            workers.execute(() -> {
+        try {
+            workers.execute(() -> {
+                IAlphaPlatformBroker broker = connector.connect();
+                if (broker == null) {
+                    reject(call, AlphaIpcContract.CLOUD_NOT_CONFIGURED);
+                    return;
+                }
+                try (PfdStreams.Payload payload = PfdStreams.pack(bodyBytes)) {
+                    broker.cloudRequest(
+                        finalCallId,
+                        method,
+                        parsed.path,
+                        parsed.queryJson,
+                        headersJson,
+                        payload.inlineBody(),
+                        payload.bodyFd(),
+                        expectedCredentialId,
+                        expectedSessionCredentialId,
+                        new IAlphaCloudCallback.Stub() {
+                            @Override public void onResponse(String id, int status, String replyHeadersJson, byte[] inlineBody, ParcelFileDescriptor bodyFd) {
                                 try {
-                                    byte[] replyBytes = PfdStreams.unpack(inlineBody, bodyFd, 64 * 1024 * 1024);
-                                    call.resolve(buildReply(status, replyHeadersJson, replyBytes == null ? new byte[0] : replyBytes));
-                                } catch (IOException failed) {
-                                    reject(call, failed instanceof PfdStreams.PayloadTooLargeException ? "reply-too-large" : "network");
+                                    workers.execute(() -> {
+                                        try {
+                                            byte[] replyBytes = PfdStreams.unpack(inlineBody, bodyFd, 64 * 1024 * 1024);
+                                            call.resolve(buildReply(status, replyHeadersJson, replyBytes == null ? new byte[0] : replyBytes));
+                                        } catch (IOException failed) {
+                                            reject(call, failed instanceof PfdStreams.PayloadTooLargeException ? "reply-too-large" : "network");
+                                        }
+                                    });
+                                } catch (RejectedExecutionException closed) {
+                                    PfdStreams.closeQuietly(bodyFd);
+                                    reject(call, "network");
                                 }
-                            });
-                        }
+                            }
 
-                        @Override public void onError(String id, String failureCode, String message) {
-                            reject(call, failureCode == null || failureCode.isEmpty() ? "network" : failureCode);
+                            @Override public void onError(String id, String failureCode, String message) {
+                                reject(call, failureCode == null || failureCode.isEmpty() ? "network" : failureCode);
+                            }
                         }
-                    }
-                );
-            } catch (PfdStreams.PayloadTooLargeException tooLarge) {
-                reject(call, "body-too-large");
-            } catch (IOException | RemoteException | SecurityException failed) {
-                reject(call, failed instanceof SecurityException ? AlphaIpcContract.CLOUD_NOT_LISTED : "network");
-            }
-        });
+                    );
+                } catch (PfdStreams.PayloadTooLargeException tooLarge) {
+                    reject(call, "body-too-large");
+                } catch (IOException | RemoteException | SecurityException failed) {
+                    reject(call, failed instanceof SecurityException ? AlphaIpcContract.CLOUD_NOT_LISTED : "network");
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            reject(call, AlphaIpcContract.CLOUD_NOT_CONFIGURED);
+        }
     }
 
     @PluginMethod public void cancel(PluginCall call) {
