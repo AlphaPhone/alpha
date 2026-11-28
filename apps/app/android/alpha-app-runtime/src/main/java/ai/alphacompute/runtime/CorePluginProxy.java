@@ -43,12 +43,26 @@ public abstract class CorePluginProxy extends Plugin {
         return current == null ? null : current.connect();
     }
 
+    /** Returns an active verified platform broker proxy within {@code timeoutMs}, or {@code null}. */
+    protected final IAlphaPlatformBroker connectBroker(long timeoutMs) {
+        CoreServiceConnector<IAlphaPlatformBroker> current = connector;
+        return current == null ? null : current.connect(timeoutMs);
+    }
+
     /** Runs a background task on this proxy's worker pool, rejecting {@code call} if shut down. */
     protected final void runOnWorker(PluginCall call, Runnable work) {
         try {
             workers.execute(work);
         } catch (RejectedExecutionException closed) {
             call.reject("AlphaCoreUnavailable", "AlphaCoreUnavailable");
+        }
+    }
+
+    /** Submits a background task without an associated {@link PluginCall}, ignoring shutdown rejection. */
+    protected final void runBackground(Runnable work) {
+        try {
+            workers.execute(work);
+        } catch (RejectedExecutionException ignored) {
         }
     }
 
@@ -85,7 +99,7 @@ public abstract class CorePluginProxy extends Plugin {
                 call.reject(message, code);
                 return;
             }
-            if (parsed.optBoolean("ok", false) && parsed.has("result") && parsed.length() <= 2) {
+            if (isEnvelopeReply(parsed)) {
                 Object inner = parsed.opt("result");
                 if (inner instanceof JSONObject object) {
                     call.resolve(JSObject.fromJSONObject(object));
@@ -100,5 +114,13 @@ public abstract class CorePluginProxy extends Plugin {
         } catch (JSONException malformed) {
             call.reject("MalformedCoreReply", "MalformedCoreReply");
         }
+    }
+
+    private static boolean isEnvelopeReply(JSObject parsed) {
+        if (!parsed.optBoolean("ok", false) || !parsed.has("result")) return false;
+        int metaKeys = 2;
+        if (parsed.has("events")) metaKeys++;
+        if (parsed.has("playbackStopped")) metaKeys++;
+        return parsed.length() <= metaKeys;
     }
 }

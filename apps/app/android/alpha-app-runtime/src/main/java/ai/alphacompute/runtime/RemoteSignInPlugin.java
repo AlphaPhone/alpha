@@ -6,6 +6,7 @@ import ai.alphacompute.ipc.IAlphaPlatformBroker;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.webkit.WebView;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -31,10 +32,15 @@ public final class RemoteSignInPlugin extends Plugin {
     private volatile boolean destroyed;
     private CoreServiceConnector<IAlphaPlatformBroker> connector;
 
+    private static final String BILLING_RETURN_DOM_EVENT = "window.dispatchEvent(new CustomEvent('alpha-billing-return'))";
+
     private final IAlphaEventCallback.Stub signInObserver = new IAlphaEventCallback.Stub() {
         @Override public void onEvent(String subId, long index, String eventJson) {
             if (destroyed) return;
             String eventName = subId == null || subId.isBlank() ? "signInSettled" : subId;
+            if (!"signInSettled".equals(eventName) && !"billingReturned".equals(eventName)) {
+                return;
+            }
             JSObject payload;
             try {
                 payload = eventJson == null || eventJson.isBlank() ? new JSObject() : new JSObject(eventJson);
@@ -43,8 +49,14 @@ public final class RemoteSignInPlugin extends Plugin {
             }
             JSObject finalPayload = payload;
             mainHandler.post(() -> {
-                if (!destroyed) {
-                    notifyListeners(eventName, finalPayload);
+                if (destroyed) return;
+                notifyListeners(eventName, finalPayload);
+                if ("billingReturned".equals(eventName)) {
+                    var bridge = getBridge();
+                    WebView page = bridge == null ? null : bridge.getWebView();
+                    if (page != null) {
+                        page.evaluateJavascript(BILLING_RETURN_DOM_EVENT, null);
+                    }
                 }
             });
         }
