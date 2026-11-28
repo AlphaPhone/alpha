@@ -1,5 +1,6 @@
 // spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
 import type { TelegramClient as SdkClient } from "@mtcute/web"
+import type { MessagingFailure } from "./messaging.vibe"
 import type { TelegramClient, TelegramUpdate } from "./telegram.vibe"
 import { mtprotoRequest } from "./telegram.vibe"
 
@@ -272,7 +273,7 @@ export function telegramMessages(clientFor: (token: string) => Promise<SdkClient
     getDifference: (token, pts) => request(token, (c) => difference(c, pts)),
     updatesStream: (token, pts = 0) => Stream.unwrap(effect {
       const client = try mtprotoRequest(() => clientFor(token))
-      return Stream.callback<TelegramUpdate, import("./messaging.vibe").MessagingFailure>((queue) => effect {
+      return Stream.callback<TelegramUpdate, MessagingFailure>((queue) => effect {
         const live = try Queue.unbounded<TelegramUpdate>()
         try acquireRelease(sync(() => listen(client, pts, (u) => { Queue.offerUnsafe(live, u) })), (off) => sync(off))
         try mtprotoRequest(() => client.startUpdatesLoop())

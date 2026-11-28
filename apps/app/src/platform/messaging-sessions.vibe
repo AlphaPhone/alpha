@@ -3,12 +3,10 @@ import { MessagingSessions, SavedGrant, type StoredSecret, sameCredential, secre
 import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { Vault, type MessagingSlot } from "./vault.vibe"
 
-schema SavedGrants {
-  readonly grants: ReadonlyArray<SavedGrant>
-  readonly migratedFrom?: string
-}
-
-const stored = Schema.fromJsonString(SavedGrants)
+const stored = Schema.fromJsonString(Schema.Struct({
+  grants: Schema.Array(SavedGrant),
+  migratedFrom: Schema.optionalKey(Schema.String),
+}))
 const slackSlot: MessagingSlot = "messaging-sessions:slack:v2"
 const telegramSlot: MessagingSlot = "messaging-sessions:telegram:v2"
 

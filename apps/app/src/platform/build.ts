@@ -1,5 +1,11 @@
 import { isTelegramApplicationId } from "@repo/deployment";
 
+declare global {
+  interface ImportMetaEnv {
+    readonly VITE_ALPHA_CLOUD_API_ORIGIN: string;
+  }
+}
+
 /** The API origin selected for the packaged phone by its build configuration. */
 export const cloudApiOrigin: string = import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN;
 

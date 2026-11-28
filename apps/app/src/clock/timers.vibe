@@ -2,7 +2,7 @@
 import type * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Timers from "../../gen/app__clock__timers.effect.vibe"
 import type { Event, Timer } from "../../gen/app__clock__timers.effect.vibe"
-import { clockRecordId } from "../platform/clock-alerts.vibe"
+import { clockRecordId } from "../platform/index.vibe"
 import { contained, due, reacting, untimed, Time } from "../runtime/index.vibe"
 import { persistClockMeta } from "./alarms.vibe"
 import { activeClockRecords } from "./shelf.vibe"
