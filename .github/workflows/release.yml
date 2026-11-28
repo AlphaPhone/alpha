@@ -76,6 +76,8 @@ jobs:
           printf 'code=%s\n' "$version_code" >> "$GITHUB_OUTPUT"
       - run: pnpm --filter @repo/app android build --release
         env:
+          TELEGRAM_API_ID: ${{ vars.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           ELIZAOS_VERSION_CODE: ${{ steps.version.outputs.code }}
       - name: Build the candidate, mirror it and plan its signing
         working-directory: apps/app

@@ -26,7 +26,7 @@ const version = process.env.ELIZAOS_VERSION_NAME || (JSON.parse(readFileSync(new
  * test-mocks build may also reach a development agent on the machine; the development server is not held to it.
  */
 function policy(testMocks: boolean): string {
-  const connect = ["'self'", "data:", "blob:", "https:", ...(testMocks ? ["http://10.0.2.2:*", "http://127.0.0.1:*", "http://localhost:*"] : [])];
+  const connect = ["'self'", "data:", "blob:", "https:", "wss://*.web.telegram.org", ...(testMocks ? ["http://10.0.2.2:*", "http://127.0.0.1:*", "http://localhost:*"] : [])];
   return [
     "default-src 'self'",
     "script-src 'self' 'wasm-unsafe-eval'",
@@ -98,5 +98,8 @@ export default defineConfig({
   // spec/app/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks": the page reads the build's allowance as `import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS`.
   envPrefix: ["VITE_", "ELIZA_DEV_ALLOW_TEST_MOCKS"],
   // spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight": About names the version this build was made as where the phone names none.
-  define: { "import.meta.env.VITE_ALPHA_VERSION": JSON.stringify(version) },
+  define: { "import.meta.env.VITE_ALPHA_VERSION": JSON.stringify(version),
+    "import.meta.env.VITE_TELEGRAM_API_ID": JSON.stringify(process.env.TELEGRAM_API_ID ?? ""),
+    "import.meta.env.VITE_TELEGRAM_API_HASH": JSON.stringify(process.env.TELEGRAM_API_HASH ?? ""),
+  },
 });

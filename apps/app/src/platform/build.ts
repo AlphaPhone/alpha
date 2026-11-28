@@ -1,7 +1,7 @@
-/** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). */
+/** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). @throws {never} */
 export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
 
-/** Whether this runs under the development/test server or a build made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. */
+/** Whether this runs under the development/test server or a build made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1`. @throws {never} */
 export const allowsTestOrigin = (): boolean => import.meta.env.DEV || allowsTestMocks();
 
 /** Whether the page was opened with the explicit `?tools=1` query, which alone admits nothing (spec/app/platform/index.md). */
@@ -11,4 +11,11 @@ export const toolsAsked = (): boolean => new URLSearchParams(globalThis.location
 export function appVersion(): string {
   const named: unknown = import.meta.env.VITE_ALPHA_VERSION;
   return typeof named === "string" ? named : "";
+}
+
+/** The Telegram application identity built into this public client. */
+export function telegramRegistration(): { id: number; hash: string } | undefined {
+  const id = Number(import.meta.env.VITE_TELEGRAM_API_ID);
+  const hash: unknown = import.meta.env.VITE_TELEGRAM_API_HASH;
+  return Number.isSafeInteger(id) && id > 0 && typeof hash === "string" && /^[0-9a-f]{32}$/i.test(hash) ? { id, hash } : undefined;
 }
