@@ -128,7 +128,7 @@ const readReceipt = Schema.Struct({ ...journalBinding.fields, operationId: Schem
   agentAttemptId: Schema.NonEmptyString, acknowledged: Schema.Literal(true), evidence: Schema.Struct({ result: Schema.Unknown }),
 })
 type ReadOrigin = typeof readOrigin.Type
-type ReviewedRead = Extract<DeviceOperation, { type: "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" }>
+type ReviewedRead = Extract<DeviceOperation, { type: "sms_latest_sender" | "messages_read_selected" | "voicemail_read_selected" | "calendar_availability" }>
 interface BoundRead { readonly origin: ReadOrigin; readonly pageTicket: number }
 
 type Proposal = typeof listed.Type.proposals[number]
@@ -320,13 +320,15 @@ export function namedReviewQuery(operation: DeviceOperation): string | undefined
 }
 
 function reviewedRead(operation: DeviceOperation): operation is ReviewedRead {
-  return operation.type === "sms_latest_sender" || operation.type === "messages_read_selected" || operation.type === "voicemail_read_selected"
+  return operation.type === "sms_latest_sender" || operation.type === "messages_read_selected"
+    || operation.type === "voicemail_read_selected" || operation.type === "calendar_availability"
 }
 
 function acceptsRead(opened: Session, operation: ReviewedRead): boolean {
   const capabilities = opened.capabilities
   if (operation.type === "messages_read_selected") return capabilities.has("messages.read.v1")
   if (operation.type === "voicemail_read_selected") return capabilities.has("voicemail.read.v1")
+  if (operation.type === "calendar_availability") return capabilities.has("calendar.availability-read.v1")
   return capabilities.has("sms.latest-sender.v2") || (!("includeAddress" in operation) && capabilities.has("sms.latest-sender.v1"))
 }
 
@@ -364,10 +366,11 @@ function spokenOperation(proposal: Proposal, opened: Session, message: string, r
   if (reply.spoken?.noFiles === true && op.type.startsWith("files_")) return undefined
   const request = proposal.payload.requestMessageId
   if (request !== undefined && request !== message) return undefined
-  if (reviewedRead(op)) return acceptsRead(opened, op) && exactReadOrigin(proposal, message, reply) !== undefined ? op : undefined
+  if (reviewedRead(op)) return acceptsRead(opened, op) && (op.type === "calendar_availability" || exactReadOrigin(proposal, message, reply) !== undefined) ? op : undefined
   if (op.type === "voicemail_delete_selected" && (reply.voicemail?.witness === undefined ||
     !opened.capabilities.has("voicemail.delete.v1"))) return undefined
-  return request === message || commsReview(op) || op.type.startsWith("files_") || op.type === "browser_navigate" ? op : undefined
+  return request === message || commsReview(op) || op.type.startsWith("files_") || op.type === "browser_navigate"
+    || calendarOperation(op) !== undefined || notesOperation(op) !== undefined ? op : undefined
 }
 
 /** The exact Talk request whose reply proposed a text in the already-open chat. */
@@ -434,10 +437,11 @@ function offeredBy(reply: DeviceActionReply, actions: ReadonlyMap<string, ReplyA
 }
 
 /** What a reviewed read found, in v119's words (Alpha 45f6bed30: `ui/telephony/telephony-receipt-text.ts:179-196`). */
-function readSaid(result: NonNullable<ReturnType<typeof latestSenderResult>> | { readonly kind: "messages-read" | "voicemail-read" }): string {
+function readSaid(result: NonNullable<ReturnType<typeof latestSenderResult>> | { readonly kind: "messages-read" | "voicemail-read" | "calendar_availability" }): string {
   switch (result.kind) {
     case "messages-read": return "Shared the open thread."
     case "voicemail-read": return "Shared the open voicemail."
+    case "calendar_availability": return "Shared your availability."
     case "sms-latest-sender": return result.status !== "found" ? result.status === "empty" ? "No incoming SMS messages." : "The latest incoming SMS has no readable phone number."
       : "address" in result ? result.address : `Latest incoming SMS sender ends in ${result.numberEnding}.`
   }
@@ -799,6 +803,7 @@ function completion(op: DeviceOperation, synced: boolean): string {
     case "files_move":
     case "files_trash": return synced ? "Files shows which items changed." : "Files shows which items changed. Agent receipt pending."
     case "maps_read_selected": return synced ? "Shared what Maps shows with the agent." : "Maps place prepared. Agent receipt pending."
+    case "calendar_availability": return synced ? "Shared your availability." : "Availability prepared. Agent receipt pending."
     default: return synced ? "Done" : "Done. Agent receipt pending."
   }
 }
@@ -1061,11 +1066,12 @@ function pendingProposals(context: PendingReviewContext): MediaReview.Shape["pen
       const readsContent = reviewedRead(op)
       const origin = readsContent ? exactReadOrigin(proposal, message, reply) : undefined
       if (readsContent && !acceptsRead(opened, op)) return undefined
-      if (readsContent && (op.type !== "messages_read_selected" || proposal.readReplyOrigin !== undefined)) {
+      if (readsContent && op.type !== "calendar_availability" && (op.type !== "messages_read_selected" || proposal.readReplyOrigin !== undefined)) {
         if (origin === undefined || (request !== undefined && request !== message) || !fromThisEnrollment(proposal, opened)
           || !(try reviewContext(revision, view)) || !(try enrollmentIsCurrent(opened)) || !isLatest(opened) || !(try reviewContext(revision, view))) return undefined
       } else if (request === undefined) {
-        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate" || op.type === "camera_capture_photo")
+        if (!(commsReview(op) || filesOperation || op.type === "browser_navigate" || op.type === "camera_capture_photo"
+          || calendarOperation(op) !== undefined || notesOperation(op) !== undefined)
           || !currentReview || !reviewFromReply(proposal, opened, actions)) return undefined
       } else if (request !== message || (filesOperation && (!fromThisEnrollment(proposal, opened)
         || (actions.get(proposal.id) !== "Review" && actions.get(proposal.id) !== "Direct")))) return undefined
@@ -1301,6 +1307,10 @@ const mediaReviewContext = effect {
     if (operation.type === "sms_latest_sender") {
       const sender = latestSenderResult(operation, entry.evidence.result)
       return sender === undefined ? undefined : { attempt: entry.agentAttemptId, said: readSaid(sender) }
+    }
+    if (operation.type === "calendar_availability") {
+      const availability = readResult<"calendar_availability">(operation, entry.evidence.result)
+      return availability === undefined ? undefined : { attempt: entry.agentAttemptId, said: readSaid(availability) }
     }
     const shared = readResult<"messages_read_selected">(operation, entry.evidence.result)
     return shared?.status === "read" ? { attempt: entry.agentAttemptId, said: readSaid(shared) } : undefined
@@ -1642,9 +1652,10 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const result = (tryPromise(() => held.execute.approve({ id, digest, expiresAt, operation }, { live: true, nonsensitive: true, exact: true, forceReview: true, requestEligible: true, reviewed: true }))
           |> ensuring(%, sync(() => { scopes.delete(card.id) }))) catch () => undefined
         if (card.read !== undefined) {
+          const refusedRead = result?.kind === "settled" && result.result.tag === "NoEffect"
           const said = result?.kind === "settled" && result.result.tag === "Applied" && result.synced ? try completeRead(held) : undefined
           if ((try finishDecision(held, result?.kind === "settled" && result.synced)) !== "Unavailable" && (try current(held))) {
-            report(said ?? "Alpha couldn’t complete that read.")
+            report(said ?? (refusedRead && card.operation.type === "calendar_availability" ? "Nothing was shared." : "Alpha couldn’t complete that read."))
           }
           return
         }
@@ -1654,7 +1665,8 @@ export const mediaReview = Layer.effect(MediaReview, effect {
         const note = result?.kind !== "settled" ? notStarted
           : result.result.tag === "Unknown" ? "The result could not be confirmed. Check before trying again."
           : filesOutcome !== undefined ? filesCompletion(filesOutcome, result.synced)
-          : result.result.tag === "Applied" ? completion(card.operation, result.synced) : "Nothing changed."
+          : result.result.tag === "Applied" ? completion(card.operation, result.synced)
+          : card.operation.type === "calendar_availability" ? "Nothing was shared." : "Nothing changed."
         report(note)
       })
     },
