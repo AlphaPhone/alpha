@@ -30,6 +30,8 @@ export interface NotesScene {
   readonly told: string[];
   /** Reports the tape as it is now, as Android's recorder does when it changes by itself. */
   tapeChanged: () => void;
+  /** The owner presses Pause or Resume in the recording's notification, which Android carries out without Alpha. */
+  notification: (action: "Pause" | "Resume") => void;
   playing?: { readonly audioId: string; readonly noteId: string; readonly offsetMs: number };
   /** Whether a read of the store fails, as an agent without its notes answers. */
   failing: boolean;
@@ -87,6 +89,7 @@ export function notesScene(now = Date.now()): NotesScene {
     tape: { state: "idle", durationMs: 0, segments: [] },
     told: [],
     tapeChanged: () => {},
+    notification: () => {},
     notes: [
       note("enclave", "Enclave launch", "Confirm attestation flow\nShip the keys-on-device doc\nDry run Friday", now - 20 * 60_000, { kind: "text", data: { pinned: true } }),
       note("sync", "Design sync", "", now - hour, {
@@ -129,7 +132,10 @@ export function notesScene(now = Date.now()): NotesScene {
  * The retained Notes recordings as the Android host reports them. As `AlphaNoteRecorder.java` does, it refuses a Start
  * while a recording is open, until that one is discarded (line 136), and reports each change it makes to the tape before
  * answering (`publish()` at lines 146, 221, 231, 237 and 268, sent on by `AlphaNotesPlugin.java` line 84); it discards
- * only the recording it holds (`AlphaNotesPlugin.java` line 165).
+ * only the recording it holds (`AlphaNotesPlugin.java` line 165). The notification's Pause pauses a recording that is
+ * recording and its Resume goes on with a paused one (`AlphaNoteRecordingService.java` lines 101-104), each through the
+ * recorder's own pause or resume, which writes the segment so far on a pause and reports the change
+ * (`AlphaNoteRecorder.java` lines 221 and 229-231).
  */
 export function alphaNotes(scene: NotesScene): Faked {
   return (emit, onUnplug) => {
@@ -151,8 +157,18 @@ export function alphaNotes(scene: NotesScene): Faked {
       };
       return scene.commandGate === undefined ? carry() : scene.commandGate.then(carry);
     };
+    const notified = (action: "Pause" | "Resume") => {
+      if (scene.tape.state !== (action === "Pause" ? "recording" : "paused")) return;
+      if (action === "Pause") written();
+      scene.tape.state = action === "Pause" ? "paused" : "recording";
+      changed();
+    };
     scene.tapeChanged = changed;
-    onUnplug?.(() => { if (scene.tapeChanged === changed) scene.tapeChanged = () => {}; });
+    scene.notification = notified;
+    onUnplug?.(() => {
+      if (scene.tapeChanged === changed) scene.tapeChanged = () => {};
+      if (scene.notification === notified) scene.notification = () => {};
+    });
     return {
       permission: () => Promise.resolve({ grant: "granted" }),
       requestMicrophone: () => Promise.resolve({ grant: "granted" }),

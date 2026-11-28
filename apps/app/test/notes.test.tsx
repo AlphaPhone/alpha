@@ -959,6 +959,32 @@ describe("Notes", () => {
       polled.push([world.notes.tape.state, await phase(at)]);
       expect(polled).toEqual([["paused", "Recording"], ["paused", "Recording"], ["paused", "Recording"], ["recording", "Recording"]]);
     };
+    const pausedBeforeThePhone = async (at: Opened) => {
+      let land = () => {};
+      world.notes.commandGate = new Promise((settle) => { land = settle; });
+      await press(/^Pause$/);
+      await until(at.alpha, at.runtime, Recorder, (state) => state.phase === "Paused");
+      await drawn(() => world.notes.tapeChanged());
+      await later(at.alpha, 1000);
+      const held = [world.notes.tape.state, await phase(at)];
+      delete world.notes.commandGate;
+      land();
+      await rendered(() => expect(world.notes.tape.state).toBe("paused"));
+      await later(at.alpha, 1000);
+      expect([held, [world.notes.tape.state, await phase(at)]]).toEqual([["recording", "Paused"], ["paused", "Paused"]]);
+    };
+    const follows = (at: Opened, tape: string, recorder: string) => rendered(async () => expect([world.notes.tape.state, await phase(at)]).toEqual([tape, recorder]));
+    const notified = async (at: Opened, action: "Pause" | "Resume") => {
+      await drawn(() => world.notes.notification(action));
+      await follows(at, action === "Pause" ? "paused" : "recording", action === "Pause" ? "Paused" : "Recording");
+      await later(at.alpha, 1000);
+    };
+    const restart = async (at: typeof first) => {
+      await at.close();
+      const { alpha, close } = await open(world, only("home", "view:Notes", "notice"));
+      await until(alpha, alpha.runtime, Shell, (where) => showing(where, "Notes"));
+      return { alpha, close, runtime: notes.runtime(alpha) };
+    };
     await record();
     await heard(2000);
     await until(first.alpha, first.runtime, Recorder, (state) => state.unsaved >= 2);
@@ -988,30 +1014,51 @@ describe("Notes", () => {
     expect(world.notes.told).toEqual(["Start", "Start", "Pause"]);
     // spec/app/notes/recording.md, "The owner pauses and goes on, from Notes or from the notification, and a call pauses the recording": Resume after the call holds while the phone's status still reads paused
     await resumedBeforeThePhone(first);
-    await press(/^Pause$/);
-    await until(first.alpha, first.runtime, Recorder, (state) => state.phase === "Paused");
-    await rendered(() => expect([world.notes.told, world.notes.tape.state]).toEqual([["Start", "Start", "Pause", "Resume", "Pause"], "paused"]));
-    await first.close();
+    // spec/app/notes/recording.md, "The owner pauses and goes on, from Notes or from the notification, and a call pauses the recording": Pause holds while the phone still reports recording before it pauses
+    await pausedBeforeThePhone(first);
+    expect([world.notes.told, world.notes.tape.state]).toEqual([["Start", "Start", "Pause", "Resume", "Pause"], "paused"]);
+    // spec/app/notes/recording.md, "The owner pauses and goes on, from Notes or from the notification, and a call pauses the recording": Notes follows the notification's Resume and Pause, and a Resume made over Home once Notes is in front
+    await notified(first, "Resume");
+    await notified(first, "Pause");
+    await drawn(() => first.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" }))));
+    await drawn(() => world.notes.notification("Resume"));
+    await later(first.alpha, 1000);
+    await drawn(() => first.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await follows(first, "recording", "Recording");
+    await notified(first, "Pause");
 
-    const restarted = await open(world, only("home", "view:Notes", "notice"));
-    const second = { alpha: restarted.alpha, runtime: notes.runtime(restarted.alpha) };
-    await until(second.alpha, second.alpha.runtime, Shell, (where) => showing(where, "Notes"));
+    const second = await restart(first);
     await until(second.alpha, second.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 1);
     await rendered(() => expect([seen(), spoken("status"), button(/^Resume$/)?.disabled])
-      .toEqual(["Voice noteDiscard0:00Paused Resume Stop recording", "Recovered recording", false]));
+      .toEqual(["Voice noteDiscard0:04Paused Resume Stop recording", "Recovered recording", false]));
+    // spec/app/notes/recording.md, "A recording cut off waits, paused and without the microphone, holding exactly the segments the phone found, until the owner goes on, keeps or discards it": the first Resume and Pause made in the notification after a restart are followed
+    await notified(second, "Resume");
+    await notified(second, "Pause");
+    await notified(second, "Resume");
+
+    // spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off": a recording the phone went on with while Alpha was away is shown recording, as the phone has it, and the notification's Pause is followed
+    const away = await second.runtime.runPromise(Effect.flatMap(Recorder, (machine) => machine.get())).then((state) => state.capture);
+    const third = await restart(second);
+    await until(third.alpha, third.runtime, Recorder, (state) => state.capture !== away);
+    await follows(third, "recording", "Recording");
+    await later(third.alpha, 1000);
+    await notified(third, "Pause");
+
+    const fourth = await restart(third);
+    await until(fourth.alpha, fourth.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 1);
     // spec/app/notes/recording.md, "A recording cut off waits, paused and without the microphone, holding exactly the segments the phone found, until the owner goes on, keeps or discards it": Resume after the restart holds while the phone's status still reads paused
-    await resumedBeforeThePhone(second);
+    await resumedBeforeThePhone(fourth);
     await press(/^Stop recording$/);
-    await until(second.alpha, second.runtime, Recorder, (state) => state.phase === "Kept" && state.note > 0);
+    await until(fourth.alpha, fourth.runtime, Recorder, (state) => state.phase === "Kept" && state.note > 0);
     const kept = world.notes.notes.filter((one) => one.format?.kind === "voice" && one.id.startsWith("fake-note-"));
     expect([world.notes.told, kept.length, world.notes.audio.get("recording-2")])
       .toEqual([["Start", "Start", "Pause", "Resume", "Pause", "Resume", "End"], 1, { noteId: kept[0]?.id, durationMs: 4000 }]);
 
     // spec/app/notes/recording.md, "A new recording starts only when no recording is unfinished, and is made in the folder the list is narrowed to": a kept voice note leaves the phone free for the next one
     await rendered(() => expect(world.notes.tape.state).toBe("idle"));
-    await record(second);
-    await later(second.alpha, 1000);
-    expect([world.notes.told.at(-1), world.notes.tape.state, world.notes.tape.recordingId, await phase(second)])
+    await record(fourth);
+    await later(fourth.alpha, 1000);
+    expect([world.notes.told.at(-1), world.notes.tape.state, world.notes.tape.recordingId, await phase(fourth)])
       .toEqual(["Start", "recording", "recording-8", "Recording"]);
     expect(world.notes.audio.get("recording-2")).toEqual({ noteId: kept[0]?.id, durationMs: 4000 });
   });

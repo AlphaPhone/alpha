@@ -1,4 +1,4 @@
-// spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"; spec/app/notes/microphone.md, "The owner sees Mic unavailable after asking to record while the browser denies the microphone"
+// spec/app/notes/recording.md, "Story: Record a voice note"; spec/app/notes/recording.md, "Story: Discard a recording"; spec/app/notes/microphone.md, "The owner's screen reader hears Mic unavailable after asking to record while the browser denies the microphone"
 import { Button } from "@repo/ui";
 import { Check, Mic, Pause, Square } from "lucide-react";
 import { type ReactNode, type Ref, useCallback, useRef, useSyncExternalStore } from "react";
@@ -69,7 +69,7 @@ function RecorderFrame({ seconds, levels, measuring, status, spoken = status, on
 
 export function MicrophoneUnavailable({ onRecord, onDiscard }: { readonly onRecord: () => void; readonly onDiscard: () => void }) {
   return <RecorderFrame seconds={0} levels={[]} measuring={false} status="" onDiscard={onDiscard}
-    details={<p role="alert" className="mt-2 text-sm leading-voice-status text-muted-foreground">Mic unavailable</p>} actions={<>
+    details={<p role="alert" className="sr-only">Mic unavailable</p>} actions={<>
     <Button variant="secondary" className={actionClass} onClick={onRecord}><Mic className="size-5" /> Record</Button>
     <Button className={actionClass} disabled><Square className="size-5" /> Stop recording</Button>
   </>} />;

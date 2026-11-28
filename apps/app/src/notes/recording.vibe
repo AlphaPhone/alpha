@@ -216,9 +216,11 @@ effect function capture(fx: Extract<Rec.Effect, { readonly tag: "Captures" }>): 
   const mappedId = try takes.recordingFor(state.owner, fx.take)
   const existing = try currentTape()
   const resumingOwned = mappedId !== undefined && existing?.recordingId === mappedId
-  const taken = resumingOwned
-    ? (device.command(mappedId, "Resume") catch () => undefined)
-    : (device.start(try promise(() => ownerDigest(identity)), folderId) catch () => undefined)
+  const overtaken = (try recorder.get()).phase !== "Recording"
+  const taken = !resumingOwned
+    ? (device.start(try promise(() => ownerDigest(identity)), folderId) catch () => undefined)
+    : existing.state === "recording" || overtaken ? existing
+    : (device.command(mappedId, "Resume") catch () => undefined)
   if (taken?.recordingId !== undefined) try takes.bind(state.owner, fx.take, taken.recordingId)
   if (taken === undefined) try ignore(recorder.send({ type: "broke", capture: fx.capture }, phone))
 }
@@ -425,13 +427,18 @@ const updates = started(effect {
     }
     return identity
   }
-  /** The tape as the phone last reported it, so a pause or resume is followed only when the phone made it, never from a report older than Alpha's own command. */
-  let reported: Tape | undefined
+  const apart = (tape: Tape, phase: Rec.Phase) => tape.state === "paused" && phase === "Recording" || tape.state === "recording" && phase === "Paused"
+  /**
+   * The tape as the phone last reported it while the recorder agreed with it. A pause or resume is followed only when the
+   * phone made it, never from a report older than Alpha's own command, and one the rules refused, such as a Resume made over
+   * Home, is followed once Notes is in front again. A recording cut off holds no capture of Alpha's, so it follows the phone
+   * as it is, as v119's adopt did.
+   */
+  let agreed: Tape | undefined
   const report = effect (tape: Tape) => {
     const owner = try project(tape)
     if (owner === undefined) return
-    const moved = reported !== undefined && reported.recordingId === tape.recordingId && reported.state !== tape.state
-    reported = tape
+    const moved = agreed !== undefined && agreed.recordingId === tape.recordingId && agreed.state !== tape.state
     try samples(tape, owner)
     const state = try recorder.get()
     if (tape.state === "stopped" && (state.phase === "Recording" || state.phase === "Paused")) {
@@ -439,20 +446,23 @@ const updates = started(effect {
       else try ignore(recorder.send({ type: "broke", capture: state.capture }, phone))
     } else if (moved && tape.state === "paused" && state.phase === "Recording") {
       try ignore(recorder.send({ type: "pause", take: state.take }, "Owner"))
-    } else if (moved && tape.state === "recording" && state.phase === "Paused") {
+    } else if ((moved || state.recovered) && tape.state === "recording" && state.phase === "Paused") {
       try ignore(recorder.send({ type: "resume", take: state.take, room: try room() }, "Owner"))
     }
+    if (!apart(tape, (try recorder.get()).phase)) agreed = tape
   }
   const read = effect { return device.status() catch () => undefined }
+  const answered = (tape: Tape | undefined): tape is Tape => tape !== undefined
   const poll = Stream.fromEffectSchedule(read, Schedule.spaced("1 second"))
   const playing = Stream.changes(Stream.map(recorder.changes, (state) => state.phase === "Recording" || state.phase === "Stopping"))
-  const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, (tape): tape is Tape => tape !== undefined) : Stream.empty)
+  const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, answered) : Stream.empty)
   const visibility = Stream.concat(Stream.fromEffect(devicePage.showing()), devicePage.visible)
-  const listening = Stream.changes(Stream.map(Stream.zipLatestAll(recorder.changes, shell.changes, visibility),
-    ([state, place, visible]) => state.phase === "Recording" && visible && showing(place, "Notes")))
+  const inFront = (phase: Rec.Phase) => Stream.changes(Stream.map(Stream.zipLatestAll(recorder.changes, shell.changes, visibility),
+    ([state, place, visible]) => state.phase === phase && visible && showing(place, "Notes")))
   const amplitudes = Stream.filter(Stream.fromEffectSchedule(read, Schedule.spaced("120 millis")),
     (tape): tape is Tape => tape?.state === "recording")
-  const meters = Stream.switchMap(listening, (on) => on ? amplitudes : Stream.empty)
+  const meters = Stream.switchMap(inFront("Recording"), (on) => on ? amplitudes : Stream.empty)
+  const looks = Stream.switchMap(inFront("Paused"), (on) => on ? Stream.filter(Stream.fromEffect(read), answered) : Stream.empty)
   const opened = Stream.merge(device.openAsked, Stream.as(Stream.filter(devicePage.visible, (front) => front), undefined))
   const reopen = effect () => {
     if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
@@ -460,7 +470,7 @@ const updates = started(effect {
   try reopen()
   try Effect.all([
     Stream.runForEach(opened, reopen),
-    Stream.runForEach(Stream.merge(device.changed, ticks), report),
+    Stream.runForEach(Stream.merge(device.changed, Stream.merge(ticks, looks)), report),
     Stream.runForEach(meters, project),
   ], { concurrency: "unbounded" })
 }, "watch the phone’s Notes recorder")
