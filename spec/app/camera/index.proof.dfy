@@ -755,10 +755,30 @@ lemma chunk_ensures(s: Camera, piece: int, now: int, by_: app__photos__actor_Act
   ensures (inv(s) ==> canChunk(s, piece, by_) ==> stepEachRequestIsAnsweredOnce(s, chunk(s, piece, now, by_).state, chunk(s, piece, now, by_).out))
   ensures (inv(s) ==> canChunk(s, piece, by_) ==> stepTheAgentFailsOnlyForCause(s, "chunk", chunk(s, piece, now, by_).state))
 {
+  hide *;
   if inv(s) && canChunk(s, piece, by_) {
     var f := app__camera__recording_chunk(s.film, piece, now);
-    assert !f.stage.Saved? && !f.stage.Empty? && !f.stage.Broken?;
+    assert chunk(s, piece, now, by_) == filming(f, now, s) by {
+      reveal chunk;
+    }
+    assert app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
+      && (app__camera__recording_recording(f) ==> recording(s))
+      && (f.stage.Running? ==> holds(s)) by {
+      reveal inv, canChunk, alwaysRecordingHoldsThePreview, recording,
+        app__camera__recording_canChunk, app__camera__recording_chunk,
+        app__camera__recording_stopping, app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole;
+    }
+    FilmingPreserves(s, f, now, "chunk");
   }
+}
+
+lemma ChunkStepsAsRecordingSize(s: Camera, after: Done)
+  ensures stepALostPreviewFails(s, "chunk", after.state) ==> stepALostPreviewFails(s, "recordingSize", after.state)
+  ensures stepARetiredPreviewIsReleased(s, "chunk", after.state, after.out) ==> stepARetiredPreviewIsReleased(s, "recordingSize", after.state, after.out)
+  ensures stepOneFocusWriteAtATime(s, "chunk", after.state, after.out) ==> stepOneFocusWriteAtATime(s, "recordingSize", after.state, after.out)
+  ensures stepTheAgentFailsOnlyForCause(s, "chunk", after.state) ==> stepTheAgentFailsOnlyForCause(s, "recordingSize", after.state)
+{
 }
 
 lemma recordingSize_ensures(s: Camera, total: int, now: int, by_: app__photos__actor_Actor)
@@ -780,9 +800,10 @@ lemma recordingSize_ensures(s: Camera, total: int, now: int, by_: app__photos__a
   ensures (inv(s) ==> canRecordingSize(s, total, by_) ==> stepEachRequestIsAnsweredOnce(s, recordingSize(s, total, now, by_).state, recordingSize(s, total, now, by_).out))
   ensures (inv(s) ==> canRecordingSize(s, total, by_) ==> stepTheAgentFailsOnlyForCause(s, "recordingSize", recordingSize(s, total, now, by_).state))
 {
-  if inv(s) && canRecordingSize(s, total, by_) {
-    chunk_ensures(s, total - s.film.bytes, now, by_);
-  }
+  hide *;
+  reveal recordingSize, canRecordingSize, canChunk;
+  chunk_ensures(s, total - s.film.bytes, now, by_);
+  ChunkStepsAsRecordingSize(s, recordingSize(s, total, now, by_));
 }
 
 lemma agentLens_ensures(s: Camera, requested: RequestedLens, by_: app__photos__actor_Actor)
