@@ -31,7 +31,7 @@ export interface NotesScene {
   /** Reports the tape as it is now, as Android's recorder does when it changes by itself. */
   tapeChanged: () => void;
   /** The owner presses Pause or Resume in the recording's notification, which Android carries out without Alpha. */
-  notification: (action: "Pause" | "Resume") => void;
+  notification: (action: "Pause" | "Resume", publish?: boolean) => void;
   /** Android's recorder hears `heardMs` more and closes the segment being written, as it does every 27 s while recording, also with Alpha closed. */
   rollover: (heardMs: number) => void;
   playing?: { readonly audioId: string; readonly noteId: string; readonly offsetMs: number };
@@ -47,6 +47,7 @@ export interface NotesScene {
   interactGate?: Promise<void>;
   /** Holds each command Android's recorder is given until it settles, as a phone that has not yet carried it out. */
   commandGate?: Promise<void>;
+  statusGate?: Promise<void>;
   /** Holds each deletion sent to the store, in place of `interactGate`, until it settles. */
   discardGate?: Promise<void>;
   /** Holds each read of the store until it settles. */
@@ -167,11 +168,11 @@ export function alphaNotes(scene: NotesScene, calling: () => boolean): Faked {
       };
       return scene.commandGate === undefined ? carry() : scene.commandGate.then(carry);
     };
-    const notified = (action: "Pause" | "Resume") => {
+    const notified = (action: "Pause" | "Resume", publish = true) => {
       if (scene.tape.state !== (action === "Pause" ? "recording" : "paused") || action === "Resume" && calling()) return;
       if (action === "Pause") written();
       scene.tape.state = action === "Pause" ? "paused" : "recording";
-      changed();
+      if (publish) changed();
     };
     const rolled = (heardMs: number) => {
       if (scene.tape.state !== "recording") return;
@@ -188,7 +189,7 @@ export function alphaNotes(scene: NotesScene, calling: () => boolean): Faked {
     return {
       permission: () => Promise.resolve({ grant: "granted" }),
       requestMicrophone: () => Promise.resolve({ grant: "granted" }),
-      status: () => Promise.resolve(reading()),
+      status: () => scene.statusGate === undefined ? Promise.resolve(reading()) : scene.statusGate.then(reading),
       start: ({ ownerDigest, folderId }: { ownerDigest: string; folderId?: string }) => {
         if (scene.tape.state !== "idle") return Promise.reject(rejection("A recording is already open"));
         scene.told.push("Start");

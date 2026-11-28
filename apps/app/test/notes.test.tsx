@@ -1020,8 +1020,20 @@ describe("Notes", () => {
     await pausedBeforeThePhone(first);
     expect([world.notes.told, world.notes.tape.state]).toEqual([["Start", "Start", "Pause", "Resume", "Pause"], "paused"]);
     // spec/app/notes/recording.md, "The owner pauses and goes on, from Notes or from the notification, and a call pauses the recording": Notes follows the notification's Resume and Pause, and a Resume made over Home once Notes is in front
-    await notified(first, "Resume");
-    await notified(first, "Pause");
+    const beforeNotificationControls = [...world.notes.told];
+    const delayedStatus = Promise.withResolvers<void>();
+    world.notes.statusGate = delayedStatus.promise;
+    try {
+      await notified(first, "Resume");
+      world.notes.notification("Pause", false);
+    } finally {
+      delete world.notes.statusGate;
+      delayedStatus.resolve();
+    }
+    await later(first.alpha, 1000);
+    await drawn(() => world.notes.tapeChanged());
+    await follows(first, "paused", "Paused");
+    expect(world.notes.told).toEqual(beforeNotificationControls);
     await drawn(() => first.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" }))));
     await drawn(() => world.notes.notification("Resume"));
     await later(first.alpha, 1000);

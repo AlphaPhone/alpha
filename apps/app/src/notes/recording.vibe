@@ -450,9 +450,9 @@ const updates = started(effect {
     const mapped = try takes.recordingFor(state.owner, state.take)
     const owned = tape.recordingId !== undefined && tape.recordingId === mapped
     if (owned && moved && tape.state === "paused" && state.phase === "Recording") {
-      try ignore(recorder.send({ type: "pause", take: state.take }, "Owner"))
+      try ignore(recorder.send({ type: "phonePaused", take: state.take }, phone))
     } else if (owned && (moved || state.recovered) && tape.state === "recording" && state.phase === "Paused") {
-      try ignore(recorder.send({ type: "resume", take: state.take, room: try room() }, "Owner"))
+      try ignore(recorder.send({ type: "phoneResumed", take: state.take, room: try room() }, phone))
     }
     if (!apart(tape, (try recorder.get()).phase) && (mapped === undefined || tape.recordingId === mapped)) agreed = tape
   }

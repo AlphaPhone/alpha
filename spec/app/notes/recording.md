@@ -208,13 +208,20 @@ pure def broke(r: Recorder, capture: int, by: Actor): Moved = halted(r.capture, 
 
 Each control names the recording it was shown for, so one from an old
 notification changes nothing. Pausing writes the segment so far. An
-interrupted recording goes on under a new capture.
+interrupted recording goes on under a new capture. When Android reports that
+the owner has already paused or resumed the matching recording from its
+notification, Notes adopts the reported phase without issuing another command.
 
 ```quint
 pure def canPause(r: Recorder, take: int, by: Actor): bool = by == Owner and r.phase == Recording and take == r.take
 
 pure def pause(r: Recorder, take: int, by: Actor): Moved =
   { state: { ...r, phase: Paused, level: 0 }, out: List(Tells({ capture: r.capture, command: Pause })) }
+
+pure def canPhonePaused(r: Recorder, take: int, by: Actor): bool =
+  by == Phone and take == r.take and r.phase == Recording
+
+pure def phonePaused(r: Recorder, take: int, by: Actor): Recorder = { ...r, phase: Paused, level: 0 }
 
 pure def canCallStarted(r: Recorder, by: Actor): bool = by == Phone and not(r.calling)
 
@@ -235,6 +242,12 @@ pure def resume(r: Recorder, take: int, room: Admission, by: Actor): Moved =
   if (r.capture != 0) { state: { ...r, phase: Recording }, out: List(Tells({ capture: r.capture, command: Resume })) }
   else { state: { ...r, phase: Recording, capture: n, issued: n, recovered: false },
     out: List(Captures({ take: r.take, capture: n })) }
+
+pure def canPhoneResumed(r: Recorder, take: int, room: Admission, by: Actor): bool =
+  by == Phone and canResume(r, take, room, Owner)
+
+pure def phoneResumed(r: Recorder, take: int, room: Admission, by: Actor): Recorder =
+  resume(r, take, room, Owner).state
 ```
 
 ### Stopping ends the capture and keeps what was recorded as a voice note, and a recording with nothing in it leaves nothing
@@ -257,7 +270,7 @@ pure def stop(r: Recorder, take: int, by: Actor): Moved =
 ```quint
 pure def stepNoLengthLimit(before: Recorder, via: str, after: Recorder): bool =
   (before.phase == Recording and after.phase != Recording)
-    implies (via == "pause" or via == "stop" or via == "callStarted" or via == "broke" or via == "tick"
+    implies (via == "pause" or via == "phonePaused" or via == "stop" or via == "callStarted" or via == "broke" or via == "tick"
       or via == "segmentKept" or via == "restart" or via == "ownerChanged" or via == "confirmDiscard")
 ```
 
@@ -343,13 +356,17 @@ pure def alwaysTheMicrophoneFollowsTheRecorder(r: Recorder): bool =
 
 ### The phone is told to pause before a recording pauses, and to end or write down a discard before it lets go of a capture
 
-A restart, which ends every capture, is the exception; so is the last
-segment of a recording already told to end.
+While recording, a pause action issued from Notes or following a call tells
+the phone to pause. Android can also report that its own notification already
+paused the recorder. Either notification control changes only the observed
+phase and issues no command back to the device. Restart ends every capture,
+and the last segment can arrive after the phone was told to end.
 
 ```quint
 pure def stepTheMicrophoneIsToldFirst(before: Recorder, via: str, after: Recorder, out: List[Effect]): bool =
   and {
-    (before.phase == Recording and after.phase == Paused and via != "restart") implies told(out, before.capture, Pause),
+    (via == "phonePaused" or via == "phoneResumed") implies out.length() == 0,
+    (before.phase == Recording and after.phase == Paused and via != "restart" and via != "phonePaused") implies told(out, before.capture, Pause),
     (after.phase == Stopping and before.phase != Stopping) implies told(out, before.capture, End),
     (before.capture != 0 and after.capture == 0 and via != "restart" and before.phase != Stopping)
       implies (told(out, before.capture, End) or (via == "confirmDiscard" and out.some(fx => match fx {
