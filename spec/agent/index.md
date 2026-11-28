@@ -346,7 +346,8 @@ through the approvals module. Ask Alpha completes a reviewed Messages read only
 for the exact owner turn after the agent acknowledges its device receipt.
 Wallet reads the wallet module's status, holdings, waiting requests and
 activity, makes and switches the wallet, asks for a transfer, and opens and
-decides its review. A route an area
+decides its review. Settings reads and updates Alpha's on-device local LLM
+status, pinned model catalog, AI routing mode, active model, and model removal. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -491,11 +492,20 @@ pure val pageTaskWalletRoutes: List[Route] = List(
   { method: Get, path: "/api/alpha/control/state", stream: false },
   { method: Post, path: "/api/alpha/control/lease", stream: false },
   { method: Post, path: "/api/alpha/control/stop", stream: false },
+  { method: Get, path: "/api/alpha/local-llm/status", stream: false },
+  { method: Get, path: "/api/alpha/local-llm/catalog", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/mode", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/activate", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/delete", stream: false },
 )
 pure val controlLeasePath = "/api/alpha/control/lease"
 pure val controlStopPath = "/api/alpha/control/stop"
 pure val controlLeaseLimit = 4096
 pure val controlStopLimit = 1024
+pure val localLlmModePath = "/api/alpha/local-llm/mode"
+pure val localLlmActivatePath = "/api/alpha/local-llm/activate"
+pure val localLlmDeletePath = "/api/alpha/local-llm/delete"
+pure val localLlmControlLimit = 1024
 pure def joinRoutes(a: List[Route], b: List[Route]): List[Route] = a.concat(b)
 pure val pageRoutes: List[Route] =
   joinRoutes(joinRoutes(joinRoutes(joinRoutes(pageCoreRoutes, pageCalendarClockRoutes), pageReminderNotesRoutes), pageWorkflowRoutes), pageTaskWalletRoutes)

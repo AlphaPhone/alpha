@@ -25,3 +25,26 @@ lemma lawControlNativeRoutesAreAbsentFromThePage_ensures(controlRoute: Route)
     }
   }
 }
+
+lemma NotOtherCleanup(xs: seq<Route>, m: Method)
+  requires m != Method.Post
+  requires forall i :: 0 <= i < |xs| ==> xs[i] != Route(m, browserNotesCleanup, false)
+  ensures Route(m, browserNotesCleanup, false) !in xs
+{
+}
+
+lemma lawBrowserNotesCleanupIsOnThePage_ensures(method_: Method)
+  ensures (lawBrowserNotesCleanupIsOnThePage(method_) == true)
+{
+  var r := Route(method_, browserNotesCleanup, false);
+  if method_ == Method.Post {
+    assert r in pageReminderNotesRoutes;
+    assert r in pageRoutes;
+  } else {
+    NotOtherCleanup(pageCoreRoutes, method_);
+    NotOtherCleanup(pageCalendarClockRoutes, method_);
+    NotOtherCleanup(pageReminderNotesRoutes, method_);
+    NotOtherCleanup(pageWorkflowRoutes, method_);
+    NotOtherCleanup(pageTaskWalletRoutes, method_);
+  }
+}
