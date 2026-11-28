@@ -207,8 +207,11 @@ URL. The operator supplies `SLACK_SIGNING_SECRET`, `SLACK_APP_ID` and an
 app-level `SLACK_APP_TOKEN` with `authorizations:read`. The API advertises
 `notifications: true` when those bindings are present. Alpha's PKCE exchange
 then passes through the Worker, which retains credential digests for the
-authorized human installation. The Worker validates Slack's signature and
-timestamp, resolves the individual installations entitled to the event, and
+authorized human installation for the credential's lifetime, up to 30 days.
+The Worker validates Slack's signature and timestamp and acknowledges a callback
+once its message reference is saved. Background dispatch continues across
+pagination, rate limits and Worker restarts to resolve the individual
+installations entitled to the event. It
 queues up to 128 message references per recipient for an hour. A connected phone
 uses its own enrolled grant. The Worker rereads each message at Slack with that
 grant before returning it. A phone can connect directly to Slack when live

@@ -1,7 +1,7 @@
 // spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker"; spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
 import { parseProfile } from "@elizaos/cloud"
-import { cloudWorker, observeIdentity, storeLayer, type CloudBindings, type WorkerExecution } from "@elizaos/cloud-worker"
-import { slackNotifications, slackRelay, type SlackBindings } from "./slack-events.vibe"
+import { cloudWorker, observeIdentity, storeLayer, type CloudBindings, type WorkerExecution, type Store } from "@elizaos/cloud-worker"
+import { dispatchSlackEvents, slackNotifications, slackRelay, type SlackBindings } from "./slack-events.vibe"
 import { pruneSlackMailbox } from "./slack-mailbox.vibe"
 import { EdgeResponse } from "./edge-platform.ts"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
@@ -33,7 +33,7 @@ module slackNetwork {
 }
 import { providerFetch } from slackNetwork
 
-effect function runMailbox(bound: CloudBindings, work: Response!unknown!import("@elizaos/cloud-worker").Store) {
+effect function runMailbox(bound: CloudBindings, work: Response!unknown!Store) {
   const raw = try Effect.try(() => JSON.parse(bound.CLOUD_PROFILE))
   const profile = try parseProfile(raw)
   const settings = profile.environments[bound.CLOUD_ENVIRONMENT]
@@ -65,7 +65,11 @@ const alphaCloudWorker = {
     if (bound === undefined) throw new Error("Alpha Cloud's profile asset is missing or differs from CLOUD_PROFILE_SHA256")
     await upstream.scheduled(event, bound)
     if (slackNotifications(env)) {
-      const cleaned = await Effect.runPromise(runMailbox(bound, Effect.as(pruneSlackMailbox(event.scheduledTime), new EdgeResponse(null, { status: 204 }))))
+      const cleaned = await Effect.runPromise(runMailbox(bound, effect {
+        try pruneSlackMailbox(event.scheduledTime)
+        try dispatchSlackEvents(env, providerFetch, event.scheduledTime)
+        return new EdgeResponse(null, { status: 204 })
+      }))
       if (!cleaned.ok) throw new Error("Alpha Slack mailbox database is unavailable")
     }
   },
@@ -73,7 +77,13 @@ const alphaCloudWorker = {
     const bound = await bindingsOf(env)
     if (bound === undefined) return profileUnavailable()
     const path = new URL(request.url).pathname
-    if (path.startsWith("/api/slack/")) return serveMailbox(request, env, bound)
+    if (path.startsWith("/api/slack/")) {
+      const response = await serveMailbox(request, env, bound)
+      if (path === "/api/slack/events" && request.method === "POST" && response.ok && execution) {
+        execution.waitUntil(Effect.runPromise(runMailbox(bound, Effect.as(dispatchSlackEvents(env, providerFetch, Date.now()), new EdgeResponse(null, { status: 204 })))))
+      }
+      return response
+    }
     if (path === "/.well-known/alpha-slack" || path === "/.well-known/alpha-telegram") {
       const headers = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" }
       if (request.method !== "GET" && request.method !== "HEAD")

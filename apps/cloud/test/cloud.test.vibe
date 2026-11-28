@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { createCloudClient } from "@elizaos/cloud"
 import { deployment } from "@repo/deployment"
 import { storeLayer } from "@elizaos/cloud-worker"
-import { slackRelay } from "../src/slack-events.vibe"
+import { dispatchSlackEvents, slackRelay } from "../src/slack-events.vibe"
 import { prepareSlackMailbox, pruneSlackMailbox } from "../src/slack-mailbox.vibe"
 import { prepared, said, startSlackProvider } from "@repo/eliza-harness"
 import { ChildProcess } from "effect/process"
@@ -50,6 +50,11 @@ module node {
       if (url.origin !== "https://slack.com" || !url.pathname.startsWith("/api/") || url.searchParams.has("token")) throw new Error("unexpected provider destination")
       return fetch(origin + url.pathname + url.search, init)
     }
+  }
+  export async function limitAuthorizations(origin: string) {
+    const response = await fetch(origin + "/__control/fault", { method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: "/api/apps.event.authorizations.list", status: 429, retryAfter: 2, remaining: 1}) })
+    if (!response.ok) throw new Error("could not configure Slack rate limit")
   }
   export async function consentCode(origin: string, team: string) {
     const verifier = random()
@@ -153,7 +158,7 @@ module node {
     return { address: url.href, ...shown }
   }
 }
-import { consentCode, providerAt, receiverEnv, relayRequest, signedEvent, catalog, challengeOf, oversizedKey, p384Key, portalAnswer, random, returnPageAt, returnPageParts } from node
+import { consentCode, limitAuthorizations, providerAt, receiverEnv, relayRequest, signedEvent, catalog, challengeOf, oversizedKey, p384Key, portalAnswer, random, returnPageAt, returnPageParts } from node
 
 /** The cloud stopped, or said nothing of serving, before its deadline. */
 error NotServing { output: string }
@@ -456,8 +461,16 @@ describe(`Cloud Slack events reach each authorized installation (spec/app/slack/
       event: { type: "message", channel: "D01MAYA", ts: "1730000360.000200", user: "U11OWNER", text: "callback text must never be delivered" } }
     const accepted = try relay(signedEvent(callback, now))
     const retry = try relay(signedEvent(callback, now))
+    const pending = try readBody(try readFor(alpha.access_token, 0))
+    try holds(() => assert.deepStrictEqual(pending.events, []))
+    try tryPromise(() => limitAuthorizations(slack.origin))
+    try dispatchSlackEvents(receiverEnv, send, now)
+    try dispatchSlackEvents(receiverEnv, send, now + 1000)
+    const delayed = try readBody(try readFor(alpha.access_token, 0))
+    try holds(() => assert.deepStrictEqual(delayed.events, []))
+    try dispatchSlackEvents(receiverEnv, send, now + 2000)
     const stranger = try readBody(try readFor(design.access_token, 0))
-    const foreign = try readFor("xoxp-same-user-other-app", 0)
+    const foreign = try readFor("xoxp-alpha-team-owner-initial", 0)
     try holds(() => assert.deepStrictEqual([accepted.status, retry.status, stranger, foreign.status], [200,200,{cursor:0,events:[]},401]))
     const rotated = try relay(relayRequest("oauth", new URLSearchParams({ client_id: receiverEnv.SLACK_CLIENT_ID, grant_type: "refresh_token", refresh_token: alpha.refresh_token }).toString()))
     const credentials = try tryPromise(() => rotated.json() as Promise<{ access_token: string }>)
@@ -466,9 +479,15 @@ describe(`Cloud Slack events reach each authorized installation (spec/app/slack/
     const again = try readBody(try readFor(credentials.access_token, received.cursor))
     try holds(() => assert.deepStrictEqual([rotated.status, retired.status, received.events.map(item => item.event.text), again.events],
       [200,401,["Yes! Grabbing coffee and joining in 5."],[]]))
+    const thread = { ...callback, event_id: "EvThread", event: { ...callback.event, channel: "C01GENERAL", ts: "1730000130.000300", thread_ts: "1730000100.000100" } }
+    try relay(signedEvent(thread, now))
+    try dispatchSlackEvents(receiverEnv, send, now)
+    const reply = try readBody(try readFor(credentials.access_token, received.cursor))
+    try holds(() => assert.deepStrictEqual(reply.events.map(item => item.event.text), ["Design slides are linked in the doc."]))
     const hidden = { ...callback, event_id: "EvHidden", event: { ...callback.event, channel: "D99HIDDEN" } }
     try relay(signedEvent(hidden, now))
-    const denied = try readBody(try readFor(credentials.access_token, received.cursor))
+    try dispatchSlackEvents(receiverEnv, send, now)
+    const denied = try readBody(try readFor(credentials.access_token, reply.cursor))
     try holds(() => assert.deepStrictEqual(denied.events, []))
     try pruneSlackMailbox(now + 3600001)
     const expired = try readBody(try readFor(credentials.access_token, 0))

@@ -952,24 +952,22 @@ function sendPagedMessages(res: ServerResponse, req: ParsedRequest, items: reado
   });
 }
 
-function handleConversationsHistory(req: ParsedRequest, res: ServerResponse, auth: ResolvedAuth): void {
-  const channel = requireChannel(req, res, auth);
-  if (!channel) return;
+function inTimeRange(req: ParsedRequest): (message: SlackMessage) => boolean {
   const oldest = asString(req.params.oldest);
   const latest = asString(req.params.latest);
   const inclusive = asBoolean(req.params.inclusive) ?? false;
+  return (message: SlackMessage) => {
+    const after = oldest ? compareTs(message.ts, oldest) : 1;
+    const before = latest ? compareTs(message.ts, latest) : -1;
+    return inclusive ? after >= 0 && before <= 0 : after > 0 && before < 0;
+  };
+}
+
+function handleConversationsHistory(req: ParsedRequest, res: ServerResponse, auth: ResolvedAuth): void {
+  const channel = requireChannel(req, res, auth);
+  if (!channel) return;
   const filtered = visibleTimelineMessages(channel)
-    .filter((msg) => {
-      if (oldest) {
-        const cmp = compareTs(msg.ts, oldest);
-        if (inclusive ? cmp < 0 : cmp <= 0) return false;
-      }
-      if (latest) {
-        const cmp = compareTs(msg.ts, latest);
-        if (inclusive ? cmp > 0 : cmp >= 0) return false;
-      }
-      return true;
-    })
+    .filter(inTimeRange(req))
     .sort((a, b) => compareTs(b.ts, a.ts));
   sendPagedMessages(res, req, filtered);
 }
@@ -985,6 +983,7 @@ function handleConversationsReplies(req: ParsedRequest, res: ServerResponse, aut
   }
   const replies = channel.messages
     .filter((msg) => msg.thread_ts === ts && msg.ts !== ts)
+    .filter(inTimeRange(req))
     .sort((a, b) => compareTs(a.ts, b.ts));
   sendPagedMessages(res, req, [parent, ...replies]);
 }
