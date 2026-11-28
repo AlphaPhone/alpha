@@ -5,6 +5,7 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20'
     }
 }
 
@@ -33,7 +34,7 @@ allprojects {
 }
 
 subprojects {
-    if (project.name == 'capacitor-android') {
-        layout.buildDirectory.set(rootProject.layout.buildDirectory.dir('modules/capacitor-android'))
+    if (project.name == 'capacitor-android' || project.name.startsWith('eliza-')) {
+        layout.buildDirectory.set(rootProject.layout.buildDirectory.dir("modules/${project.name}"))
     }
 }

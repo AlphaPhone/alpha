@@ -255,41 +255,41 @@ public final class AlphaSuitePolicy {
         put(rules, "contacts", "Contacts", "app", "ai.alphacompute.contacts",
             Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), true);
         put(rules, "browser", "Browser", "app", "ai.alphacompute.browser",
-            Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "inbox", "Inbox", "app", "ai.alphacompute.inbox",
             Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"),
-            Set.of("/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/connect/initiate", "/api/v1/eliza/google/disconnect", "/api/v1/eliza/google/gmail/"),
+            Set.of("/api/v1/user", "/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/connect/initiate", "/api/v1/eliza/google/disconnect", "/api/v1/eliza/google/gmail/"),
             Set.of("inbox-saved-bodies"), false);
         put(rules, "telegram", "Telegram", "app", "ai.alphacompute.telegram",
             Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "slack", "Slack", "app", "ai.alphacompute.slack",
             Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "calendar", "Calendar", "app", "ai.alphacompute.calendar",
-            Set.of("/api/health", "/api/status", "/api/lifeops/calendar/", "/api/views/", "/api/client-devices/"),
-            Set.of("/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/calendar/"), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/lifeops/calendar", "/api/approvals", "/api/notes/", "/api/views/", "/api/client-devices/"),
+            Set.of("/api/v1/user", "/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/calendar/"), Set.of(), false);
         put(rules, "clock", "Clock", "app", "ai.alphacompute.clock",
-            Set.of("/api/health", "/api/status", "/api/alpha/clock", "/api/views/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/alpha/clock", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "reminders", "Reminders", "app", "ai.alphacompute.reminders",
-            Set.of("/api/health", "/api/status", "/api/alpha/reminders", "/api/scheduled-tasks", "/api/views/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/alpha/reminders", "/api/scheduled-tasks", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "camera", "Camera", "app", "ai.alphacompute.camera",
             Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "photos", "Photos", "app", "ai.alphacompute.photos",
             Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "maps", "Maps", "app", "ai.alphacompute.maps",
             Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"),
-            Set.of("/api/v1/maps/"), Set.of(), false);
+            Set.of("/api/v1/user", "/api/v1/maps/"), Set.of(), false);
         put(rules, "notes", "Notes", "app", "ai.alphacompute.notes",
-            Set.of("/api/health", "/api/status", "/api/notes/", "/api/alpha/notes/", "/api/views/", "/api/client-devices/"),
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/notes/", "/api/alpha/notes/", "/api/views/", "/api/client-devices/"),
             Set.of(), Set.of("notes-draft:*", "notes-folders:*"), false);
         put(rules, "files", "Files", "app", "ai.alphacompute.files",
-            Set.of("/api/health", "/api/status", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/notes/", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "workflows", "Workflows", "app", "ai.alphacompute.workflows",
-            Set.of("/api/health", "/api/status", "/api/workflow/", "/api/triggers", "/api/scheduled-tasks", "/api/notifications", "/api/approvals", "/api/views/"),
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/workflow/", "/api/triggers", "/api/scheduled-tasks", "/api/notifications", "/api/approvals", "/api/notes/", "/api/lifeops/calendar", "/api/alpha/reminders", "/api/views/", "/api/client-devices/"),
             Set.of(), Set.of(), false);
         put(rules, "wallet", "Wallet", "app", "ai.alphacompute.wallet",
-            Set.of("/api/health", "/api/status", "/api/wallet", "/api/approvals", "/api/views/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/wallet", "/api/approvals", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "settings", "Settings", "app", "ai.alphacompute.settings",
-            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/approvals", "/api/notifications", "/api/views/", "/api/client-devices/"),
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/approvals", "/api/notifications", "/api/conversations", "/api/agents", "/api/turns/", "/api/lifeops/calendar", "/api/views/", "/api/client-devices/"),
             Set.of("/api/v1/user", "/api/v1/referrals", "/api/v1/subscriptions/", "/api/v1/subscription/", "/api/v1/billing/", "/api/v1/eliza/google/"),
             Set.of(), false);
         return new AlphaSuitePolicy(rules);

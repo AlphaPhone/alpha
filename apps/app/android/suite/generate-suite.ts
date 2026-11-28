@@ -215,20 +215,290 @@ function renderIntentFilter(filter: IntentFilterSpec): string {
   return lines.join("\n");
 }
 
+interface FlavorPluginProfile {
+  readonly modules: readonly string[];
+  readonly sourceDirs: readonly string[];
+  readonly resDirs?: readonly string[];
+  readonly pluginClasses: readonly string[];
+}
+
+const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
+  phone: {
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+  },
+  messages: {
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+  },
+  contacts: {
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+  },
+  browser: {
+    modules: [":eliza-browser-surface"],
+    sourceDirs: ["src/plugins/browser/java"],
+    resDirs: ["src/plugins/browser/res"],
+    pluginClasses: [
+      "ai.eliza.plugins.browsersurface.ElizaSurfaceManagerPlugin",
+      "ai.alphacompute.thinapp.ThinBrowserPlugin",
+    ],
+  },
+  calendar: {
+    modules: [":eliza-calendar"],
+    sourceDirs: ["src/plugins/calendar/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinCalendarPlugin"],
+  },
+  clock: {
+    modules: [":eliza-system"],
+    sourceDirs: ["src/plugins/system/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinSystemPlugin"],
+  },
+  reminders: {
+    modules: [":eliza-reminders"],
+    sourceDirs: ["src/plugins/reminders/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinRemindersPlugin"],
+  },
+  camera: {
+    modules: [":eliza-camera", ":eliza-media"],
+    sourceDirs: ["src/plugins/media/java"],
+    pluginClasses: [
+      "ai.eliza.plugins.camera.CameraPlugin",
+      "ai.alphacompute.thinapp.ThinPhotosPlugin",
+      "ai.alphacompute.thinapp.ThinPhotoLibraryPlugin",
+      "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
+    ],
+  },
+  photos: {
+    modules: [":eliza-media"],
+    sourceDirs: ["src/plugins/media/java"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinPhotosPlugin",
+      "ai.alphacompute.thinapp.ThinPhotoLibraryPlugin",
+      "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
+    ],
+  },
+  maps: {
+    modules: [":eliza-location"],
+    sourceDirs: [],
+    pluginClasses: ["ai.eliza.plugins.location.LocationPlugin"],
+  },
+  files: {
+    modules: [":eliza-filesystem", ":eliza-media"],
+    sourceDirs: ["src/plugins/files/java", "src/plugins/media/java"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinFilesPlugin",
+      "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
+    ],
+  },
+  workflows: {
+    modules: [":eliza-system", ":eliza-calendar"],
+    sourceDirs: ["src/plugins/system/java", "src/plugins/calendar/java"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinSystemPlugin",
+      "ai.alphacompute.thinapp.ThinCalendarPlugin",
+    ],
+  },
+  settings: {
+    modules: [
+      ":eliza-system",
+      ":eliza-wifi",
+      ":eliza-location",
+      ":eliza-filesystem",
+      ":eliza-media",
+      ":eliza-calendar",
+      ":eliza-contacts",
+    ],
+    sourceDirs: [
+      "src/plugins/system/java",
+      "src/plugins/files/java",
+      "src/plugins/media/java",
+      "src/plugins/calendar/java",
+      "src/plugins/contacts/java",
+    ],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinSystemPlugin",
+      "ai.eliza.plugins.system.SensePlugin",
+      "ai.eliza.plugins.wifi.WiFiPlugin",
+      "ai.eliza.plugins.location.LocationPlugin",
+      "ai.alphacompute.thinapp.ThinFilesPlugin",
+      "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
+      "ai.alphacompute.thinapp.ThinCalendarPlugin",
+      "ai.alphacompute.thinapp.ThinContactsPlugin",
+    ],
+  },
+};
+
+function renderOptionalFeatures(permissions: readonly string[]): readonly string[] {
+  const permSet = new Set(permissions);
+  const features: string[] = [];
+  if (permSet.has("android.permission.CAMERA")) {
+    features.push("android.hardware.camera", "android.hardware.camera.autofocus");
+  }
+  if (permSet.has("android.permission.RECORD_AUDIO")) {
+    features.push("android.hardware.microphone");
+  }
+  if (permSet.has("android.permission.ACCESS_FINE_LOCATION") || permSet.has("android.permission.ACCESS_COARSE_LOCATION")) {
+    features.push("android.hardware.location", "android.hardware.location.gps");
+  }
+  if (permSet.has("android.permission.ACCESS_WIFI_STATE")) {
+    features.push("android.hardware.wifi");
+  }
+  if (permSet.has("android.permission.CALL_PHONE") || permSet.has("android.permission.SEND_SMS")) {
+    features.push("android.hardware.telephony");
+  }
+  return features.map((name) => `    <uses-feature android:name="${name}" android:required="false" />`);
+}
+
+function renderQueries(registry: SuiteRegistry, app: SuiteAppEntry): readonly string[] {
+  const packages = new Set<string>([
+    registry.corePackage,
+    "proton.android.pass",
+    "ai.alphacompute.alphaphone.sense",
+    "com.android.systemui",
+  ]);
+  for (const sibling of registry.apps) {
+    if (sibling.applicationId !== app.applicationId) {
+      packages.add(sibling.applicationId);
+    }
+  }
+  const packageLines = [...packages].map((pkg) => `        <package android:name="${escapeXml(pkg)}" />`);
+  return [
+    `    <queries>`,
+    ...packageLines,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.VIEW" />`,
+    `            <category android:name="android.intent.category.BROWSABLE" />`,
+    `            <data android:scheme="https" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.VIEW" />`,
+    `            <data android:scheme="geo" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.DIAL" />`,
+    `            <data android:scheme="tel" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.SENDTO" />`,
+    `            <data android:scheme="mailto" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.SENDTO" />`,
+    `            <data android:scheme="smsto" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.SET_ALARM" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.SHOW_ALARMS" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.DISMISS_ALARM" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.intent.action.SNOOZE_ALARM" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.support.customtabs.action.CustomTabsService" />`,
+    `        </intent>`,
+    `        <intent>`,
+    `            <action android:name="android.settings.SETTINGS" />`,
+    `        </intent>`,
+    `    </queries>`,
+  ];
+}
+
+function renderFlavorComponents(app: SuiteAppEntry): readonly string[] {
+  if (app.id === "browser") {
+    return [
+      `        <provider`,
+      `            android:name="androidx.core.content.FileProvider"`,
+      `            android:authorities="\${applicationId}.browser.fileprovider"`,
+      `            android:exported="false"`,
+      `            android:grantUriPermissions="true">`,
+      `            <meta-data`,
+      `                android:name="android.support.FILE_PROVIDER_PATHS"`,
+      `                android:resource="@xml/alpha_browser_file_paths" />`,
+      `        </provider>`,
+    ];
+  }
+  if (app.id === "reminders") {
+    return [
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinReminderReceiver"`,
+      `            android:exported="false">`,
+      `            <intent-filter>`,
+      `                <action android:name="android.intent.action.BOOT_COMPLETED" />`,
+      `                <action android:name="android.intent.action.TIME_SET" />`,
+      `                <action android:name="android.intent.action.TIMEZONE_CHANGED" />`,
+      `            </intent-filter>`,
+      `        </receiver>`,
+    ];
+  }
+  if (app.id === "phone" || app.id === "messages" || app.id === "contacts") {
+    return [
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinSmsSendReceiver"`,
+      `            android:exported="false" />`,
+    ];
+  }
+  return [];
+}
+
+function renderFlavorPluginsJava(app: SuiteAppEntry): string {
+  const profile = FLAVOR_PLUGIN_PROFILES[app.id];
+  const calls = (profile?.pluginClasses ?? []).map(
+    (cls) => `        activity.registerThinPlugin(${cls}.class);`,
+  );
+  return [
+    `package ai.alphacompute.thinapp;`,
+    ``,
+    `/** Generated per-flavor native Capacitor plugin registrar for {@code ${app.id}}. */`,
+    `final class FlavorPlugins {`,
+    `    private FlavorPlugins() {}`,
+    ``,
+    `    static void register(ThinAppActivity activity) {`,
+    ...calls,
+    `    }`,
+    `}`,
+    ``,
+  ].join("\n");
+}
+
 function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string {
+  const permSet = new Set(app.permissions);
   const permissionLines = [
     registry.ipcPermission,
     ...app.permissions.filter((perm) => perm !== registry.ipcPermission),
   ].map((perm) => `    <uses-permission android:name="${escapeXml(perm)}" />`);
 
+  if (permSet.has("android.permission.READ_MEDIA_IMAGES") && !permSet.has("android.permission.READ_EXTERNAL_STORAGE")) {
+    permissionLines.push(
+      `    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion" />`,
+    );
+  }
+  if (app.id === "files" && !permSet.has("android.permission.WRITE_EXTERNAL_STORAGE")) {
+    permissionLines.push(
+      `    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:replace="android:maxSdkVersion" />`,
+    );
+  }
+
+  const featureLines = renderOptionalFeatures(app.permissions);
+  const queryLines = renderQueries(registry, app);
   const extraFilters = app.intentFilters.map(renderIntentFilter);
+  const flavorComponents = renderFlavorComponents(app);
+
   return [
     `<?xml version="1.0" encoding="utf-8"?>`,
-    `<manifest xmlns:android="http://schemas.android.com/apk/res/android">`,
+    `<manifest xmlns:android="http://schemas.android.com/apk/res/android"`,
+    `    xmlns:tools="http://schemas.android.com/tools">`,
     ...permissionLines,
-    `    <queries>`,
-    `        <package android:name="${escapeXml(registry.corePackage)}" />`,
-    `    </queries>`,
+    ...featureLines,
+    ...queryLines,
     `    <application android:label="${escapeXml(app.label)}">`,
     `        <activity`,
     `            android:name="ai.alphacompute.thinapp.ThinAppActivity"`,
@@ -258,6 +528,7 @@ function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string
     `                <data android:scheme="alpha" android:host="${escapeXml(app.id)}" />`,
     `            </intent-filter>`,
     `        </activity>`,
+    ...flavorComponents,
     `    </application>`,
     `</manifest>`,
     "",
@@ -284,12 +555,33 @@ function renderFlavorsGradle(registry: SuiteRegistry): string {
     `        }`,
   ].join("\n"));
 
-  const sourceSetBlocks = thinApps.map((app) => [
-    `        ${app.id} {`,
-    `            manifest.srcFile file('../generated/flavors/${app.id}/AndroidManifest.xml')`,
-    `            assets.srcDirs += [file('src/${app.id}/assets')]`,
-    `        }`,
-  ].join("\n"));
+  const sourceSetBlocks = thinApps.map((app) => {
+    const profile = FLAVOR_PLUGIN_PROFILES[app.id];
+    const javaDirs = [
+      `file('../generated/flavors/${app.id}/java')`,
+      ...(profile?.sourceDirs ?? []).map((dir) => `file('${dir}')`),
+    ];
+    const resLines = (profile?.resDirs ?? []).length > 0
+      ? [`            res.srcDirs += [${(profile?.resDirs ?? []).map((dir) => `file('${dir}')`).join(", ")}]`]
+      : [];
+    return [
+      `        ${app.id} {`,
+      `            manifest.srcFile file('../generated/flavors/${app.id}/AndroidManifest.xml')`,
+      `            java.srcDirs += [${javaDirs.join(", ")}]`,
+      ...resLines,
+      `            assets.srcDirs += [file('src/${app.id}/assets')]`,
+      `        }`,
+    ].join("\n");
+  });
+
+  const dependencyLines: string[] = [];
+  for (const app of thinApps) {
+    const profile = FLAVOR_PLUGIN_PROFILES[app.id];
+    if (!profile) continue;
+    for (const moduleName of profile.modules) {
+      dependencyLines.push(`    ${app.id}Implementation project('${moduleName}')`);
+    }
+  }
 
   return [
     `android {`,
@@ -300,6 +592,10 @@ function renderFlavorsGradle(registry: SuiteRegistry): string {
     `    sourceSets {`,
     ...sourceSetBlocks,
     `    }`,
+    `}`,
+    ``,
+    `dependencies {`,
+    ...dependencyLines,
     `}`,
     "",
   ].join("\n");
@@ -315,6 +611,7 @@ export function buildSuiteOutputs(registry: SuiteRegistry, registryRaw: string):
   for (const app of registry.apps) {
     if (app.surface !== "app") continue;
     push(`flavors/${app.id}/AndroidManifest.xml`, renderThinManifest(registry, app));
+    push(`flavors/${app.id}/java/ai/alphacompute/thinapp/FlavorPlugins.java`, renderFlavorPluginsJava(app));
   }
 
   push("suite-flavors.gradle", renderFlavorsGradle(registry));

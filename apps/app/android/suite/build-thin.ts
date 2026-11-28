@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -30,6 +30,7 @@ export interface BuildThinOptions {
   readonly dryRun: boolean;
   readonly json: boolean;
   readonly maxWorkers: number;
+  readonly webConcurrency: number;
 }
 
 export interface BuiltThinApk {
@@ -119,6 +120,47 @@ function runChecked(command: string, args: readonly string[], cwd: string, env: 
   }
 }
 
+function runAsyncChecked(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  label: string,
+): Promise<void> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(command, [...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    child.on("error", rejectPromise);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        const tail = `${stdout}\n${stderr}`.trim().slice(-2000);
+        rejectPromise(new Error(`[${label}] ${command} ${args.join(" ")} exited with ${String(code ?? signal)}\n${tail}`));
+      }
+    });
+  });
+}
+
+async function runPool<T>(items: readonly T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  const lanes = Array.from({ length: limit }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      const item = items[index];
+      if (item !== undefined) {
+        await worker(item);
+      }
+    }
+  });
+  await Promise.all(lanes);
+}
+
 function stageFlavorAssets(app: SuiteAppEntry, distDir: string): void {
   const assetsRoot = join(THIN_APP_DIR, "src", app.id, "assets");
   const publicDir = join(assetsRoot, "public");
@@ -153,6 +195,7 @@ function parseCliArgs(argv: readonly string[]): BuildThinOptions {
   let dryRun = false;
   let json = false;
   let maxWorkers = 4;
+  let webConcurrency = 4;
   let appIds: string[] = [...DEFAULT_APP_IDS];
 
   for (let index = 0; index < argv.length; index++) {
@@ -172,6 +215,11 @@ function parseCliArgs(argv: readonly string[]): BuildThinOptions {
       if (!Number.isSafeInteger(value) || value < 1 || value > 16) throw new Error("--max-workers must be 1..16");
       index += 1;
       maxWorkers = value;
+    } else if (arg === "--web-concurrency") {
+      const value = Number(argv[index + 1]);
+      if (!Number.isSafeInteger(value) || value < 1 || value > 8) throw new Error("--web-concurrency must be 1..8");
+      index += 1;
+      webConcurrency = value;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -187,10 +235,10 @@ function parseCliArgs(argv: readonly string[]): BuildThinOptions {
   for (const id of appIds) {
     if (!knownThin.has(id)) throw new Error(`Unknown thin app id "${id}" (available: ${[...knownThin].join(", ")})`);
   }
-  return { appIds, release, skipWeb, dryRun, json, maxWorkers };
+  return { appIds, release, skipWeb, dryRun, json, maxWorkers, webConcurrency };
 }
 
-function main(argv: readonly string[]): number {
+async function main(argv: readonly string[]): Promise<number> {
   const options = parseCliArgs(argv);
   const registryPath = join(SUITE_DIR, "apps.json");
   const registry = loadSuiteRegistry(registryPath);
@@ -216,6 +264,8 @@ function main(argv: readonly string[]): number {
       ok: true,
       dryRun: true,
       mode,
+      count: selected.length,
+      webConcurrency: Math.min(options.webConcurrency, selected.length),
       apps: selected.map((app) => ({
         id: app.id,
         view: app.view,
@@ -244,23 +294,24 @@ function main(argv: readonly string[]): number {
   }
 
   const registryRaw = readFileSync(registryPath, "utf8");
-  for (const output of buildSuiteOutputs(registry, registryRaw)) {
+  const outputs = buildSuiteOutputs(registry, registryRaw);
+  for (const output of outputs) {
     const target = join(GENERATED_DIR, output.relativePath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, output.content, "utf8");
   }
   const ipcPolicyPath = resolve(SUITE_DIR, "../alpha-ipc/src/main/assets/alpha-suite-policy.json");
-  const policyOut = buildSuiteOutputs(registry, registryRaw).find((item) => item.relativePath === "alpha-suite-policy.json");
+  const policyOut = outputs.find((item) => item.relativePath === "alpha-suite-policy.json");
   if (policyOut) {
     mkdirSync(dirname(ipcPolicyPath), { recursive: true });
     writeFileSync(ipcPolicyPath, policyOut.content, "utf8");
   }
 
   const viteBin = join(APP_DIR, "node_modules/.bin/vite");
-  for (const app of selected) {
-    const distDir = join(APP_DIR, "dist-suite", app.id);
-    if (!options.skipWeb) {
-      runChecked(
+  if (!options.skipWeb) {
+    await runPool(selected, options.webConcurrency, async (app) => {
+      const distDir = join(APP_DIR, "dist-suite", app.id);
+      await runAsyncChecked(
         viteBin,
         ["build", "--outDir", distDir],
         APP_DIR,
@@ -269,8 +320,13 @@ function main(argv: readonly string[]): number {
           VITE_ALPHA_SURFACE: "app",
           VITE_ALPHA_VIEW: app.view ?? "",
         },
+        app.id,
       );
-    }
+    });
+  }
+
+  for (const app of selected) {
+    const distDir = join(APP_DIR, "dist-suite", app.id);
     if (!existsSync(join(distDir, "index.html"))) {
       throw new Error(`Missing built web bundle for ${app.id} at ${distDir}/index.html`);
     }
@@ -326,5 +382,11 @@ function main(argv: readonly string[]): number {
 }
 
 if (import.meta.main) {
-  process.exitCode = main(process.argv.slice(2));
+  main(process.argv.slice(2)).then(
+    (code) => { process.exitCode = code; },
+    (error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    },
+  );
 }

@@ -165,6 +165,7 @@
       "allowedAgentRoutePrefixes": [
         "/api/health",
         "/api/status",
+        "/api/auth/me",
         "/api/views/",
         "/api/client-devices/"
       ],
@@ -197,6 +198,7 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [
+        "/api/v1/user",
         "/api/v1/eliza/google/status",
         "/api/v1/eliza/google/accounts",
         "/api/v1/eliza/google/connect/initiate",
@@ -285,11 +287,15 @@
       "allowedAgentRoutePrefixes": [
         "/api/health",
         "/api/status",
-        "/api/lifeops/calendar/",
+        "/api/auth/me",
+        "/api/lifeops/calendar",
+        "/api/approvals",
+        "/api/notes/",
         "/api/views/",
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [
+        "/api/v1/user",
         "/api/v1/eliza/google/status",
         "/api/v1/eliza/google/accounts",
         "/api/v1/eliza/google/calendar/"
@@ -326,7 +332,8 @@
         "/api/health",
         "/api/status",
         "/api/alpha/clock",
-        "/api/views/"
+        "/api/views/",
+        "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
       "allowedSecureStoreSlots": [],
@@ -353,7 +360,8 @@
         "/api/status",
         "/api/alpha/reminders",
         "/api/scheduled-tasks",
-        "/api/views/"
+        "/api/views/",
+        "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
       "allowedSecureStoreSlots": [],
@@ -450,6 +458,7 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [
+        "/api/v1/user",
         "/api/v1/maps/"
       ],
       "allowedSecureStoreSlots": [],
@@ -477,6 +486,7 @@
       "allowedAgentRoutePrefixes": [
         "/api/health",
         "/api/status",
+        "/api/auth/me",
         "/api/notes/",
         "/api/alpha/notes/",
         "/api/views/",
@@ -511,6 +521,7 @@
       "allowedAgentRoutePrefixes": [
         "/api/health",
         "/api/status",
+        "/api/notes/",
         "/api/views/",
         "/api/client-devices/"
       ],
@@ -529,17 +540,23 @@
       "defaultRoles": [],
       "intentFilters": [],
       "permissions": [
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_CALENDAR"
       ],
       "allowedAgentRoutePrefixes": [
         "/api/health",
         "/api/status",
+        "/api/auth/me",
         "/api/workflow/",
         "/api/triggers",
         "/api/scheduled-tasks",
         "/api/notifications",
         "/api/approvals",
-        "/api/views/"
+        "/api/notes/",
+        "/api/lifeops/calendar",
+        "/api/alpha/reminders",
+        "/api/views/",
+        "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
       "allowedSecureStoreSlots": [],
@@ -563,7 +580,8 @@
         "/api/status",
         "/api/wallet",
         "/api/approvals",
-        "/api/views/"
+        "/api/views/",
+        "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
       "allowedSecureStoreSlots": [],
@@ -585,6 +603,15 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.ACCESS_WIFI_STATE",
         "android.permission.CHANGE_WIFI_STATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CALENDAR",
+        "android.permission.READ_CONTACTS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.USE_BIOMETRIC",
         "android.permission.POST_NOTIFICATIONS",
         "ai.alphacompute.alphaphone.sense.permission.LISTENER_CONTROL"
@@ -595,6 +622,10 @@
         "/api/auth/me",
         "/api/approvals",
         "/api/notifications",
+        "/api/conversations",
+        "/api/agents",
+        "/api/turns/",
+        "/api/lifeops/calendar",
         "/api/views/",
         "/api/client-devices/"
       ],

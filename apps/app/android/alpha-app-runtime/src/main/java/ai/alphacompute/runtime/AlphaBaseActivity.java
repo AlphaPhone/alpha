@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
@@ -51,6 +52,7 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     private InsetsState insets;
     private JSONObject bufferedIntent;
     private volatile boolean pageLoaded;
+    private volatile boolean volumeShutterEnabled;
 
     private record InsetsState(int top, int bottom, boolean keyboard) {
         void publish(WebView page) {
@@ -85,6 +87,16 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         registerPlugin(RemoteSecureStorePlugin.class);
         registerPlugin(AlphaPreferencesPlugin.class);
         registerPlugin(AlphaContextPlugin.class);
+        registerPlugin(RemoteDevicePlugin.class);
+        registerPlugin(RemoteVoiceCloudPlugin.class);
+        registerPlugin(RemoteCloudSpeechPlugin.class);
+        registerPlugin(RemoteNotificationsPlugin.class);
+        registerPlugin(RemotePasswordsPlugin.class);
+        registerPlugin(RemoteActionJournalPlugin.class);
+        registerPlugin(RemoteConnectionPlugin.class);
+        registerPlugin(RemoteHostedDigestPlugin.class);
+        registerPlugin(RemoteInboxNoticesPlugin.class);
+        registerPlugin(RemoteResetPlugin.class);
         registerAppPlugins();
         super.onCreate(savedInstanceState);
 
@@ -129,6 +141,38 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         setIntent(intent);
         captureAgentIntent(intent);
         logLaunchDiagnostics(intent);
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus || !pageLoaded) return;
+        var bridge = getBridge();
+        WebView page = bridge == null ? null : bridge.getWebView();
+        if (page != null) {
+            page.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
+        }
+    }
+
+    /** Enables or disables capturing hardware volume keys as Camera shutter triggers. */
+    public void setVolumeShutter(boolean enabled) {
+        volumeShutterEnabled = enabled;
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (volumeShutterEnabled && event != null) {
+            int code = event.getKeyCode();
+            if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                    var bridge = getBridge();
+                    WebView page = bridge == null ? null : bridge.getWebView();
+                    if (page != null) {
+                        page.evaluateJavascript("window.dispatchEvent(new Event('alpha:volume-shutter'))", null);
+                    }
+                }
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     /** Resolves a pending signed cross-app agent action callback identified by {@code claimId}. */
@@ -247,10 +291,9 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         Bundle values = snapshot.getBundle(AlphaIpcContract.PREF_RESULT_SNAPSHOT);
         if (values == null) values = snapshot;
 
-        int textScale = parseTextScale(values.getString(AlphaIpcContract.KEY_TEXT_SCALE));
         float fontScale = getResources().getConfiguration().fontScale;
         if (!Float.isFinite(fontScale) || fontScale <= 0f) fontScale = 1f;
-        int zoom = Math.max(1, Math.round(textScale * fontScale));
+        int zoom = Math.max(1, Math.round(100f * fontScale));
         var bridge = getBridge();
         WebView page = bridge == null ? null : bridge.getWebView();
         if (page != null) {
@@ -261,16 +304,6 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
         controller.setAppearanceLightStatusBars(!dark);
         controller.setAppearanceLightNavigationBars(!dark);
-    }
-
-    private int parseTextScale(String raw) {
-        if (raw == null) return 100;
-        try {
-            int parsed = Integer.parseInt(raw.trim());
-            return parsed >= 75 && parsed <= 150 ? parsed : 100;
-        } catch (NumberFormatException ignored) {
-            return 100;
-        }
     }
 
     private boolean resolveDarkLook(String rawAppearance) {

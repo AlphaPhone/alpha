@@ -7,6 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.pm.PackageManager;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.Test;
@@ -32,7 +33,26 @@ public final class AlphaSuitePolicyTest {
         assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/conversations"));
         assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet"));
         assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet/holdings"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/client-devices/alpha"));
         assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.wallet", "/api/wallet-other"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.calendar", "/api/lifeops/calendar"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.calendar", "/api/lifeops/calendar/events"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.calendar", "/api/auth/me"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.calendar", "/api/approvals"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.calendar", "/api/notes/list"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.browser", "/api/auth/me"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/auth/me"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.files", "/api/notes/state"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.clock", "/api/client-devices/alpha"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.reminders", "/api/client-devices/alpha"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.workflows", "/api/lifeops/calendar"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.workflows", "/api/alpha/reminders"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.workflows", "/api/notes/state"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.workflows", "/api/auth/me"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/conversations"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/agents"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/turns/123"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/lifeops/calendar"));
         assertFalse(policy.isAgentRouteAllowed("com.example.untrusted", "/api/health"));
     }
 
@@ -78,8 +98,11 @@ public final class AlphaSuitePolicyTest {
     @Test public void enforcesCloudRoutesAndSecureStoreSlots() {
         AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
         assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/maps/routes"));
+        assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/user"));
         assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.maps", "/api/v1/eliza/google/gmail/read"));
+        assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.inbox", "/api/v1/user"));
         assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.inbox", "/api/v1/eliza/google/gmail/search?q=test"));
+        assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.calendar", "/api/v1/user"));
         assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.notes", "/api/v1/user"));
 
         assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "notes-draft:42"));
@@ -114,7 +137,7 @@ public final class AlphaSuitePolicyTest {
     @Test public void parsesSuiteRegistryJsonMatchingDefaults() throws Exception {
         Path registry = Path.of("../suite/apps.json");
         if (!Files.exists(registry)) return;
-        AlphaSuitePolicy parsed = AlphaSuitePolicy.fromJson(Files.readString(registry));
+        AlphaSuitePolicy parsed = AlphaSuitePolicy.fromJson(new String(Files.readAllBytes(registry), StandardCharsets.UTF_8));
         assertEquals(AlphaSuitePolicy.defaults().allRules(), parsed.allRules());
     }
 }
