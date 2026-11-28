@@ -1600,6 +1600,43 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     await later(alpha, 500);
     expect([machine(runtime).unsettled, composerText(), kept(world, dinner(world)), kept(world).text, world.ask.said])
       .toEqual([true, "Hello", mark, "Hello", []]);
+
+    // spec/app/assistant/composer.md, "A send holds the message: the composer clears, and the slot is marked as sending before anything is asked": the Send that made the conversation is spent once its message comes under review, so putting it back sends nothing until the owner taps Send
+    await waitOut(alpha, 40000, () => inConversation("Put back in the field") !== undefined);
+    await drawn(() => (inConversation("Put back in the field") as HTMLButtonElement).click());
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
+    await later(alpha, 500);
+    const putBack = composerText();
+    expect([putBack.endsWith("Hello"), world.ask.said]).toEqual([true, []]);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([putBack])));
+  });
+
+  // spec/app/assistant/composer.md, "A send holds the message: the composer clears, and the slot is marked as sending before anything is asked"; spec/app/assistant/composer.md, "Story: Send what I wrote"
+  it("A message of non-Latin text near the length limit is marked within what the phone's slot takes, and sent once", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha, runtime } = await openAssistant(world);
+    const long = "書".repeat(60000);
+    write(long);
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text && !s.long);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said.map((said) => said === long)).toEqual([true])));
+    expect(composerText()).toBe("");
+  });
+
+  // spec/app/assistant/composer.md, "A send holds the message: the composer clears, and the slot is marked as sending before anything is asked"; spec/app/assistant/composer.md, "Story: Send what I wrote"
+  it("A new chat's message cannot be sent while another Alpha's mark in its slot is under review, and once put back goes only on the owner's Send", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha, runtime } = await savedMeanwhile(world, { text: "Book the table", sending: true });
+    await until(alpha, runtime, Composer, (s) => s.unsettled);
+    await waitOut(alpha, 40000, () => inConversation("Put back in the field") !== undefined);
+    expect([composerText(), button("Send")?.disabled ?? true, world.ask.said]).toEqual(["Mine too", true, []]);
+    await drawn(() => (inConversation("Put back in the field") as HTMLButtonElement).click());
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
+    await later(alpha, 500);
+    expect([composerText(), world.ask.said]).toEqual(["Book the table\nMine too", []]);
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Book the table\nMine too"])));
   });
 
   // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
