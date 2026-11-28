@@ -30,22 +30,28 @@ export effect function openSlackNotice(target: SlackTarget) {
   const ws = try Workspaces.Machine
   const auth = try Auth.Machine
   const meta = ledger.workspaceByTeamId(target.workspace)
+  const retired = effect {
+    const old = ledger.noticesList().find(({ destination }) => destination.scope === target.scope && destination.workspace === target.workspace && destination.channel === target.channel && destination.thread === target.thread)
+    if (old) ledger.removeTargetNotice(old)
+    try (try MessagingNotices).withdraw(target)
+    return "stale" as const
+  }
   const sessions = try MessagingSessions
   const owner = try sessions.owner()
   if (!owner) return "pending" as const
   const held = Option.getOrUndefined(try sessions.get(slackSessionKey(target.workspace), owner))
-  if (!held?.workspace?.brokered || held.workspace.teamId !== target.workspace) return "stale" as const
+  if (!held?.workspace?.brokered || held.workspace.teamId !== target.workspace) return try retired
   const authorizationId = try authorizationOf(held)
-  if ((try slackNoticeScope({ ...held.workspace, owner, authorizationId })) !== target.scope) return "stale" as const
+  if ((try slackNoticeScope({ ...held.workspace, owner, authorizationId })) !== target.scope) return try retired
   if (!meta || meta.owner !== owner || meta.authorizationId !== authorizationId) return "pending" as const
   if (!(try auth.get()).connected.some((grant) => grant.workspace === meta.num)) return "pending" as const
   const channel = ledger.channelNum(meta.num, target.channel)
   const info = try runWorkspaceCall(meta.num, (slack, token) => slack.conversationInfo(token, target.channel))
   if (!info.ok) {
     const denied = info.failure === "Revoked" || info.code === "channel_not_found" || info.code === "not_in_channel" || info.code === "missing_scope"
-    return denied ? "stale" as const : "pending" as const
+    return denied ? try retired : "pending" as const
   }
-  if (info.value.channel.id !== target.channel || !(try holdsWorkspace(meta))) return "stale" as const
+  if (info.value.channel.id !== target.channel || !(try holdsWorkspace(meta))) return try retired
   const summary = info.value.channel
   ledger.putConversations(meta.num, [summary], true)
   const shell = Option.getOrUndefined(try Effect.serviceOption(Shell.Machine))

@@ -375,6 +375,7 @@ describe("Slack user-account client over live HTTP provider", () => {
     await underAct(() => { expect(phone.messagingNotices.tap(deniedChannel.token)).toBe(true); });
     await vi.waitFor(() => expect(phone.messagingNotices.pending()).toBeUndefined());
     expect((await app.runtime.runPromise(ConversationMachine.use((m) => m.get()))).channel).toBe(0);
+    expect(ledger.noticesList().some((notice) => notice.destination.channel === "G01LAUNCH")).toBe(false);
     const [posted] = phone.messagingNotices.posted();
     expect(posted.target.scope).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(posted.target).toMatchObject({ provider: "slack", workspace: "T01ALPHA", channel: "C01GENERAL", thread });
