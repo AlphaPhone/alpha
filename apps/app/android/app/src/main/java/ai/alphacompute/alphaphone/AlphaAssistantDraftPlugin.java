@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** The renderer may name a conversation and assert its current seat. Native custody derives the key. */
 @CapacitorPlugin(name = "AlphaAssistantDraft")
