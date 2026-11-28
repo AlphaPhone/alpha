@@ -405,6 +405,30 @@ public final class AlphaCorePluginDispatch {
                 }
                 resolve.accept(out);
             }
+            case "updateState" -> {
+                try {
+                    resolve.accept(AlphaDevicePlugin.readHeadlessUpdateState(context));
+                } catch (Exception unavailable) {
+                    reject.accept("UNAVAILABLE", "Update status unavailable");
+                }
+            }
+            case "checkForUpdate" -> {
+                try {
+                    resolve.accept(AlphaDevicePlugin.checkForUpdateHeadless(context));
+                } catch (Exception unavailable) {
+                    reject.accept("UNAVAILABLE", "Update unavailable");
+                }
+            }
+            case "installUpdate" -> resolve.accept(jsonPair("status", "unsupported"));
+            case "activateUpdate" -> resolve.accept(new JSONObject());
+            case "continueUpdate" -> reject.accept("UNAVAILABLE", "Update confirmation unavailable");
+            case "openUpdatePermissionSettings" -> {
+                try {
+                    resolve.accept(AlphaDevicePlugin.openUpdatePermissionSettingsHeadless(context));
+                } catch (RuntimeException unavailable) {
+                    reject.accept("UNAVAILABLE", "Update unavailable");
+                }
+            }
             case "textAsk" -> resolve.accept(jsonPair("ticket", 0));
             case "closeTextAsk" -> resolve.accept(jsonPair("closed", false));
             case "copyText" -> {

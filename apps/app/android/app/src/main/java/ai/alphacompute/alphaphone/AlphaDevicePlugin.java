@@ -624,6 +624,61 @@ public final class AlphaDevicePlugin extends Plugin {
    try{call.resolve(readUpdateState());}catch(Exception unavailable){call.reject("Update status unavailable");}
   },()->call.reject("Update status unavailable"));
  }
+ /** Headless readback of AlphaCore's update state for brokered thin-app and overlay callers. */
+ static JSObject readHeadlessUpdateState(Context context)throws Exception{
+  Context appContext=context.getApplicationContext();
+  if(UpdatePause.context==null)UpdatePause.configure(appContext);
+  if(activation==null){
+   try{
+    var settled=UpdatePause.reconcile();
+    if(settled!=null){
+     try{UpdateConfirmationReceipt.retire(appContext,settled);}catch(Exception ignored){}
+     synchronized(updateBarrier){
+      settledActivation=settled.id;
+      settledOutcome=BuildConfig.VERSION_CODE==settled.targetCode?"installed":"canceled";
+      settledResumeBridge=null;
+     }
+    }
+   }catch(Exception ignored){}
+  }
+  synchronized(updateBarrier){
+   UpdateActivation pending=activation;
+   if(pending!=null){
+    return new JSObject()
+     .put("activationId",pending.id)
+     .put("bridgeId","headless")
+     .put("automatic",pending.automatic)
+     .put("phase",pending.sealed?"paused":"preparing")
+     .put("pending",true);
+   }
+   var record=UpdatePause.store().read();
+   JSObject result=new JSObject().put("bridgeId","headless").put("pending",record!=null);
+   if(record!=null){
+    result.put("activationId",record.id).put("phase","paused").put("canContinue",false);
+   }else{
+    result.put("idle",true);
+    if(settledActivation!=null){
+     result.put("activationId",settledActivation).put("outcome",settledOutcome).put("resume",false);
+    }
+   }
+   return result;
+  }
+ }
+ /** Headless update manifest check reusing AlphaDevicePlugin's verified HTTPS manifest reader. */
+ static JSObject checkForUpdateHeadless(Context context)throws Exception{
+  Context appContext=context.getApplicationContext();
+  if(UpdatePause.context==null)UpdatePause.configure(appContext);
+  byte[] manifest=readFinalUpdateManifest();
+  return manifest==null?new JSObject():new JSObject()
+   .put("manifest",new String(manifest,java.nio.charset.StandardCharsets.UTF_8))
+   .put("manifestSha256",manifestDigest(manifest));
+ }
+ /** Headless opener for Android's install-unknown-apps permission page. */
+ static JSObject openUpdatePermissionSettingsHeadless(Context context){
+  if(Build.VERSION.SDK_INT<31)return new JSObject().put("status","unsupported");
+  context.startActivity(handOff(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:"+context.getPackageName()))));
+  return new JSObject().put("status","opened");
+ }
  private boolean reconcileUpdate(){
   try{
    var settled=UpdatePause.reconcile();
