@@ -34,7 +34,7 @@ export function installClockScheduler() {
   });
   return {
     unplug, alerts: () => projection.alerts, projection: () => projection,
-    installStandalone() { standaloneInstalled = true; }, foreground: () => foreground,
+    installStandalone() { standaloneInstalled = true; }, foreground: () => foreground, pending: () => pending,
     tap(next: ClockTap) { pending = next; changed(); },
   };
 }

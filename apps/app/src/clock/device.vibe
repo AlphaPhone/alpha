@@ -68,6 +68,7 @@ export const deviceClock = started(effect {
         return
       }
     }
+    if (tap.kind === "timer" && desired.some((item) => item.kind === "alarm" && item.ringing)) return
     const tab = tap.kind === "alarm" ? "Alarms" : "Timers"
     const selected = try view.get()
     if (ClockView.canCloseSheet(selected)) {

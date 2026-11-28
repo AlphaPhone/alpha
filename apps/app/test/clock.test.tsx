@@ -296,15 +296,26 @@ describe("Clock journeys", () => {
     await expect.poll(() => host.alerts().map(({ id }) => id)).toEqual([2]);
 
     await press("Start 1m timer");
+    await clickTab("Alarms");
+    await press("Add alarm");
+    for (let step = 0; step < 2; step++) await pressOnTop("Increase hour");
+    for (let step = 0; step < 5; step++) await pressOnTop("Increase minute");
+    await fill("Alarm label", "Breakfast");
+    await pressOnTop("Save");
     await clickTab("World");
     await advance(180_000);
+    await waitFor(ClockView.Machine, (s) => s.ringingAlarm === 1);
     await waitFor(Timers.Machine, (s) => s.items.filter((item) => item.status === "Ringing").length === 2);
     await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "goHome" }))));
     await until(alpha, alpha.runtime, Shell.Machine, (s) => !Shell.showing(s, "Clock"));
     host.installStandalone();
     await drawn(() => host.tap({ kind: "timer", id: 3, token: "third-countdown" }));
     await until(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Clock"));
+    expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("Breakfast");
+    expect(host.pending()?.id).toBe(3);
+    await press("Dismiss");
     await waitFor(ClockView.Machine, (s) => s.tab === "Timers" && s.ringingTimer === 3);
+    await expect.poll(() => host.pending()).toBeUndefined();
     expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("1m timer");
     await press("Stop");
     await waitFor(ClockView.Machine, (s) => s.ringingTimer === 2);
