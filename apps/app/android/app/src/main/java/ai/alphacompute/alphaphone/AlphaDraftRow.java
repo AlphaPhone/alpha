@@ -1,13 +1,13 @@
 // spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept or the message it marks is checked"
 package ai.alphacompute.alphaphone;
 
-import java.util.Set;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 /** The draft rows Ask Alpha may write to its slot: a revision, a text and a sending flag, and beside a sending mark the message it last sent. */
 final class AlphaDraftRow {
  private static final long MAX_REVISION = 9_007_199_254_740_991L;
- private static final Set<String> MARK = Set.of("lastSentId", "lastSentWire");
+ private static final String[] MARK = {"lastSentId", "lastSentWire"};
 
  private AlphaDraftRow() {}
 
@@ -26,7 +26,7 @@ final class AlphaDraftRow {
     extra += 1;
    }
    return row.length() == 3 + extra;
-  } catch (Exception malformed) {
+  } catch (JSONException malformed) {
    return false;
   }
  }

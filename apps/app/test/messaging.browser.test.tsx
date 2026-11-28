@@ -41,8 +41,8 @@ async function controlJson(origin: string, route: string, body?: unknown): Promi
 }
 
 /**
- * Alpha with Telegram and Slack kept on Home after its default tiles, as the owner adds them from Add to Home:
- * they are in Home's catalog, not its defaults (spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles").
+ * Alpha with its default Home tiles, including Telegram and Slack
+ * (spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles").
  */
 /** Stage `draft` as the agent does, raise Ask Alpha in full, and send it from there once it shows. */
 async function sendStagedDraft(alpha: Alpha, draft: MessagingDraftProposal) {
@@ -55,11 +55,7 @@ async function sendStagedDraft(alpha: Alpha, draft: MessagingDraftProposal) {
 }
 
 async function openMessagingAlpha() {
-  localStorage.setItem(savedKey, written([
-    ...homeOrder.map((view) => ({ tag: "Own" as const, view })),
-    { tag: "Own", view: "Telegram" },
-    { tag: "Own", view: "Slack" },
-  ]));
+  localStorage.setItem(savedKey, written(homeOrder.map((view) => ({ tag: "Own" as const, view }))));
   const platform = fakeWorld(scene(), {
     slack: Layer.provide(slackAt(slackOrigin), FetchHttpClient.layer),
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
