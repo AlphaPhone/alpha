@@ -62,7 +62,9 @@ export interface CalendarProps {
 
 const hourMinute = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const hourOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric" });
-const shortDate = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
+const shortDateParts = { weekday: "short", month: "short", day: "numeric" } satisfies Intl.DateTimeFormatOptions;
+const shortDate = new Intl.DateTimeFormat(undefined, shortDateParts);
+const shortUtcDate = new Intl.DateTimeFormat(undefined, { ...shortDateParts, timeZone: "UTC" });
 const monthDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const monthDayYear = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -1302,6 +1304,10 @@ export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: C
   const f = request?.fields;
   const start = f ? Date.parse(f.startAt) : NaN;
   const end = f ? Date.parse(f.endAt) : NaN;
+  const hasTimes = Number.isFinite(start) && Number.isFinite(end) && start < end;
+  const when = !hasTimes ? "No valid time" : f?.isAllDay
+    ? `${shortUtcDate.formatRange(start, Math.max(start, new Date(end).setUTCHours(0, 0, 0, 0) - 1))} · All day`
+    : `${shortDate.format(start)} · ${hourMinute.formatRange(start, end)}`;
   // spec/app/calendar/agent.md, "Only the owner approves, and approving sends the change once, under a new number": the decision names the request this card shows
   const [approve, decline] = [{ type: "approve", filing: a.filing } as const, { type: "decline", filing: a.filing } as const];
   return (
@@ -1312,8 +1318,7 @@ export function Proposal({ runtime, className = "mx-4 mb-2", request: bound }: C
       {f ? (
         <dl>
           <dt className="sr-only">Title</dt><dd>{f.title || "Untitled event"}</dd>
-          <dt className="sr-only">When</dt><dd>{Number.isFinite(start) && Number.isFinite(end)
-            ? `${shortDate.format(start)} · ${f.isAllDay ? "All day" : hourMinute.formatRange(start, end)}${f.timeZone ? ` (${f.timeZone})` : ""}` : "No valid time"}</dd>
+          <dt className="sr-only">When</dt><dd>{when}{hasTimes && f.timeZone ? ` (${f.timeZone})` : ""}</dd>
           {f.location ? <><dt className="sr-only">Place</dt><dd>{f.location}</dd></> : null}
           <div><dt className="inline">Guests: </dt><dd className="inline">{f.attendees.length > 0 ? f.attendees.join(", ") : "No guests"}</dd></div>
           {f.description.trim() ? <><dt className="sr-only">Notes</dt><dd className="whitespace-pre-line">{f.description.trim()}</dd></> : null}
