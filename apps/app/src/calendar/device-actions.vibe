@@ -4,16 +4,16 @@ import type { DeviceOperation, ExecutorCall } from "@elizaos/agent"
 import { deleteUndoMs } from "@elizaos/os-bridges"
 import { CALENDAR_AVAILABILITY_CAPABILITY, CALENDAR_CAPABILITY, CALENDAR_NAMED_READ_CAPABILITY, NamedReadUnavailable, ReviewedReadsMachine, executeNamedCalendarRead, type NamedCalendarReadContext, type NamedCalendarReadProvider, type NamedReadOutcome } from "@elizaos/plugin-calendar-client"
 import * as Actions from "../../gen/app__calendar__actions.effect.vibe"
-import type { Action, Screen } from "../../gen/app__calendar__actions.ts"
+import type { Action } from "../../gen/app__calendar__actions.ts"
 import * as View from "../../gen/app__calendar.effect.vibe"
 import { selectedEvent } from "../../gen/app__calendar.effect.vibe"
 import type { Action as Offer, Named } from "../../gen/app__calendar__sharing.ts"
-import { advertised, availabilityAdmitted, namedChangeAllowed, rangeAdmitted, rangeOutcome, said, shareOffered } from "../../gen/app__calendar__sharing.effect.vibe"
-import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
-import { Machine as Layers, pageInert } from "../../gen/app__shell__layers.effect.vibe"
-import { Device, PhoneCalendar, type Reviewed, ownerAt } from "../platform/index.vibe"
+import { advertised, namedChangeAllowed, rangeAdmitted, rangeOutcome, said, shareOffered } from "../../gen/app__calendar__sharing.effect.vibe"
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import type { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
+import { type Device, PhoneCalendar, type Reviewed, ownerAt } from "../platform/index.vibe"
 import { Time } from "../runtime/index.vibe"
-import { checkAvailability, checkTime } from "./availability.vibe"
+import { bindingNow, checkTime } from "./availability.vibe"
 import { type CalendarObject, subjectNow } from "./selection.ts"
 import { shown } from "./shown.ts"
 
@@ -87,7 +87,7 @@ export function calendarOperationWords(op: CalendarOperation): { readonly title:
     }
     case "calendar_availability": return {
       title: "Check availability",
-      detail: `Check whether you are free from ${checkTime(op.start, op.timeZone)} to ${checkTime(op.end, op.timeZone)} (${op.timeZone}).\nYou choose which calendars this phone reads. Only busy times are shared with the agent, not event titles or details. All-day events count as busy.`,
+      detail: `Check whether you are free from ${checkTime(op.start, op.timeZone)} to ${checkTime(op.end, op.timeZone)} (${op.timeZone}).\nYou choose which calendars this phone reads. Only busy times are shared with the agent, not event titles or details. Events marked free are ignored; all-day events count as busy.`,
     }
     case "calendar_named": return op.action === "update"
       ? { title: `Change “${op.name}”`, detail: detailOf(op.fields, "open") }
@@ -98,19 +98,6 @@ export function calendarOperationWords(op: CalendarOperation): { readonly title:
 }
 
 const refused = { kind: "refused", code: NOT_DISPATCHED } as const
-
-/** The screen in front now: Calendar, Home or another app. */
-effect function screenNow(): Screen!!Shell {
-  const front = (try (try Shell).get()).trail.at(-1)
-  return front === "Calendar" ? "OnCalendar" : front === undefined ? "OnHome" : "Elsewhere"
-}
-
-/** The screen an action is bound to now, and whether Alpha is out of sight or covered. */
-effect function bindingNow() {
-  const screen = try screenNow()
-  const hidden = !(try (try Device).showing()) || pageInert(try (try Layers).get())
-  return { screen, hidden }
-}
 
 /** The event open on Calendar as Ask Alpha was given it, while its detail still shows. */
 effect function openNow(): (CalendarObject | undefined)!!View.Machine {
@@ -269,24 +256,10 @@ effect function rangeRead(op: Extract<CalendarOperation, { type: "read_calendar_
   }
 }
 
-// spec/app/calendar/sharing.md, "A check is asked only on Home or Calendar, while Alpha can be seen, on a screen that is not sensitive"; spec/app/calendar/sharing.md, "The phone can say the owner is free only when every calendar chosen lives on this phone"
-/** A reviewed availability check, asked only from Home or Calendar in sight and bound to that screen while it runs; anything but a shared answer says why nothing was shared. */
-effect function availabilityRead(op: Extract<CalendarOperation, { type: "calendar_availability" }>) {
-  const { screen, hidden } = try bindingNow()
-  if (!availabilityAdmitted(screen !== "Elsewhere", false, !hidden)) return refused
-  const services = try Effect.context<Shell | Device>()
-  const current = () => Effect.runSync(Effect.provideContext(effect { return (try (try Device).showing()) && (try screenNow()) === screen }, services))
-  const outcome = try checkAvailability(op, current)
-  const result = outcome.status === "succeeded" ? outcome.foregroundResult : undefined
-  return result !== undefined && readResult(op, result) !== undefined ? { kind: "applied", result }
-    : { kind: "refused", code: "not_shared", result: { summary: outcome.summary } }
-}
-
 // spec/app/calendar/sharing.md, "A change or deletion of an event the owner named is asked only for the open event, and only when its title is that name"
 /** An action of the agent's on the phone's calendar that its device journal approved; whatever the screen no longer holds is refused. */
 export effect function executeCalendar(op: CalendarOperation, call: ExecutorCall) {
   if (op.type === "read_calendar_range") return try rangeRead(op)
-  if (op.type === "calendar_availability") return try availabilityRead(op)
   if (op.type === "calendar_named" && op.action === "read") return try namedRead(op, call)
   if (op.type !== "calendar_named") {
     const act = actOf(op)

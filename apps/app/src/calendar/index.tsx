@@ -11,7 +11,6 @@ import { area } from "../runtime/ui.tsx";
 import { together } from "../runtime/index.vibe";
 import { changes } from "./agent.vibe";
 import { Calendar } from "./Calendar.tsx";
-import { checking } from "./availability.vibe";
 import { calendar } from "./calendar.vibe";
 import { deletions } from "./deletions.vibe";
 import { editor } from "./editor.vibe";
@@ -43,4 +42,4 @@ const back = Effect.gen(function* () {
 });
 
 /** Calendar, at its view (areas.ts): its scoped stores, view, form, Google link, owner coordination, reminder reopen review, subject selection and agent changes live from its first opening until Alpha closes. */
-export default area(Layer.mergeAll(together(stores, calendar, editor, linking, deletions, owners, reopening, selecting, checking), changes, Actions.machine(), reviewedReadsMachine()), Calendar, { back });
+export default area(Layer.mergeAll(together(stores, calendar, editor, linking, deletions, owners, reopening, selecting), changes, Actions.machine(), reviewedReadsMachine()), Calendar, { back });

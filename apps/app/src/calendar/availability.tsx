@@ -4,9 +4,8 @@ import { Effect, type ManagedRuntime } from "effect";
 import type { Machine } from "../../gen/app__calendar__sharing.effect.vibe";
 import { maxChosen } from "../../gen/app__calendar__sharing.ts";
 import { useMachine } from "../../gen/app__calendar__sharing.react.ts";
-import type { Area } from "../runtime/ui.tsx";
-import { CheckedCalendars, checkTime, type Offered } from "./availability.vibe";
-import calendar from "./index.tsx";
+import { area } from "../runtime/ui.tsx";
+import { CheckedCalendars, checkTime, checking, type Offered } from "./availability.vibe";
 
 export interface AvailabilityReviewProps {
   /** Provides the availability sheet's machine and what it shows. */
@@ -86,12 +85,5 @@ export function AvailabilityReview({ runtime }: AvailabilityReviewProps) {
   );
 }
 
-/** The availability sheet over every view (areas.ts), over Calendar's own machines, which a check from Home reaches too. */
-export default {
-  open(alpha) {
-    const runtime = calendar.runtime(alpha);
-    return function CalendarAvailability() {
-      return <AvailabilityReview runtime={runtime} />;
-    };
-  },
-} satisfies Area;
+/** The availability sheet over every view (areas.ts), on a runtime of its own: its machine and what it shows, and none of Calendar's, which a check from Home never starts. */
+export default area(checking, AvailabilityReview);
