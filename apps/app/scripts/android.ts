@@ -31,7 +31,7 @@ const nodeLicenceBySource = new Map([
 ]);
 const mockSwitches = ["ELIZA_DEV_ALLOW_TEST_MOCKS", "VITE_ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_FAKES"];
 const signingNames = ["ELIZAOS_KEYSTORE_PATH", "ELIZAOS_KEYSTORE_PASSWORD", "ELIZAOS_KEY_ALIAS", "ELIZAOS_KEY_PASSWORD"];
-const usage = "Usage: node scripts/android.ts <pin|inputs|pack|stage|web|host|build [--release]|verify [--release-only]|audit DIR>";
+const usage = "Usage: node scripts/android.ts <pin|inputs|pack|stage|web|host|build [--release]|verify [--debug-only|--release-only]|audit DIR>";
 const JAVA_HOME_CANDIDATES = [
   "/opt/homebrew/opt/openjdk@21",
   "/usr/local/opt/openjdk@21",
@@ -503,7 +503,7 @@ export async function build(release: boolean) {
         alphaCommit: git(root, "rev-parse", "HEAD"), elizaCommit: String(record(readJson(join(root, "eliza.lock.json"))).commit),
       },
     },
-    verify: { command: process.execPath, args: [fileURLToPath(import.meta.url), "verify"] },
+    verify: { command: process.execPath, args: [fileURLToPath(import.meta.url), "verify", ...(release ? [] : ["--debug-only"])] },
   });
   if (!release) for (const name of [`${variant}-release.apk`, `${variant}-release-unsigned.apk`, `mapping/${variant}-release-mapping.txt`]) rmSync(join(artifacts, name), { force: true });
   mkdirSync(join(artifacts, "sbom"), { recursive: true });
@@ -747,16 +747,20 @@ export function checkApk(file: string, mode: "debug" | "release", env: NodeJS.Pr
   };
 }
 
-/** Checks APKs in artifacts/ and writes artifacts/apk-manifest.json: debug + release rows, or release-only with `{ releaseOnly: true }`. */
-export function verify(env: NodeJS.ProcessEnv = environment(), options: { readonly releaseOnly?: boolean } = {}) {
-  const releaseOnly = options.releaseOnly === true;
+/** Writes the APK manifest after checking both variants or the selected build. */
+export function verify(env: NodeJS.ProcessEnv = environment(), options: { readonly releaseOnly?: boolean; readonly debugOnly?: never } | { readonly debugOnly: true; readonly releaseOnly?: never } = {}) {
   const debug = join(artifacts, `${variant}-debug.apk`);
   const release = [`${variant}-release.apk`, `${variant}-release-unsigned.apk`].map((name) => join(artifacts, name)).filter((file) => existsSync(file));
-  if (!releaseOnly && !existsSync(debug)) throw new Error(`artifacts/${variant}-debug.apk is missing`);
-  if (release.length !== 1) throw new Error(`artifacts/ must hold exactly one ${variant} release APK, holds ${release.length}`);
-  const results = releaseOnly
-    ? [checkApk(release[0] ?? "", "release", env, { allowMissingVoiceReceipt: true })]
-    : [checkApk(debug, "debug", env), checkApk(release[0] ?? "", "release", env)];
+  const results: ReturnType<typeof checkApk>[] = [];
+  if (!options.releaseOnly) {
+    if (!existsSync(debug)) throw new Error(`artifacts/${variant}-debug.apk is missing`);
+    results.push(checkApk(debug, "debug", env));
+  }
+  if (!options.debugOnly) {
+    const [file] = release;
+    if (release.length !== 1 || file === undefined) throw new Error(`artifacts/ must hold exactly one ${variant} release APK, holds ${release.length}`);
+    results.push(checkApk(file, "release", env, { allowMissingVoiceReceipt: options.releaseOnly === true }));
+  }
   if (new Set(results.map((row) => row.versionCode)).size !== 1) throw new Error("The debug and release APKs have different version codes");
   const tests = join(artifacts, "instrumentation", `${variant}-androidTest.apk`);
   const manifest = {
@@ -805,8 +809,8 @@ async function main(argv: readonly string[]) {
       await build(rest.includes("--release"));
       return 0;
     case "verify":
-      if (rest.some((arg) => arg !== "--release-only")) throw new Error(usage);
-      verify(environment(), { releaseOnly: rest.includes("--release-only") });
+      if (rest.length > 1 || rest.some((arg) => arg !== "--release-only" && arg !== "--debug-only")) throw new Error(usage);
+      verify(environment(), rest[0] === "--debug-only" ? { debugOnly: true } : { releaseOnly: rest[0] === "--release-only" });
       return 0;
     default:
       process.stderr.write(`${usage}\n`);
