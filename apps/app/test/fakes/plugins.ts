@@ -66,7 +66,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     AlphaBrowser: alphaBrowser(world.browser),
     AlphaInboxAttachments: alphaInboxAttachments(world.inbox),
     ...(world.inbox.notices ? { AlphaInboxNotices: alphaInboxNotices(world.inbox.notices) } : {}),
-    AlphaNotes: alphaNotes(world.notes),
+    AlphaNotes: alphaNotes(world.notes, () => world.telephony.live.length > 0),
     ...(world.workflows.nativeDigests === undefined ? {} : { AlphaHostedDigestDelivery: alphaHostedDigests(world.workflows.nativeDigests) }),
   };
 }

@@ -979,10 +979,11 @@ describe("Notes", () => {
       await follows(at, action === "Pause" ? "paused" : "recording", action === "Pause" ? "Paused" : "Recording");
       await later(at.alpha, 1000);
     };
-    const restart = async (at: typeof first) => {
+    const restart = async (at: typeof first, away = () => {}, front = true) => {
       await at.close();
+      away();
       const { alpha, close } = await open(world, only("home", "view:Notes", "notice"));
-      await until(alpha, alpha.runtime, Shell, (where) => showing(where, "Notes"));
+      await until(alpha, alpha.runtime, Shell, (where) => showing(where, "Notes") === front);
       return { alpha, close, runtime: notes.runtime(alpha) };
     };
     await record();
@@ -1036,23 +1037,23 @@ describe("Notes", () => {
     await notified(second, "Pause");
     await notified(second, "Resume");
 
-    // spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off": a recording the phone went on with while Alpha was away is shown recording, as the phone has it, and the notification's Pause is followed
+    // spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off": a recording the phone went on with while Alpha was away is shown recording, as the phone has it, with the segment it wrote meanwhile, and the notification's Pause is followed
     const away = await second.runtime.runPromise(Effect.flatMap(Recorder, (machine) => machine.get())).then((state) => state.capture);
-    const third = await restart(second);
-    await until(third.alpha, third.runtime, Recorder, (state) => state.capture !== away);
+    const third = await restart(second, () => world.notes.rollover(27_000));
+    await until(third.alpha, third.runtime, Recorder, (state) => state.capture !== away && state.phase === "Recording" && state.kept === 2);
     await follows(third, "recording", "Recording");
     await later(third.alpha, 1000);
     await notified(third, "Pause");
 
     const fourth = await restart(third);
-    await until(fourth.alpha, fourth.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 1);
+    await until(fourth.alpha, fourth.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 2);
     // spec/app/notes/recording.md, "A recording cut off waits, paused and without the microphone, holding exactly the segments the phone found, until the owner goes on, keeps or discards it": Resume after the restart holds while the phone's status still reads paused
     await resumedBeforeThePhone(fourth);
     await press(/^Stop recording$/);
     await until(fourth.alpha, fourth.runtime, Recorder, (state) => state.phase === "Kept" && state.note > 0);
     const kept = world.notes.notes.filter((one) => one.format?.kind === "voice" && one.id.startsWith("fake-note-"));
     expect([world.notes.told, kept.length, world.notes.audio.get("recording-2")])
-      .toEqual([["Start", "Start", "Pause", "Resume", "Pause", "Resume", "End"], 1, { noteId: kept[0]?.id, durationMs: 4000 }]);
+      .toEqual([["Start", "Start", "Pause", "Resume", "Pause", "Resume", "End"], 1, { noteId: kept[0]?.id, durationMs: 31_000 }]);
 
     // spec/app/notes/recording.md, "A new recording starts only when no recording is unfinished, and is made in the folder the list is narrowed to": a kept voice note leaves the phone free for the next one
     await rendered(() => expect(world.notes.tape.state).toBe("idle"));
@@ -1060,7 +1061,30 @@ describe("Notes", () => {
     await later(fourth.alpha, 1000);
     expect([world.notes.told.at(-1), world.notes.tape.state, world.notes.tape.recordingId, await phase(fourth)])
       .toEqual(["Start", "recording", "recording-8", "Recording"]);
-    expect(world.notes.audio.get("recording-2")).toEqual({ noteId: kept[0]?.id, durationMs: 4000 });
+    expect(world.notes.audio.get("recording-2")).toEqual({ noteId: kept[0]?.id, durationMs: 31_000 });
+
+    // spec/app/notes/recording.md, "Story: Pick up a recording a crash cut off": a recording paused before its first segment, one in its first segment, one the phone went on with while Alpha opened over Home and one the notification paused while Alpha was away are each taken up as the phone has them, with every segment it wrote, kept once, and the next Record starts
+    await notified(fourth, "Pause");
+    const fifth = await restart(fourth);
+    await until(fifth.alpha, fifth.runtime, Recorder, (state) => state.phase === "Paused" && state.kept === 0 && state.capture > 0);
+    await press(/^Resume$/);
+    await follows(fifth, "recording", "Recording");
+    const sixth = await restart(fifth);
+    await until(sixth.alpha, sixth.runtime, Recorder, (state) => state.phase === "Recording" && state.kept === 0 && state.capture > 0);
+    await follows(sixth, "recording", "Recording");
+    await drawn(() => sixth.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "goHome" }))));
+    const seventh = await restart(sixth, () => world.notes.rollover(27_000), false);
+    await until(seventh.alpha, seventh.runtime, Recorder, (state) => state.phase === "Recording" && state.kept === 1);
+    await later(seventh.alpha, 1000);
+    const eighth = await restart(seventh, () => { world.notes.rollover(27_000); world.notes.notification("Pause"); }, false);
+    await until(eighth.alpha, eighth.runtime, Recorder, (state) => state.recovered && state.phase === "Paused" && state.kept === 2);
+    await drawn(() => eighth.alpha.runtime.runPromise(Effect.flatMap(Shell, (shell) => shell.send({ type: "openView", view: "Notes" }))));
+    await press(/^Stop recording$/);
+    await until(eighth.alpha, eighth.runtime, Recorder, (state) => state.phase === "Kept" && state.note > 0);
+    await rendered(() => expect(world.notes.tape.state).toBe("idle"));
+    expect([world.notes.told.slice(-3), world.notes.audio.get("recording-8")?.durationMs]).toEqual([["Start", "Resume", "End"], 54_000]);
+    await record(eighth);
+    expect([world.notes.told.at(-1), world.notes.tape.state]).toEqual(["Start", "recording"]);
   });
 
   it('Guards non-finite durations and invalid timestamps when presenting notes (spec/app/notes/index.md, "Story: See my notes")', () => {

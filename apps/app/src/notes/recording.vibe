@@ -499,7 +499,7 @@ function storedMicrophone(key: string, start?: Mic.Microphone) {
 export const recording = Layer.provideMerge(together(
   reacting(Rec, { keep: 1, open: effect {
     const tape = try currentTape()
-    return [{ type: "restart", intact: tape !== undefined, found: tape?.segments?.length ?? 0 }, phone] as const
+    return [{ type: "restart", intact: tape !== undefined, found: tape?.segments?.length ?? 0, going: tape?.state === "recording" }, phone] as const
   }, carry }),
   reacting({ ...Mic, stored: storedMicrophone }, { keep: 1, open: [{ type: "restart" }, phone], carry: microphone }),
   cleanupKept,
