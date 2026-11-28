@@ -131,22 +131,19 @@ pure def lawTheWalletHoldsNothingOfValue(chain: str): bool =
   valuedChains.includes(chain) implies not(walletSettings.some(s => s.held == chain))
 ```
 
-### The wallet is given no storage key until the owner allows wallet keys
+### The wallet can be made only on a launch with the signed-in account's storage key
 
-A signed-in launch carries the account's task storage key, which the
-agent's task store seals its records under. The wallet seals its keys
-under the same key, so with it the wallet could be made and its keys
-written. Until the owner allows wallet keys on the phone, the pack hands
-the wallet module the launch without its storage key: the wallet holds
-nothing, offers no wallet to make and refuses to make one, as on a launch
-with no key. Every other module keeps the key. Allowing wallet keys is
-this one value.
+A signed-in phone gives the resident wallet the same account-bound storage
+key it releases for the task store. The wallet uses that key to seal its
+own keys on this phone when the owner chooses Make wallet. Opening Wallet
+with no wallet yet only offers that choice. Without the launch key the
+wallet cannot be made.
 
 ```quint
-pure val walletKeysAllowed = false
+pure val walletKeysAllowed = true
 pure def walletGetsKey(launchKey: bool): bool = launchKey and walletKeysAllowed
-pure def lawTheWalletSealsNothingUntilAllowed(launchKey: bool): bool =
-  walletGetsKey(launchKey) implies walletKeysAllowed
+pure def lawTheWalletRequiresTheLaunchKey(launchKey: bool): bool =
+  walletGetsKey(launchKey) iff launchKey
 ```
 
 ### The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason
