@@ -43,7 +43,7 @@ jobs:
           pnpm --filter @repo/app licences --check
           python3 scripts/ci/app_update_producer.py signer-record apps/app/aosp/signing/release-signer.json
       - name: Run full uncached verification suite
-        run: pnpm verify
+        run: pnpm verify --concurrency=4 --continue=dependencies-successful --log-order=stream
       - name: Run image, release, and AOSP conformance tests
         run: |
           pnpm --filter @repo/app exec vitest run test/image.test.ts
