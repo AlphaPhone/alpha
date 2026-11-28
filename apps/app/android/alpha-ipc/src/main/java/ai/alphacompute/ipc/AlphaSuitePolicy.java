@@ -261,9 +261,9 @@ public final class AlphaSuitePolicy {
             Set.of("/api/v1/user", "/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/connect/initiate", "/api/v1/eliza/google/disconnect", "/api/v1/eliza/google/gmail/"),
             Set.of("inbox-saved-bodies"), false);
         put(rules, "telegram", "Telegram", "app", "ai.alphacompute.telegram",
-            Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of("messaging-sessions:telegram:v2"), false);
         put(rules, "slack", "Slack", "app", "ai.alphacompute.slack",
-            Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
+            Set.of("/api/health", "/api/status", "/api/messages/reply-draft", "/api/views/", "/api/client-devices/"), Set.of(), Set.of("messaging-sessions:slack:v2"), false);
         put(rules, "calendar", "Calendar", "app", "ai.alphacompute.calendar",
             Set.of("/api/health", "/api/status", "/api/auth/me", "/api/lifeops/calendar", "/api/approvals", "/api/notes/", "/api/views/", "/api/client-devices/"),
             Set.of("/api/v1/user", "/api/v1/eliza/google/status", "/api/v1/eliza/google/accounts", "/api/v1/eliza/google/calendar/"), Set.of(), false);

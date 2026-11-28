@@ -23,6 +23,7 @@ public final class AlphaApplication extends Application {
   boolean main = getPackageName().equals(getProcessName());
   if (main) AlphaEarlier.retireWork(this);
   if (main) AlphaLegacyAgentArchive.putBack(this);
+  if (main) LegacyMessagingGrants.migrate(this);
   AlphaAgentCredentials credentials = new AlphaAgentCredentials(this);
   AgentService.useCredentials(DeviceCustody.agentCredentials(this, BuildConfig.CLOUD_API_ORIGIN));
   if (main) AgentService.useGoogleBroker(DeviceCustody.googleBroker(this, BuildConfig.CLOUD_API_ORIGIN));

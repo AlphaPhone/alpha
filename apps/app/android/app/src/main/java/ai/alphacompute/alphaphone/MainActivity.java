@@ -171,7 +171,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
   registerPlugin(ai.eliza.plugins.securestore.SecureStorePlugin.class);
   registerPlugin(AlphaSystemPlugin.class);
-  registerPlugin(AlphaSlackOAuthPlugin.class);
+  registerPlugin(ai.alphacompute.alphaphone.slack.AlphaSlackOAuthPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
   registerPlugin(AlphaInboxAttachmentsPlugin.class);

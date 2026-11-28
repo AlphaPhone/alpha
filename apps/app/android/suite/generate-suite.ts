@@ -12,6 +12,8 @@ export interface IntentFilterSpec {
   readonly category?: string;
   readonly browsable?: boolean;
   readonly scheme?: string;
+  readonly host?: string;
+  readonly path?: string;
   readonly mimeType?: string;
 }
 
@@ -85,12 +87,19 @@ function parseIntentFilter(raw: unknown, context: string): IntentFilterSpec {
   const category = raw.category === undefined ? undefined : requireString(raw, "category", context);
   const browsable = raw.browsable === undefined ? undefined : Boolean(raw.browsable);
   const scheme = raw.scheme === undefined ? undefined : requireString(raw, "scheme", context);
+  const host = raw.host === undefined ? undefined : requireString(raw, "host", context);
+  const path = raw.path === undefined ? undefined : requireString(raw, "path", context);
+  if ((host !== undefined && !scheme) || (path !== undefined && (!host || !path.startsWith("/")))) {
+    throw new Error(`${context}: an exact path needs a host and a host needs a scheme`);
+  }
   const mimeType = raw.mimeType === undefined ? undefined : requireString(raw, "mimeType", context);
   return {
     action,
     ...(category === undefined ? {} : { category }),
     ...(browsable === undefined ? {} : { browsable }),
     ...(scheme === undefined ? {} : { scheme }),
+    ...(host === undefined ? {} : { host }),
+    ...(path === undefined ? {} : { path }),
     ...(mimeType === undefined ? {} : { mimeType }),
   };
 }
@@ -204,13 +213,11 @@ function renderIntentFilter(filter: IntentFilterSpec): string {
   if (filter.browsable === true) {
     lines.push(`                <category android:name="android.intent.category.BROWSABLE" />`);
   }
-  if (filter.scheme !== undefined && filter.mimeType !== undefined) {
-    lines.push(`                <data android:scheme="${escapeXml(filter.scheme)}" android:mimeType="${escapeXml(filter.mimeType)}" />`);
-  } else if (filter.scheme !== undefined) {
-    lines.push(`                <data android:scheme="${escapeXml(filter.scheme)}" />`);
-  } else if (filter.mimeType !== undefined) {
-    lines.push(`                <data android:mimeType="${escapeXml(filter.mimeType)}" />`);
-  }
+  const data = (["scheme", "host", "path", "mimeType"] as const).flatMap((name) => {
+    const value = filter[name];
+    return value === undefined ? [] : [`android:${name}="${escapeXml(value)}"`];
+  });
+  if (data.length > 0) lines.push(`                <data ${data.join(" ")} />`);
   lines.push("            </intent-filter>");
   return lines.join("\n");
 }
@@ -223,6 +230,11 @@ interface FlavorPluginProfile {
 }
 
 const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
+  slack: {
+    modules: [],
+    sourceDirs: ["../../app/src/main/java/ai/alphacompute/alphaphone/slack"],
+    pluginClasses: ["ai.alphacompute.alphaphone.slack.AlphaSlackOAuthPlugin"],
+  },
   phone: {
     modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts", ":eliza-action-journal"],
     sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],

@@ -3,6 +3,7 @@ import { native } from "./device.vibe"
 
 module host {
   import { native } from "./device.vibe"
+  import { currentSurface } from "../surface.ts"
   import type { HttpOptions, HttpResponse } from "@capacitor/core"
   import { plugin } from "./capacitor.ts"
 
@@ -10,7 +11,8 @@ module host {
   const channelName = "alpha-slack-oauth"
   /** The redirect for the phone's registered app or the local development browser. @throws {never} */
   export function redirectUri(): string {
-    return native() ? "alphaphone://slack/oauth/callback" : new URL(browserPath, window.location.origin).href
+    if (!native()) return new URL(browserPath, window.location.origin).href
+    return currentSurface().mode === "app" ? "alphaphone://slack/oauth/standalone" : "alphaphone://slack/oauth/callback"
   }
 
   /** The independent system browser on Android supplies the validated return to the requesting WebView. */

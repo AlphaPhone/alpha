@@ -109,6 +109,12 @@ public final class AlphaSuitePolicyTest {
         assertTrue(policy.isCloudRouteAllowed("ai.alphacompute.calendar", "/api/v1/user"));
         assertFalse(policy.isCloudRouteAllowed("ai.alphacompute.notes", "/api/v1/user"));
 
+        assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.slack", "messaging-sessions:slack:v2"));
+        assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.telegram", "messaging-sessions:telegram:v2"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.slack", "messaging-sessions:telegram:v2"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.telegram", "messaging-sessions:slack:v2"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.slack", "messaging-sessions:v1"));
+        assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.wallet", "messaging-sessions:slack:v2"));
         assertTrue(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "notes-draft:42"));
         assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "notes-draft:"));
         assertFalse(policy.isSecureStoreSlotAllowed("ai.alphacompute.notes", "inbox-saved-bodies"));

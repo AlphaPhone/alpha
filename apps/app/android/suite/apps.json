@@ -237,7 +237,7 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
-      "allowedSecureStoreSlots": [],
+      "allowedSecureStoreSlots": ["messaging-sessions:telegram:v2"],
       "assetsProfile": "thin",
       "imageOnly": false,
       "taskAffinity": "ai.alphacompute.telegram"
@@ -250,7 +250,8 @@
       "label": "Slack",
       "defaultRoles": [],
       "intentFilters": [
-        { "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "browsable": true, "scheme": "slack" }
+        { "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "browsable": true, "scheme": "slack" },
+        { "action": "android.intent.action.VIEW", "category": "android.intent.category.DEFAULT", "browsable": true, "scheme": "alphaphone", "host": "slack", "path": "/oauth/standalone" }
       ],
       "permissions": [
         "android.permission.INTERNET",
@@ -265,7 +266,7 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
-      "allowedSecureStoreSlots": [],
+      "allowedSecureStoreSlots": ["messaging-sessions:slack:v2"],
       "assetsProfile": "thin",
       "imageOnly": false,
       "taskAffinity": "ai.alphacompute.slack"

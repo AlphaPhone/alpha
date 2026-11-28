@@ -121,7 +121,9 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
-      "allowedSecureStoreSlots": [],
+      "allowedSecureStoreSlots": [
+        "messaging-sessions:telegram:v2"
+      ],
       "imageOnly": false
     },
     {
@@ -137,7 +139,9 @@
         "/api/client-devices/"
       ],
       "allowedCloudRoutePrefixes": [],
-      "allowedSecureStoreSlots": [],
+      "allowedSecureStoreSlots": [
+        "messaging-sessions:slack:v2"
+      ],
       "imageOnly": false
     },
     {

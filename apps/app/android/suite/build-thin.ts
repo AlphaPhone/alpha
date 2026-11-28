@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import deployments from "@repo/deployment/deployments.json" with { type: "json" };
 import { createHash } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -170,6 +171,7 @@ function stageFlavorAssets(app: SuiteAppEntry, distDir: string): void {
   const capacitorConfig = {
     appId: app.applicationId,
     appName: app.label,
+    ...(app.id === "slack" ? { plugins: { AlphaSlackOAuth: { cloudOrigin: deployments.production.cloud, callbackPath: "/oauth/standalone" } } } : {}),
     webDir: "dist",
     loggingBehavior: "none",
     server: { androidScheme: "https" },

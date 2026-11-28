@@ -1,5 +1,5 @@
 // spec/app/slack/auth.md, "Adding a workspace presents scope consent first, then opens PKCE OAuth with a fresh state nonce"
-package ai.alphacompute.alphaphone;
+package ai.alphacompute.alphaphone.slack;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -11,18 +11,30 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 @CapacitorPlugin(name = "AlphaSlackOAuth")
 public final class AlphaSlackOAuthPlugin extends Plugin {
- private static final String RETURN = "alphaphone://slack/oauth/callback";
+ private String callbackPath() {
+  return getConfig().getString("callbackPath");
+ }
+
+ private boolean foreground(android.app.Activity activity) {
+  var lock = activity.getSystemService(android.app.KeyguardManager.class);
+  var users = activity.getSystemService(android.os.UserManager.class);
+  return !activity.isFinishing() && !activity.isDestroyed() && activity.hasWindowFocus()
+      && activity instanceof androidx.lifecycle.LifecycleOwner owner
+      && owner.getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+      && lock != null && !lock.isDeviceLocked() && users != null && users.isUserUnlocked();
+ }
  private PluginCall pending;
  private String nonce;
 
  @PluginMethod public void request(PluginCall call) {
   String address = call.getString("url", "");
   Uri url = Uri.parse(address);
-  boolean registration = (BuildConfig.CLOUD_API_ORIGIN + "/.well-known/alpha-slack").equals(address)
+  String cloud = getConfig().getString("cloudOrigin");
+  boolean registration = (cloud + "/.well-known/alpha-slack").equals(address)
       && "GET".equals(call.getString("method")) && !call.getData().has("data");
   boolean mailbox = "POST".equals(call.getString("method"))
-      && ((BuildConfig.CLOUD_API_ORIGIN + "/api/slack/oauth").equals(address)
-          || (BuildConfig.CLOUD_API_ORIGIN + "/api/slack/events/read").equals(address));
+      && ((cloud + "/api/slack/oauth").equals(address)
+          || (cloud + "/api/slack/events/read").equals(address));
   boolean api = url.isHierarchical() && "https".equals(url.getScheme()) && "slack.com".equals(url.getEncodedAuthority())
       && url.getEncodedPath() != null && url.getEncodedPath().matches("/api/[A-Za-z][A-Za-z0-9.]*");
   var transport = getBridge().getPlugin("CapacitorHttp");
@@ -39,7 +51,7 @@ public final class AlphaSlackOAuthPlugin extends Plugin {
   if (source == null) { call.reject("No Slack authorization request"); return; }
   Uri uri = Uri.parse(source);
   if (!uri.isHierarchical() || !"https".equals(uri.getScheme()) || !"slack.com".equals(uri.getEncodedAuthority())
-      || !"/oauth/v2/authorize".equals(uri.getEncodedPath()) || !RETURN.equals(uri.getQueryParameter("redirect_uri"))
+      || !"/oauth/v2/authorize".equals(uri.getEncodedPath()) || !("alphaphone://slack" + callbackPath()).equals(uri.getQueryParameter("redirect_uri"))
       || !"S256".equals(uri.getQueryParameter("code_challenge_method")) || uri.getQueryParameter("scope") != null) {
    call.reject("Invalid Slack authorization request"); return;
   }
@@ -48,7 +60,7 @@ public final class AlphaSlackOAuthPlugin extends Plugin {
   android.app.Activity activity = getActivity();
   if (activity == null) { call.reject("Open Alpha to connect Slack"); return; }
   activity.runOnUiThread(() -> {
-   if (!AlphaDevicePlugin.shareForeground(activity)) { call.reject("Open Alpha to connect Slack"); return; }
+   if (!foreground(activity)) { call.reject("Open Alpha to connect Slack"); return; }
    if (pending != null) pending.reject("Slack authorization superseded");
    pending = call;
    nonce = state;
@@ -61,7 +73,7 @@ public final class AlphaSlackOAuthPlugin extends Plugin {
   Uri url = intent.getData();
   if (!Intent.ACTION_VIEW.equals(intent.getAction()) || url == null || !url.isHierarchical()
       || !"alphaphone".equals(url.getScheme()) || !"slack".equals(url.getEncodedAuthority())
-      || !"/oauth/callback".equals(url.getEncodedPath()) || url.getEncodedFragment() != null) return;
+      || !java.util.Objects.equals(callbackPath(), url.getEncodedPath()) || url.getEncodedFragment() != null) return;
   intent.setData(null);
   if (pending == null || (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return;
   var states = url.getQueryParameters("state");
