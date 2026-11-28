@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { NOT_DISPATCHED } from "@elizaos/agent";
+import { CALENDAR_AVAILABILITY_CAPABILITY, CALENDAR_CAPABILITY, deviceTimeZone } from "@elizaos/plugin-calendar-client";
 import { Effect, Schema } from "effect";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -17,6 +18,8 @@ import { Machine as Reminders } from "../gen/app__reminders.effect.vibe";
 import { Machine as Alerts } from "../gen/app__reminders__alerts.effect.vibe";
 import assistant from "../src/assistant/index.tsx";
 import { executeMedia } from "../src/assistant/media-executors.ts";
+import type { Mount } from "../src/areas.ts";
+import { calendarCapabilities } from "../src/calendar/device-actions.vibe";
 import calendar from "../src/calendar/index.tsx";
 import { relistRequests } from "../src/calendar/agent.vibe";
 import { mapsHandoffKey } from "../src/calendar/calendar.vibe";
@@ -2310,5 +2313,65 @@ describe("the agent on a phone", () => {
     const range = { type: "read_calendar_range", calendarIds: ["local"], start: new Date(world.at(0, 0)).toISOString(), end: new Date(world.at(1, 0)).toISOString(), timeZone: "UTC", maximumEvents: 5 } as const;
     expect(await executeMedia(alpha, range, call("range-1"), approved)).toMatchObject({ kind: "applied", result: { kind: "calendar", events: [{ id: "p1", title: "Gym" }] } });
     expect(await executeMedia(alpha, { ...range, maximumEvents: 0 }, call("range-2"), approved)).toMatchObject({ kind: "refused" });
+  });
+
+  it("Choose the calendars and see the answer before it is shared (spec/app/calendar/sharing.md, \"Story: Choose the calendars and see the answer before it is shared\"; spec/app/calendar/sharing.md, \"Story: Offer the agent only the Calendar actions this phone runs\")", async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    world.calendar.calendars.push({ id: "work", name: "Work", account: "owner@alpha.test", writable: true, local: false });
+    world.calendar.phoneEvents.push({ id: "p9", calendarId: "local", title: "Probe single", begin: world.at(0, 13), end: world.at(0, 13.5), allDay: false, recurring: false });
+    const availabilityReview: Mount = { at: "overlay", load: () => import("../src/calendar/availability.tsx") };
+    const { alpha } = await mountCalendar(world, [...only("view:Calendar"), availabilityReview], (s) => s.front && s.phoneRows >= 1);
+    const call = (id: string) => ({ proposalId: id, operationId: id, attemptId: 1 });
+    const approved = { current: () => Promise.resolve(true) };
+    const iso = (hours: number) => new Date(world.at(0, hours)).toISOString();
+    const check = { type: "calendar_availability", start: iso(13), end: iso(13.5), timeZone: deviceTimeZone() } as const;
+    const box = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("[role=checkbox]")].find((found) => found.getAttribute("aria-label") === name);
+    const sheet = async (label: string) => vi.waitFor(() => expect(document.querySelector(`[role=dialog][aria-label="${label}"]`)).not.toBeNull());
+
+    // spec/app/calendar/sharing.md, "A local event is always offered; the agenda read only in a browser; every other action only when the agent offers it"
+    expect(calendarCapabilities([CALENDAR_CAPABILITY, CALENDAR_AVAILABILITY_CAPABILITY])).toContain(CALENDAR_AVAILABILITY_CAPABILITY);
+    expect(calendarCapabilities([CALENDAR_CAPABILITY])).not.toContain(CALENDAR_AVAILABILITY_CAPABILITY);
+
+    // spec/app/calendar/sharing.md, "The sheet offers the phone's calendars with none ticked, reads only the ticked ones, and shares only a free or busy answer it showed": the local busy row is shown busy, then shared once read again.
+    const busy = executeMedia(alpha, check, call("availability-1"), approved);
+    await sheet("Calendars");
+    expect([box("Phone · On this phone")?.getAttribute("aria-checked"), box("Work · owner@alpha.test")?.getAttribute("aria-checked")]).toEqual(["false", "false"]);
+    expect(button("Check")?.disabled).toBe(true);
+    await drawn(() => box("Phone · On this phone")?.click());
+    await press("Check");
+    await sheet("Share availability");
+    expect(document.querySelector("[role=dialog][aria-label='Share availability'] h2")?.textContent).toBe("Busy");
+    await press("Share with agent");
+    expect(await busy).toEqual({
+      kind: "applied",
+      result: { version: 1, kind: "calendar_availability", window: { start: check.start, end: check.end, timeZone: check.timeZone }, calendarCount: 1, status: "busy", busy: [{ start: iso(13), end: iso(13.5), allDay: false, tentative: false }], transparentIgnored: 0 },
+    });
+
+    // spec/app/calendar/sharing.md, "The phone can say the owner is free only when every calendar chosen lives on this phone": a synced calendar is unknown, never free, and no answer is shown.
+    const synced = executeMedia(alpha, check, call("availability-2"), approved);
+    await sheet("Calendars");
+    await drawn(() => box("Work · owner@alpha.test")?.click());
+    await press("Check");
+    expect(await synced).toEqual({ kind: "refused", code: "not_shared", result: { summary: "Calendar freshness could not be verified, so your availability is unknown. Nothing was shared." } });
+    expect(document.querySelector("[role=dialog][aria-label='Share availability']")).toBeNull();
+
+    // spec/app/calendar/sharing.md, "The sheet offers the phone's calendars with none ticked, reads only the ticked ones, and shares only a free or busy answer it showed": Cancel reads nothing.
+    const reads = world.calendar.rangeReads;
+    const cancelled = executeMedia(alpha, check, call("availability-3"), approved);
+    await sheet("Calendars");
+    await press("Cancel");
+    expect(await cancelled).toEqual({ kind: "refused", code: "not_shared", result: { summary: "Availability check cancelled. No calendar was read. Nothing was shared." } });
+    expect(world.calendar.rangeReads).toBe(reads);
+
+    // spec/app/calendar/sharing.md, "A check is asked only on Home or Calendar, while Alpha can be seen, on a screen that is not sensitive": a hidden page asks nothing and reads nothing, and refused access reads nothing.
+    const asked = world.calendar.asked;
+    await seen(false);
+    expect(await executeMedia(alpha, check, call("availability-4"), approved)).toEqual({ kind: "refused", code: NOT_DISPATCHED });
+    await seen(true);
+    expect([world.calendar.asked, world.calendar.rangeReads]).toEqual([asked, reads]);
+    world.calendar.granted = false;
+    expect(await executeMedia(alpha, check, call("availability-5"), approved)).toEqual({ kind: "refused", code: "not_shared", result: { summary: "Calendar access was not allowed, so no calendar was read. Nothing was shared." } });
+    expect(world.calendar.rangeReads).toBe(reads);
   });
 });

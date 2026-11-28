@@ -67,4 +67,5 @@ export const mounts: readonly Mount[] = [
   at("settings/voice", () => import("./assistant/settingsVoice.tsx")),
   at("settings/notification-collection", () => import("./notices/SettingsCollection.tsx")),
   at("assistant/calendar", () => import("./calendar/sheet.tsx")),
+  at("overlay", () => import("./calendar/availability.tsx")),
 ];

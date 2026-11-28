@@ -1,0 +1,155 @@
+// spec/app/calendar/sharing.md, "Story: Choose the calendars and see the answer before it is shared"; spec/app/calendar/sharing.md, "The phone can say the owner is free only when every calendar chosen lives on this phone"; spec/app/calendar/sharing.md, "The sheet offers the phone's calendars with none ticked, reads only the ticked ones, and shares only a free or busy answer it showed"
+import {
+  AvailabilityUnavailable, CALENDAR_AVAILABILITY_MAX_BUSY, deviceAvailabilitySources, deviceTimeZone, executeCalendarAvailability, readDeviceAvailability,
+  type AvailabilityDeviceCalendarPort, type AvailabilityProvider, type AvailabilityReview, type CalendarAvailabilityOperation, type CalendarAvailabilityResult,
+} from "@elizaos/plugin-calendar-client"
+import * as Sharing from "../../gen/app__calendar__sharing.effect.vibe"
+import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { Device, PhoneCalendar } from "../platform/index.vibe"
+import { contained, started, together } from "../runtime/index.vibe"
+
+/** One of the phone's calendars as the sheet offers it: its id and revision, and its name and account, which stay on the phone. */
+export type Offered = Parameters<AvailabilityReview["chooseCalendars"]>[0][number]
+
+/** What the sheet shows beside its machine: the window asked, the calendars offered, the answer read and the calendars it was read from. */
+export interface Checked {
+  readonly operation: CalendarAvailabilityOperation | undefined
+  readonly offered: readonly Offered[]
+  readonly result: CalendarAvailabilityResult | undefined
+  readonly chosen: readonly Offered[]
+}
+
+const nothing: Checked = { operation: undefined, offered: [], result: undefined, chosen: [] }
+
+/** What the sheet shows of the check open now; only this shell writes it. */
+export service CheckedCalendars {
+  get(): Checked!!
+  set(change: Partial<Checked>): void!!
+}
+
+const checkedCalendars = Layer.sync(CheckedCalendars, () => {
+  let held = nothing
+  return { get: () => sync(() => held), set: (change: Partial<Checked>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** An instant of a check as v119 wrote it: its date, its time to the minute, and its zone's short name. */
+export function checkTime(value: string, timeZone: string): string {
+  const at = new Date(value)
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone, year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
+    ...(at.getUTCSeconds() !== 0 || at.getUTCMilliseconds() !== 0 ? { second: "2-digit" as const } : {}),
+    ...(at.getUTCMilliseconds() !== 0 ? { fractionalSecondDigits: 3 as const } : {}),
+    timeZoneName: "short",
+  }).format(at)
+}
+
+const calendarRows = Schema.Struct({
+  status: Schema.Literal("ready"),
+  calendars: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, account: Schema.String, sourceRevision: Schema.String })),
+})
+const rangeRows = Schema.Struct({
+  status: Schema.Literal("ready"),
+  events: Schema.Array(Schema.Struct({ calendarId: Schema.String, start: Schema.String, end: Schema.String, allDay: Schema.Boolean })),
+})
+
+function labelled(value: string, fallback: string): string {
+  return value.trim() === "" || value.includes("\0") ? fallback : value
+}
+
+/**
+ * The phone's calendars and events as eliza's availability reader takes them, through the reviewed workflow reads of
+ * `ElizaCalendar`: each calendar with its revision, and whether it lives on this phone, which the phone's own list says.
+ * The phone reads the reviewed window in its zone, with the all-day events of its dates, so the reader's civil query is
+ * that window. The phone's range read names no event's free, cancelled or declined state, so every event it finds is busy.
+ */
+function phonePort(phone: PhoneCalendar.Shape, operation: CalendarAvailabilityOperation, granted: () => boolean, current: () => boolean): AvailabilityDeviceCalendarPort {
+  const unavailable = (reason: string) => new AvailabilityUnavailable({ reason })
+  const window = { begin: Date.parse(operation.start), end: Date.parse(operation.end) }
+  return {
+    context: () => ({ permitted: granted(), foreground: current(), unlocked: current(), timeZone: deviceTimeZone() }),
+    calendars: effect () => {
+      const listed = try mapError(flatMap(phone.workflowCalendars(), Schema.decodeUnknownEffect(calendarRows)), () => unavailable("Calendar sources could not be read"))
+      const list = phone.list(window) catch () => undefined
+      const local = new Set(list?.status === "ready" ? list.calendars.filter((row) => row.local).map((row) => row.id) : [])
+      return listed.calendars.map((row) => ({
+        id: row.id, sourceRevision: row.sourceRevision, name: labelled(row.name, "Untitled calendar"), account: labelled(row.account, "On this phone"),
+        local: local.has(row.id), freeBusyOrAbove: true,
+      }))
+    },
+    instances: effect (query) => {
+      const read = try mapError(flatMap(phone.readRange({ calendarIds: query.calendarIds, start: operation.start, end: operation.end, timeZone: operation.timeZone, maximumEvents: CALENDAR_AVAILABILITY_MAX_BUSY }),
+        Schema.decodeUnknownEffect(rangeRows)), () => unavailable("Calendar events could not be read"))
+      return {
+        rows: read.events.map((row) => ({ calendarId: row.calendarId, begin: Date.parse(row.start), end: Date.parse(row.end), allDay: row.allDay, availability: null, status: null, selfAttendeeStatus: null })),
+        truncated: false,
+      }
+    },
+  }
+}
+
+/** The machine's state once it has left `from`: the owner's choice, or the sheet closed. */
+effect function leaving(machine: Sharing.Machine.Shape, from: Sharing.Checking) {
+  const moved = try Stream.runHead(Stream.filter(machine.changes, (state) => state.checking !== from))
+  return Option.getOrElse(moved, () => Sharing.initial)
+}
+
+/**
+ * Check the owner's availability over the window `operation` asks, through eliza's reviewed check: Android's access, the
+ * sheet of the phone's calendars, a read of only those ticked, the exact answer shown, and the same read again before it
+ * is shared. `current` says whether the screen the check is bound to still shows. The sheet it opened closes when it ends.
+ */
+export effect function checkAvailability(operation: CalendarAvailabilityOperation, current: () => boolean) {
+  const phone = try PhoneCalendar
+  const machine = try Sharing.Machine
+  const checked = try CheckedCalendars
+  let granted = false
+  let opened = false
+  const port = phonePort(phone, operation, () => granted, current)
+  const provider: AvailabilityProvider = {
+    requestReadAccess: () => map(phone.workflowAccess(), (grant) => {
+      granted = grant === "Granted"
+      return { status: granted ? "granted" : "denied" }
+    }),
+    availabilitySources: (input) => deviceAvailabilitySources(port, input),
+    readAvailability: (input) => readDeviceAvailability(port, input),
+  }
+  const unshown = () => new AvailabilityUnavailable({ reason: "The availability sheet could not be shown" })
+  const review: AvailabilityReview = {
+    chooseCalendars: effect (offered, asked) => {
+      const calendars = offered.map((one) => one.id)
+      if (!Sharing.canShowCalendars(try machine.get(), calendars)) throw unshown()
+      try checked.set({ ...nothing, operation: asked, offered })
+      try mapError(machine.send({ type: "showCalendars", calendars }), unshown)
+      opened = true
+      const chosen = try leaving(machine, "Choosing")
+      return chosen.checking === "Reading" ? chosen.ticked : null
+    },
+    confirmResult: effect (result, chosen) => {
+      try checked.set({ result, chosen })
+      try mapError(machine.send({ type: "answered", answer: Sharing.availability(true, result.busy.length) }), unshown)
+      return (try leaving(machine, "Answered")).checking === "Sharing"
+    },
+  }
+  const outcome = try executeCalendarAvailability(provider, operation, { current, contextTimeZone: deviceTimeZone() }, review)
+  if (opened && Sharing.canClose(try machine.get())) try contained(machine.send({ type: "close" }), "closing the availability sheet")
+  if (opened) try checked.set(nothing)
+  return outcome
+}
+
+// spec/app/calendar/sharing.md, "The sheet offers the phone's calendars with none ticked, reads only the ticked ones, and shares only a free or busy answer it showed"
+/** The sheet closes as soon as Alpha goes out of sight or the owner leaves Home and Calendar. */
+const retire = started(effect {
+  const device = try Device
+  const shell = try Shell
+  const machine = try Sharing.Machine
+  const visible = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const watching = Stream.zipLatestWith(shell.changes, visible, (page, shown) => ({ front: page.trail.at(-1), shown }))
+  try Stream.runForEach(watching, effect ({ front, shown }) => {
+    if (Sharing.canClose(try machine.get()) && (!shown || (front !== undefined && front !== "Calendar"))) {
+      try contained(machine.send({ type: "close" }), "closing the availability sheet after leaving")
+    }
+  })
+}, "closing the availability sheet once out of sight")
+
+/** The availability sheet's machine, what it shows, and its closing once out of sight. */
+export const checking = together(Sharing.machine(), checkedCalendars, retire)

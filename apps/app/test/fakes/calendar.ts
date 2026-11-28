@@ -79,6 +79,8 @@ export interface CalendarScene {
   phoneEvents: AndroidCalendarEvent[];
   granted: boolean;
   denies: boolean;
+  /** How often a reviewed step read the phone's events: each `readWorkflowRange`. */
+  rangeReads: number;
   /** A read of the agent's calendar feed is taken and never answered, as by an agent still busy starting. */
   silent: boolean;
   asked: number;
@@ -99,7 +101,7 @@ export interface CalendarScene {
 export function calendarScene(): CalendarScene {
   return {
     events: [], writes: [], keys: new Map(), down: false, stalled: false, queued: false,
-    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, silent: false, asked: 0,
+    calendars: [{ id: "local", name: "Phone", writable: true, local: true }], phoneEvents: [], granted: false, denies: false, rangeReads: 0, silent: false, asked: 0,
     creations: new Map(), lost: false, handedOff: 0, handoffs: [],
     reviewed: [], review: "applied",
     control: { revision: 0, paused: true, destination: null, links: [] }, approvals: [], heldCalendars: [], heldApprovals: [], heldFeed: [],
@@ -315,6 +317,7 @@ interface Creations {
   executeAgent(input: { operation: unknown; operationId: string }): Promise<{ status: string; result?: unknown }>;
   cancelAgent(input: { operationId: string }): Promise<{ status: string }>;
   requestWorkflowReadAccess(): Promise<{ status: string }>;
+  workflowCalendars(): Promise<{ status: string; calendars?: unknown }>;
   readWorkflowRange(input: { calendarIds: readonly string[]; start: string; end: string; timeZone: string; maximumEvents: number }): Promise<{ status: string; events?: unknown }>;
   prepareAgentSource(): Promise<{ status: string; sourceId?: string; sourceRevision?: string }>;
 }
@@ -322,8 +325,11 @@ interface Creations {
 /** The phone's calls: what eliza's definition lists, which eliza checks against the compiled plugin, then the calls it does not name yet. */
 type PhoneCalendar = Omit<AndroidCalendarPlugin, "save"> & Creations;
 const CREATION_CALLS = Object.keys({
-  saveOptions: true, pendingCreations: true, executeAgent: true, cancelAgent: true, requestWorkflowReadAccess: true, readWorkflowRange: true, prepareAgentSource: true,
+  saveOptions: true, pendingCreations: true, executeAgent: true, cancelAgent: true, requestWorkflowReadAccess: true, workflowCalendars: true, readWorkflowRange: true, prepareAgentSource: true,
 } satisfies Record<Exclude<keyof Creations, "save">, true>) as ReadonlyArray<Exclude<keyof Creations, "save">>;
+
+/** A phone calendar's source revision as `CalendarSourceIdentity.java` names it: 64 hex digits that change with its name, account or kind. */
+const sourceRevisionOf = (row: AndroidCalendarRow) => [...JSON.stringify([row.id, row.name, row.account, row.local])].map((one) => one.charCodeAt(0).toString(16)).join("").padEnd(64, "0").slice(-64);
 
 /** The phone event `id` as the plugin compares it: its revision is what it says. */
 const revisionOf = (event: AndroidCalendarEvent) => JSON.stringify([event.title, event.body, event.location, event.begin, event.end]);
@@ -404,7 +410,12 @@ export function elizaCalendar(scene: CalendarScene): Faked {
       scene.asked += 1;
       return Promise.resolve({ status: scene.granted ? "granted" : "denied" });
     },
+    workflowCalendars() {
+      if (!scene.granted) return Promise.resolve({ status: "permission-required" });
+      return Promise.resolve({ status: "ready", calendars: scene.calendars.map((row) => ({ id: row.id, name: row.name ?? "", account: row.account ?? "", sourceRevision: sourceRevisionOf(row) })) });
+    },
     readWorkflowRange({ calendarIds, start, end, maximumEvents }) {
+      scene.rangeReads += 1;
       const [from, to] = [Date.parse(start), Date.parse(end)];
       const events = scene.phoneEvents.filter((event) => calendarIds.includes(event.calendarId) && event.begin < to && event.end > from).slice(0, maximumEvents + 1)
         .map((event) => ({ id: event.id, calendarId: event.calendarId, revision: "0".repeat(64), title: event.title ?? "", start: new Date(event.begin).toISOString(), end: new Date(event.end).toISOString(), allDay: event.allDay }));
