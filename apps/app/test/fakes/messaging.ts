@@ -12,6 +12,7 @@ export function messagingNoticePhone() {
   type Entry = { readonly token: string; readonly target: MessagingNoticeTarget; readonly title: string; readonly body: string };
   const enabled = new Set<ProviderName>();
   const entries = new Map<string, Entry>();
+  const visible = new Map<ProviderName, MessagingNoticeTarget>();
   let pending: Entry | undefined;
   let signal = () => {};
   const matches = (target: MessagingNoticeTarget, filter: MessagingNoticeFilter) =>
@@ -31,12 +32,17 @@ export function messagingNoticePhone() {
   const plugins: Readonly<Record<string, Faked>> = {
     AlphaMessagingNotices: (emit, onUnplug) => {
       signal = () => emit("messagingNoticesChanged", {});
-      onUnplug?.(() => { signal = () => {}; });
+      onUnplug?.(() => { signal = () => {}; visible.clear(); });
       return {
         status: ({ provider }: { provider: ProviderName }) => ({ allowed: enabled.has(provider) }),
         configure: ({ provider }: { provider: ProviderName }) => setAllowed(provider, true),
+        front({ provider, target }: { provider: ProviderName; target?: MessagingNoticeTarget }) {
+          if (target === undefined) visible.delete(provider);
+          else if (provider === target.provider) visible.set(provider, target);
+        },
         post({ target, title, body }: Omit<Entry, "token">) {
-          if (!enabled.has(target.provider)) return { posted: false };
+          const current = visible.get(target.provider);
+          if (!enabled.has(target.provider) || current !== undefined && matches(current, target)) return { posted: false };
           for (const [token, item] of entries) if (matches(item.target, target)) entries.delete(token);
           const token = crypto.randomUUID();
           entries.set(token, { target, title, body, token });

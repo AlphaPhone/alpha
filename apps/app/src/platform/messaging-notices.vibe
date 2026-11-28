@@ -19,6 +19,7 @@ const delivery = Schema.Struct({ posted: Schema.Boolean })
 interface NativeMessagingNotices {
   status(input: { provider: ProviderName }): Promise<unknown>
   configure(input: { provider: ProviderName }): Promise<void>
+  front(input: { provider: ProviderName; target?: MessagingNoticeTarget }): Promise<void>
   post(input: { target: MessagingNoticeTarget; title: string; body: string }): Promise<unknown>
   withdraw(filter: MessagingNoticeFilter): Promise<void>
   pendingTap(input: { provider: ProviderName }): Promise<unknown>
@@ -32,6 +33,7 @@ export service MessagingNotices {
   readonly changed: Stream.Stream<void>
   allowed(provider: ProviderName): boolean!!
   configure(provider: ProviderName): void!!
+  front(provider: ProviderName, target?: MessagingNoticeTarget): void!!
   post(target: MessagingNoticeTarget, title: string, body: string): boolean!!
   withdraw(filter: MessagingNoticeFilter): void!!
   pending(provider: ProviderName): (typeof tapped.Type | undefined)!!
@@ -55,6 +57,7 @@ export const phoneMessagingNotices = Layer.sync(MessagingNotices, () => {
       return Option.getOrUndefined(Schema.decodeUnknownOption(permission)(raw))?.allowed === true
     },
     configure: (provider) => available ? ignore(tryPromise(() => host().configure({ provider }))) : Effect.void,
+    front: (provider, target) => available ? ignore(tryPromise(() => host().front(target === undefined ? { provider } : { provider, target }))) : Effect.void,
     effect post(target, title, body) {
       if (!available) return false
       const raw = tryPromise(() => host().post({ target, title, body })) catch () => undefined
@@ -73,5 +76,5 @@ export const phoneMessagingNotices = Layer.sync(MessagingNotices, () => {
 
 export const browserMessagingNotices = Layer.succeed(MessagingNotices, {
   native: false, changed: Stream.empty, allowed: () => succeed(true), configure: () => Effect.void,
-  post: () => succeed(false), withdraw: () => Effect.void, pending: () => succeed(undefined), consume: () => Effect.void,
+  front: () => Effect.void, post: () => succeed(false), withdraw: () => Effect.void, pending: () => succeed(undefined), consume: () => Effect.void,
 })
