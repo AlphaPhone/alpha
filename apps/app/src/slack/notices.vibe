@@ -1,6 +1,6 @@
 // spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace"
-import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
-import { Said, say } from "../notices/index.vibe"
+import { slackNoticeTarget } from "./notice-targets.vibe"
+import { MessagingNotices } from "../platform/index.vibe"
 import type { MessagingSessions } from "../platform/index.vibe"
 import { type SlackEventEnvelope, type SlackMessage, RateLimited, Slack } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, stop } from "../runtime/index.vibe"
@@ -96,10 +96,11 @@ effect function handleLiveEnvelope(
     thread_ts: payload.thread_ts,
     reply_broadcast: payload.reply_broadcast,
   }
-  const convState = try (try Conversation.Machine).get()
+  const front = (try (try Notices.Machine).get()).front
   const chNum = ledger.channelNum(workspace, payload.channel)
   const isOwn = payload.user === meta.ownerUserId
-  const isFront = convState.front && convState.workspace === workspace && convState.channel === chNum
+  const parent = payload.thread_ts && payload.thread_ts !== payload.ts ? ledger.tsNum(workspace, chNum, payload.thread_ts) : 0
+  const isFront = front.workspace === workspace && front.channel === chNum && front.threadTs === parent
   const saved = ledger.upsertMessage(workspace, payload.channel, msg, !isOwn && !isFront)
   const channel = ledger.channelOf(workspace, saved.channel)
   const kind = channel ? convKindOf(channel) : "PublicChannel"
@@ -169,7 +170,9 @@ effect function pollWorkspace(ticket: number, workspace: number): Event!!SlackLe
   return { type: "polled", ticket, ok: true, point, incoming }
 }
 
-effect function postSlackNotice(target: Target, ts: number): void!!SlackLedger {
+effect function postSlackNotice(target: Target, ts: number): void!!(SlackLedger | MessagingNotices | MessagingSessions | Notices.Machine) {
+  const destination = try slackNoticeTarget(target)
+  if (!destination) return
   const ledger = try SlackLedger
   const meta = ledger.workspaceMeta(target.workspace)
   const channel = ledger.channelOf(target.workspace, target.channel)
@@ -183,7 +186,20 @@ effect function postSlackNotice(target: Target, ts: number): void!!SlackLedger {
   const title = meta ? `${meta.name} · ${channelName}` : channelName
   const sender = msg ? messageSenderName(users, msg) : "Slack"
   const body = msg ? `${sender}: ${msg.text}` : "New Slack message"
+  const notices = try Notices.Machine
+  const current = effect {
+    const stillUp = (try notices.get()).up.some((item) => item.ts === ts && targetId(item.target) === targetId(target))
+    return stillUp && (try slackNoticeTarget(target))?.scope === destination.scope
+  }
+  if (!(try current)) return
+  const host = try MessagingNotices
+  if (host.native && !(try host.post(destination, title, body))) return
+  if (!(try current)) {
+    try host.withdraw(destination)
+    return
+  }
   ledger.putNotice({
+    destination,
     key: targetId(target),
     workspace: target.workspace,
     channel: target.channel,
@@ -192,20 +208,11 @@ effect function postSlackNotice(target: Target, ts: number): void!!SlackLedger {
     title,
     body,
   })
-  const toastsOpt = try Effect.serviceOption(Toasts.Machine)
-  const saidOpt = try Effect.serviceOption(Said)
-  if (Option.isSome(toastsOpt) && Option.isSome(saidOpt)) {
-    try Effect.provideService(
-      Effect.provideService(say(`${title} — ${body}`), Toasts.Machine, toastsOpt.value),
-      Said,
-      saidOpt.value,
-    )
-  }
 }
 
 function carry(
   fx: Out,
-): Job<Event, Slack | SlackLedger | MessagingSessions | Auth.Machine | Workspaces.Machine | Conversation.Machine | Notices.Machine, []> {
+): Job<Event, Slack | SlackLedger | MessagingSessions | MessagingNotices | Auth.Machine | Workspaces.Machine | Conversation.Machine | Notices.Machine, []> {
   return match (fx) {
     when { tag: "ScheduleWorkspace", let workspace }:
       run(`slack-sse-${workspace}`, watchWorkspace(workspace));
@@ -216,11 +223,18 @@ function carry(
     when { tag: "PostNotice", let target, let ts }:
       run(`slack-notice-${targetId(target)}`, postSlackNotice(target, ts));
     when { tag: "WithdrawTarget", let target }:
-      run(`slack-withdraw-target-${targetId(target)}`, effect { (try SlackLedger).removeTargetNotice(target) });
+      run(`slack-withdraw-target-${targetId(target)}`, effect {
+        const destination = try slackNoticeTarget(target)
+        if (destination) try (try MessagingNotices).withdraw(destination)
+        ;(try SlackLedger).removeTargetNotice(target)
+      });
     when { tag: "WithdrawWorkspace", let workspace }:
       run(`slack-withdraw-ws-${workspace}`, sync(() => { pendingIncoming.delete(workspace) }));
     when { tag: "WithdrawAll" }:
-      run("slack-withdraw-all", effect { (try SlackLedger).clearAllNotices() });
+      run("slack-withdraw-all", effect {
+        try (try MessagingNotices).withdraw({ provider: "slack" })
+        ;(try SlackLedger).clearAllNotices()
+      });
   }
 }
 

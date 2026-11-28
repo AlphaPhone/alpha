@@ -7,6 +7,7 @@ import type * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { act } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import * as Shell from "../gen/app__shell.effect.vibe";
 import * as Preferences from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as WorkspacesMachine, attention } from "../gen/app__slack.effect.vibe";
 import { Machine as AgentMachine } from "../gen/app__slack__agent.effect.vibe";
@@ -32,6 +33,7 @@ import { executeSlackAgentRequest, slackAmbientSnapshot, slackBack, slackHomeCar
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type SlackTestServices =
+  | Shell.Machine
   | Preferences.Machine
   | AuthMachine
   | WorkspacesMachine
@@ -59,7 +61,7 @@ async function underAct(work: () => Promise<void> | void): Promise<void> {
   });
 }
 
-async function mountSlack(origin: string, phone?: Scene, options?: Parameters<typeof slackPhone>[1]): Promise<MountedSlack> {
+async function mountSlack(origin: string, phone?: Scene, options?: Parameters<typeof slackPhone>[1], openFrom: "Home" | "Slack" = "Slack"): Promise<MountedSlack> {
   const unplug = phone && plugIn({ ...plugins(phone, services(phone)), ...slackPhone(origin, options) });
   const slackLayer = Layer.provide(slackAt(origin), FetchHttpClient.layer);
   const platform = phone ? phonePlatform() : pagePlatform(
@@ -67,13 +69,14 @@ async function mountSlack(origin: string, phone?: Scene, options?: Parameters<ty
     Layer.provide(cloudAt(origin), FetchHttpClient.layer),
     { slack: slackLayer, sessions: messagingSessions },
   );
-  const appLayer = Layer.provideMerge(whole(together(slackResident, Preferences.machine())), platform);
+  const appLayer = Layer.provideMerge(whole(together(slackResident, Preferences.machine(), Shell.machine())), platform);
   const runtime = ManagedRuntime.make(appLayer) as unknown as MountedSlack["runtime"];
   const host = document.body.appendChild(document.createElement("div"));
   const root: Root = createRoot(host);
   await underAct(async () => {
     root.render(<SlackScreen runtime={runtime as unknown as Parameters<typeof SlackScreen>[0]["runtime"]} />);
-    await runtime.runPromise(Effect.void);
+    if (openFrom === "Slack") await runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "openView", view: "Slack" })));
+    else await runtime.runPromise(Effect.void);
   });
   const handle: MountedSlack = {
     runtime,
@@ -338,6 +341,68 @@ describe("Slack user-account client over live HTTP provider", () => {
     expect((await controlRequests("/api/slack/oauth")).length).toBe(grants.length);
   });
 
+  it('opens the exact Slack thread from the Android tray after a cold start and keeps syncing without permission (spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace")', async () => {
+    const phone = { ...scene(), phone: true };
+    const app = await mountSlack(provider.origin, phone);
+    await underAct(() => findButton(app.host, "Connect workspace").click());
+    await underAct(() => findButton(app.host, "Approve & connect").click());
+    const ready = await waitFor(app.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    const workspace = ready.selected.workspace;
+    const notices = NoticesMachine.use((m) => Effect.succeed(m.changes));
+    const baseline = await waitFor(app.runtime, notices, (s) => (s.watermarks[workspace] ?? 0) > 0);
+    expect(baseline.notifyAllowed).toBe(false);
+    const channel = await channelNum(app, workspace, "C01GENERAL");
+    const ledger = await app.runtime.runPromise(SlackLedger);
+    const incoming = { team_id: "T01ALPHA", channel: "C01GENERAL", user: "U02MAYA" };
+    const denied = "<@U01OWNER> while notices are off";
+    await controlPost("/__control/inject", { ...incoming, text: denied });
+    await waitFor(app.runtime, notices, (s) => s.watermarks[workspace] > baseline.watermarks[workspace]);
+    expect(ledger.channelMessagesOf(workspace, channel).some((message) => message.text === denied)).toBe(true);
+    expect(phone.messagingNotices.posted()).toEqual([]);
+
+    await underAct(() => findButton(app.host, "Enable Slack notifications").click());
+    await waitFor(app.runtime, notices, (s) => s.notifyAllowed);
+    const thread = "1730000100.000100";
+    await controlPost("/__control/inject", { ...incoming, thread_ts: thread, text: "<@U01OWNER> please review this thread" });
+    await waitFor(app.runtime, notices, (s) => s.up.length === 1);
+    await vi.waitFor(() => expect(phone.messagingNotices.posted()).toHaveLength(1));
+    const [posted] = phone.messagingNotices.posted();
+    expect(posted.target.scope).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(posted.target).toMatchObject({ provider: "slack", workspace: "T01ALPHA", channel: "C01GENERAL", thread });
+    expect(posted.body).toContain("please review this thread");
+    await app.close();
+    expect(phone.messagingNotices.tap(posted.token)).toBe(true);
+    const reopened = await mountSlack(provider.origin, phone, undefined, "Home");
+    const view = await waitFor(reopened.runtime, ConversationMachine.use((m) => Effect.succeed(m.changes)), (s) => s.threadTs > 0 && s.threadRead.status === "Loaded");
+    expect(Shell.showing(await reopened.runtime.runPromise(Shell.Machine.use((m) => m.get())), "Slack")).toBe(true);
+    const restored = await reopened.runtime.runPromise(SlackLedger);
+    expect(restored.workspaceMeta(view.workspace)?.teamId).toBe("T01ALPHA");
+    expect(restored.channelId(view.workspace, view.channel)).toBe("C01GENERAL");
+    expect(restored.tsStr(view.workspace, view.channel, view.threadTs)).toBe(thread);
+    expect(reopened.host.textContent).toContain("please review this thread");
+    expect(phone.messagingNotices.pending()).toBeUndefined();
+    expect(phone.messagingNotices.tap(posted.token)).toBe(false);
+
+    await waitFor(reopened.runtime, notices, (s) => (s.watermarks[view.workspace] ?? 0) > 0);
+    await controlPost("/__control/inject", { ...incoming, channel: "C02ENG", text: "<@U01OWNER> former account only" });
+    await vi.waitFor(() => expect(phone.messagingNotices.posted()).toHaveLength(1), { timeout: 8000 });
+    const [former] = phone.messagingNotices.posted();
+    await reopened.close();
+    const sibling = await mountSlack(provider.origin, { ...phone, messagingNotices: scene().messagingNotices });
+    const before = await waitFor(sibling.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.connected.length === 1);
+    await underAct(async () => { await sibling.runtime.runPromise(AuthMachine.use((m) => m.send({ type: "startConnect" }))); });
+    await underAct(() => findButton(sibling.host, "Approve & connect").click());
+    await waitFor(sibling.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.connected[0]?.credentialRev > before.connected[0].credentialRev);
+    await waitFor(sibling.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded" && s.connected[0]?.credentialRev > before.connected[0].credentialRev);
+    await sibling.close();
+    expect(phone.messagingNotices.tap(former.token)).toBe(true);
+    const reauthorized = await mountSlack(provider.origin, phone, undefined, "Home");
+    await vi.waitFor(() => expect(phone.messagingNotices.pending()).toBeUndefined());
+    expect((await reauthorized.runtime.runPromise(ConversationMachine.use((m) => m.get()))).channel).toBe(0);
+    expect(Shell.showing(await reauthorized.runtime.runPromise(Shell.Machine.use((m) => m.get())), "Slack")).toBe(false);
+    expect(reauthorized.host.textContent).not.toContain("former account only");
+  }, 40_000);
+
   it('keeps a workspace connected across two phone runtimes when an old grant is refused during renewal (spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only")', async () => {
     const phone = { ...scene(), phone: true };
     const first = await mountSlack(provider.origin, phone);
@@ -596,6 +661,11 @@ describe("Slack user-account client over live HTTP provider", () => {
     );
     expect(noticed.up.some((p) => p.target.channel === engNum)).toBe(false);
     expect(noticed.up.some((p) => p.target.channel === generalNum)).toBe(true);
+    await vi.waitFor(() => expect(findButton(app.host, "live mention in general!")).toBeDefined());
+    await underAct(() => findButton(app.host, "live mention in general!").click());
+    await waitFor(app.runtime, Effect.map(ConversationMachine, (m) => m.changes), (s) => s.workspace === alphaWs && s.channel === generalNum && s.threadTs === 0 && s.newestLoaded);
+    await vi.waitFor(() => expect([...app.host.querySelectorAll("button")].some((button) => button.textContent?.includes("live mention in general!"))).toBe(false));
+
 
     const card = await app.runtime.runPromise(slackHomeCard);
     expect(card.standing).toBe("Ready");

@@ -125,7 +125,7 @@ export schema SavedGrant {
   readonly expiresAt?: number
   readonly clientId?: string
   readonly rotation?: { readonly id: string; readonly until: number }
-  readonly workspace?: { readonly teamId: string; readonly name: string; readonly ownerUserId: string; readonly brokered?: boolean }
+  readonly workspace?: { readonly teamId: string; readonly name: string; readonly ownerUserId: string; readonly brokered?: boolean; readonly authorizationId?: string }
 }
 
 /** The same grant metadata with tokens redacted until they reach the vault or provider. */
@@ -169,7 +169,7 @@ export function refreshTokenValue(secret: StoredSecret): string | undefined {
 /** Both a renewed grant and a new refresh reservation invalidate an earlier comparison. */
 export function sameCredential(left: StoredSecret, right: StoredSecret): boolean {
   return tokenValue(left) === tokenValue(right) && refreshTokenValue(left) === refreshTokenValue(right)
-    && left.rotation?.id === right.rotation?.id
+    && left.rotation?.id === right.rotation?.id && left.workspace?.authorizationId === right.workspace?.authorizationId
 }
 
 /** Isolated in-memory `SessionStore` whose contents never enter `KeyValueStore` or serialized machine state. */

@@ -5,6 +5,9 @@ import type { TargetKey } from "../../gen/app__slack__composer.effect.vibe"
 import type { MutationTool } from "../../gen/app__slack__agent.effect.vibe"
 import {
   type MessagingFailure,
+  type MessagingNoticeTarget,
+  type StoredSecret,
+  noticeScope,
   AuthRevoked,
   Forbidden,
   MessagingSessions,
@@ -27,6 +30,7 @@ export interface WorkspaceMeta {
   readonly ownerUserNum: number
   readonly credentialRev: number
   readonly owner: string
+  readonly authorizationId: string
   readonly clientId?: string
   readonly brokered?: boolean
   readonly expiresAt?: number
@@ -47,6 +51,7 @@ export interface PendingOAuth {
 
 /** Stored metadata for one posted Slack notification. */
 interface SlackNoticeRecord {
+  readonly destination: Extract<MessagingNoticeTarget, { readonly provider: "slack" }>
   readonly key: string
   readonly workspace: number
   readonly channel: number
@@ -558,7 +563,7 @@ function createSlackLedger() {
       rateNotice = message
       notify()
     },
-    registerWorkspace(teamId: string, name: string, ownerUserId: string, grant: Pick<WorkspaceMeta, "owner" | "clientId" | "expiresAt" | "brokered">): WorkspaceMeta {
+    registerWorkspace(teamId: string, name: string, ownerUserId: string, grant: Pick<WorkspaceMeta, "owner" | "authorizationId" | "clientId" | "expiresAt" | "brokered">): WorkspaceMeta {
       const num = teamToNum.get(teamId) ?? nextWorkspaceNum++
       teamToNum.set(teamId, num)
       const bucket = bucketOf(num)
@@ -580,6 +585,7 @@ function createSlackLedger() {
       notify()
     },
     workspaceMeta: (workspace: number) => metas.get(workspace),
+    workspaceMetas: () => [...metas.values()],
     workspaceByTeamId(teamId: string) {
       const num = teamToNum.get(teamId)
       return num === undefined ? undefined : metas.get(num)
@@ -639,6 +645,17 @@ export service SlackLedger: SlackLedgerStore {}
 /** Layer providing the in-memory non-secret `SlackLedger` service. */
 export const slackLedger = Layer.sync(SlackLedger, createSlackLedger)
 
+/** An older encrypted grant keeps this identity across its first token rotation. */
+export effect function authorizationOf(grant: StoredSecret): string!! {
+  return grant.workspace?.authorizationId ?? (try noticeScope(["legacy Slack authorization", tokenValue(grant)]))
+}
+
+export effect function holdsWorkspace(meta: WorkspaceMeta): boolean!!MessagingSessions {
+  const sessions = try MessagingSessions
+  const held = Option.getOrUndefined(try sessions.get(slackSessionKey(meta.teamId), meta.owner))
+  return held !== undefined && held.workspace?.teamId === meta.teamId && held.workspace.ownerUserId === meta.ownerUserId && (try authorizationOf(held)) === meta.authorizationId
+}
+
 /** Get a valid user grant, serializing the single-use refresh token per workspace and refusing a superseded grant. */
 export effect function tokenForWorkspace(workspace: number, expired?: string): (string | undefined)!MessagingFailure!(Slack | SlackLedger | MessagingSessions) {
   const ledger = try SlackLedger
@@ -652,6 +669,7 @@ export effect function tokenForWorkspace(workspace: number, expired?: string): (
     const found = try sessions.get(key, meta.owner)
     if (Option.isNone(found)) return undefined
     const secret = found.value
+    if ((try authorizationOf(secret)) !== meta.authorizationId) return undefined
     const token = tokenValue(secret)
     const now = try Clock.currentTimeMillis
     if (now >= deadline) throw new Unreachable({ cause: "Slack credential rotation is still pending" })
@@ -676,21 +694,23 @@ export effect function tokenForWorkspace(workspace: number, expired?: string): (
       throw refreshed
     }
     const next = try assertSlackUserToken(refreshed.access_token)
-    const replacement = { ...held, ...secretOf(next, refreshed.refresh_token, now + refreshed.expires_in * 1000) }
+    const replacement = { ...held, ...secretOf(next, refreshed.refresh_token, now + refreshed.expires_in * 1000), ...(held.workspace ? { workspace: { ...held.workspace, authorizationId: meta.authorizationId } } : {}) }
     if (try sessions.exchange(key, reserved, replacement, meta.owner)) return next
   }
 }
 
 /** A provider-confirmed expired access token can be replaced before retrying the refused operation. */
 export effect function withWorkspaceToken<A>(workspace: number, request: (token: string) => A!MessagingFailure): (A | undefined)!MessagingFailure!(Slack | SlackLedger | MessagingSessions) {
+  const meta = (try SlackLedger).workspaceMeta(workspace)
   const token = try tokenForWorkspace(workspace)
-  if (token === undefined) return undefined
-  return request(token) catch effect (failure) => {
+  if (token === undefined || !meta) return undefined
+  const result = request(token) catch effect (failure) => {
     if (!(failure instanceof AuthRevoked) || failure.code !== "token_expired") throw failure
     const current = try tokenForWorkspace(workspace, token)
     if (current === undefined || current === token) throw failure
     return try request(current)
   }
+  return (try holdsWorkspace(meta)) ? result : undefined
 }
 
 /** Handle a typed Slack HTTP/SSE failure: propagate `AuthRevoked` to `Auth.Machine` for that workspace only, and surface `RateLimited`. */
@@ -706,6 +726,7 @@ export effect function handleSlackFailure(
     const key = slackSessionKey(meta.teamId)
     const current = try sessions.get(key, meta.owner)
     if (Option.isSome(current)) {
+      if ((try authorizationOf(current.value)) !== meta.authorizationId) return "Unreachable"
       if (current.value.rotation !== undefined && current.value.rotation.until > (try Clock.currentTimeMillis)) return "Unreachable"
       if (tokenValue(current.value) !== Redacted.value(failure.rejected)) return "Unreachable"
       if (!(try sessions.exchange(key, current.value, undefined, meta.owner))) return "Unreachable"

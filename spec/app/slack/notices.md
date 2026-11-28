@@ -10,7 +10,7 @@ workspace subscription. A connected handset polls its own cloud mailbox with the
 current user grant, resumes from the last reply's cursor and respects a
 rate-limit retry delay. Signing out stops the poll. A workspace connected
 directly to Slack can enable these notices by reconnecting after the cloud
-receiver becomes available. When the deployment has no receiver, Alpha shows
+receiver becomes available. The handset keeps reading new messages and updating unread counts even when Android denies notification permission. An owner can enable the Slack channel from the workspace. A notice binds to the verified Alpha owner and the specific Slack authorization. Renewing the access token keeps that binding and fresh consent replaces it. The notice carries the durable Slack team, channel and optional parent timestamp; tapping it after a restart restores that exact conversation only for the matching account. Reading, disconnecting or blocking notices withdraws corresponding system notifications. When the deployment has no receiver, Alpha shows
 that live notifications are unavailable and offers manual refresh.
 
 ## Story: Hear about Slack DMs, mentions and thread replies per workspace
@@ -57,7 +57,7 @@ pure def sinceOf(ws: int, m: int -> int): int =
   if (m.keys().contains(ws)) m.get(ws) else 0
 
 pure def watching(s: Notices, workspace: int): bool =
-  s.notifyAllowed and s.connected.contains(workspace)
+  s.connected.contains(workspace)
 
 pure val workspaceValues = Set(0, 1, 2)
 pure val channelValues = Set(0, 1, 2)
@@ -101,7 +101,7 @@ pure def canNotifyPermissionChanged(s: Notices, notifyAllowed: bool): bool =
 pure def notifyPermissionChanged(s: Notices, notifyAllowed: bool): Noticed =
   if (not(notifyAllowed))
     {
-      state: { ...s, notifyAllowed: false, check: R::drop(s.check), checkingWorkspace: 0, up: List() },
+      state: { ...s, notifyAllowed: false, up: List() },
       out: if (s.connected.size() > 0 or s.up.length() > 0) List(WithdrawAll) else List(),
     }
   else { state: { ...s, notifyAllowed: true }, out: List() }
@@ -111,7 +111,7 @@ pure def canWorkspaceAdded(s: Notices, workspace: int): bool =
 
 pure def workspaceAdded(s: Notices, workspace: int): Noticed = {
   state: { ...s, connected: s.connected.union(Set(workspace)), watermarks: s.watermarks.put(workspace, 0) },
-  out: if (s.notifyAllowed) List(ScheduleWorkspace({ workspace: workspace })) else List(),
+  out: List(ScheduleWorkspace({ workspace: workspace })),
 }
 
 pure def canWorkspaceRemoved(s: Notices, workspace: int): bool =
@@ -163,7 +163,7 @@ pure def polled(s: Notices, ticket: int, ok: bool, point: int, incoming: Incomin
   val check = R::answer(s.check, ok)
   val target = { workspace: ws, channel: incoming.channel, threadTs: incoming.threadTs }
   val eligible =
-    ok and prior != 0 and incoming.channel > 0 and incoming.ts > 0
+    s.notifyAllowed and ok and prior != 0 and incoming.channel > 0 and incoming.ts > 0
       and shouldNotify(
         incoming.isOwn, s.mutedChannels.contains(incoming.channel), s.front, target,
         incoming.kind, incoming.mentioned, incoming.inThread
@@ -194,10 +194,9 @@ pure def canFrontChanged(s: Notices, workspace: int, channel: int, threadTs: int
 
 pure def frontChanged(s: Notices, workspace: int, channel: int, threadTs: int): Noticed =
   val target = { workspace: workspace, channel: channel, threadTs: threadTs }
-  val hasUp = target != noTarget and s.up.some(p => p.target == target)
   {
-    state: { ...s, front: target, up: if (hasUp) s.up.select(p => p.target != target) else s.up },
-    out: if (hasUp) List(WithdrawTarget({ target: target })) else List(),
+    state: { ...s, front: target, up: s.up.select(p => p.target != target) },
+    out: if (target != noTarget) List(WithdrawTarget({ target: target })) else List(),
   }
 
 pure def restart(s: Notices): Notices =
@@ -218,7 +217,7 @@ pure def alwaysNoticesIsolated(s: Notices): bool =
 pure def stepNoNoticeBeforeBaseline(before: Notices, via: str, after: Notices, out: List[Effect]): bool =
   out.every(e => match e {
     | PostNotice(p) =>
-      via == "polled" and before.checkingWorkspace == p.target.workspace
+      via == "polled" and before.notifyAllowed and before.checkingWorkspace == p.target.workspace
         and sinceOf(p.target.workspace, before.watermarks) != 0
         and p.target != before.front and not(before.mutedChannels.contains(p.target.channel))
         and after.up.some(u => u.target == p.target and u.ts == p.ts)

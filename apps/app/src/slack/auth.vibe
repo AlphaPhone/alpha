@@ -1,4 +1,5 @@
 // spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"
+import { slackNoticeScope } from "./notice-targets.vibe"
 import * as Workspaces from "../../gen/app__slack.effect.vibe"
 import * as Agent from "../../gen/app__slack__agent.effect.vibe"
 import * as Auth from "../../gen/app__slack__auth.effect.vibe"
@@ -11,6 +12,7 @@ import {
   Device,
   VoiceBridge,
   MessagingSessions,
+  MessagingNotices,
   createPkcePair,
   randomState,
   secretOf,
@@ -19,7 +21,7 @@ import {
 import { authorizeSlack, slackRedirectUri, slackReturns, type SlackReturn } from "../platform/index.vibe"
 import { SLACK_DEFAULT_USER_SCOPES, Slack, assertSlackUserToken } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, started } from "../runtime/index.vibe"
-import { SlackLedger, slackSessionKey, tokenForWorkspace } from "./ledger.vibe"
+import { SlackLedger, authorizationOf, holdsWorkspace, slackSessionKey, tokenForWorkspace } from "./ledger.vibe"
 
 effect function browserFailed(nonce: number, denied: boolean): void!!Auth.Machine {
   const auth = try Auth.Machine
@@ -72,7 +74,7 @@ effect function openOAuthBrowser(nonce: number): void!!(Slack | SlackLedger | Au
   } else if (reply) try receiveSlackReturn(reply)
 }
 
-effect function exchangeCode(ticket: number, code: string, verifier: string): Event!!(Slack | SlackLedger) {
+effect function exchangeCode(ticket: number, code: string, verifier: string): Event!!(Slack | SlackLedger | MessagingSessions | MessagingNotices | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine) {
   const slack = try Slack
   const ledger = try SlackLedger
   const pending = ledger.pendingOAuth()
@@ -98,10 +100,13 @@ effect function exchangeCode(ticket: number, code: string, verifier: string): Ev
   if (Option.isNone(identity) || identity.value.team_id !== response.team.id || identity.value.user_id !== response.authed_user.id) {
     return { type: "exchanged", ticket, reply: { tag: "ExchangeErr" }, token: "", refresh: "" }
   }
+  if ((try (try MessagingSessions).owner()) !== pending.owner) return { type: "exchanged", ticket, reply: { tag: "ExchangeErr" }, token: "", refresh: "" }
+  const previous = ledger.workspaceByTeamId(identity.value.team_id)
+  if (previous) try detachWorkspace(previous.num)
   const expires = response.authed_user.expires_in
   const now = try Clock.currentTimeMillis
   const meta = ledger.registerWorkspace(identity.value.team_id, identity.value.team, identity.value.user_id, {
-    owner: pending.owner, clientId: pending.clientId, brokered: pending.brokered, ...(expires === undefined ? {} : { expiresAt: now + expires * 1000 }),
+    owner: pending.owner, authorizationId: randomState(), clientId: pending.clientId, brokered: pending.brokered, ...(expires === undefined ? {} : { expiresAt: now + expires * 1000 }),
   })
   return {
     type: "exchanged",
@@ -126,7 +131,7 @@ effect function storeWorkspaceToken(
   const grant = {
     ...secretOf(token, refresh === "" ? undefined : refresh, meta.expiresAt),
     ...(meta.clientId === undefined ? {} : { clientId: meta.clientId }),
-    workspace: { teamId: meta.teamId, name: meta.name, ownerUserId: meta.ownerUserId, brokered: meta.brokered === true },
+    workspace: { teamId: meta.teamId, name: meta.name, ownerUserId: meta.ownerUserId, brokered: meta.brokered === true, authorizationId: meta.authorizationId },
   }
   const saved = try (try MessagingSessions).set(slackSessionKey(meta.teamId), grant, meta.owner)
   if (!saved) {
@@ -149,7 +154,6 @@ effect function activateWorkspace(workspace: number, credentialRev: number): voi
   const notices = try Notices.Machine
   if ((try notices.get()).connected.includes(workspace)) try contained(notices.send({ type: "workspaceRemoved", workspace }), "Slack previous grant removed")
   if (ledger.workspaceMeta(workspace)?.brokered) {
-    if (!(try notices.get()).notifyAllowed) try contained(notices.send({ type: "notifyPermissionChanged", notifyAllowed: true }), "Slack subscribed notices")
     try contained(notices.send({ type: "workspaceAdded", workspace }), "Slack notices workspace added")
   }
 }
@@ -158,24 +162,30 @@ effect function wipeWorkspace(
   workspace: number,
   revokeRemote: boolean,
 ): void!!(
-  Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+  Slack | SlackLedger | MessagingSessions | MessagingNotices | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
 ) {
   const ledger = try SlackLedger
   const sessions = try MessagingSessions
   const slack = try Slack
   const meta = ledger.workspaceMeta(workspace)
   if (meta && revokeRemote) {
+    const key = slackSessionKey(meta.teamId)
     const token = tokenForWorkspace(workspace) catch () => undefined
-    try sessions.delete(slackSessionKey(meta.teamId), meta.owner)
-    if (token !== undefined) try ignore(slack.revoke(token))
+    const held = Option.getOrUndefined(try sessions.get(key, meta.owner))
+    if (held && (try authorizationOf(held)) === meta.authorizationId && (try sessions.exchange(key, held, undefined, meta.owner))) {
+      if (token !== undefined) try ignore(slack.revoke(tokenValue(held)))
+    }
   }
   try detachWorkspace(workspace)
 }
 
 effect function detachWorkspace(workspace: number): void!!(
-  SlackLedger | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+  SlackLedger | MessagingNotices | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
 ) {
-  (try SlackLedger).wipeWorkspace(workspace)
+  const ledger = try SlackLedger
+  const meta = ledger.workspaceMeta(workspace)
+  if (meta) try (try MessagingNotices).withdraw({ provider: "slack", workspace: meta.teamId, scope: try slackNoticeScope(meta) })
+  ledger.wipeWorkspace(workspace)
   try contained((try Workspaces.Machine).send({ type: "workspaceRemoved", workspace }), "Slack workspace removed")
   try contained((try Conversation.Machine).send({ type: "workspaceRevoked", workspace }), "Slack conversation workspace revoked")
   try contained((try Composer.Machine).send({ type: "workspaceRevoked", workspace }, "Device"), "Slack composer workspace revoked")
@@ -186,7 +196,7 @@ effect function detachWorkspace(workspace: number): void!!(
 effect function wipeWorkspaceFromState(
   workspace: number,
 ): void!!(
-  Auth.Machine | Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
+  Auth.Machine | Slack | SlackLedger | MessagingSessions | MessagingNotices | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine
 ) {
   const state = try (try Auth.Machine).get()
   const revokeRemote = !(state.trouble === "WorkspaceRevoked" && state.revokedWorkspace === workspace)
@@ -197,7 +207,7 @@ function carry(
   fx: Out,
 ): Job<
   Event,
-  Auth.Machine | Slack | SlackLedger | MessagingSessions | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine,
+  Auth.Machine | Slack | SlackLedger | MessagingSessions | MessagingNotices | Workspaces.Machine | Conversation.Machine | Composer.Machine | Agent.Machine | Notices.Machine,
   []
 > {
   return match (fx) {
@@ -221,6 +231,11 @@ effect function connectionsFor(binding: string | undefined) {
   const sessions = try MessagingSessions
   const ledger = try SlackLedger
   const entries: Auth.WorkspaceAuth[] = []
+  const previous = ledger.owner()
+  if (previous !== undefined && previous !== binding) {
+    const host = try MessagingNotices
+    for (const meta of ledger.workspaceMetas()) try host.withdraw({ provider: "slack", workspace: meta.teamId, scope: try slackNoticeScope(meta) })
+  }
   ledger.bindOwner(binding)
   if (binding === undefined) return [{ type: "restoreConnections", entries }] as const
   for (const key of try sessions.keys()) {
@@ -231,7 +246,7 @@ effect function connectionsFor(binding: string | undefined) {
     const valid = try Effect.option(assertSlackUserToken(tokenValue(saved)))
     if (Option.isNone(valid)) continue
     const meta = ledger.registerWorkspace(owner.teamId, owner.name, owner.ownerUserId, {
-      owner: binding, brokered: owner.brokered === true,
+      owner: binding, authorizationId: try authorizationOf(saved), brokered: owner.brokered === true,
       ...(saved.clientId === undefined ? {} : { clientId: saved.clientId }),
       ...(saved.expiresAt === undefined ? {} : { expiresAt: saved.expiresAt }),
     })
@@ -250,10 +265,25 @@ export const slackAccountChanges = started(effect {
   const auth = try Auth.Machine
   const device = try Device
   const voice = try VoiceBridge
-  const changes = Stream.merge(Stream.filter(device.visible, (shown) => shown), voice.signIns)
+  const host = try MessagingNotices
+  const changes = Stream.mergeAll([Stream.as(Stream.filter(device.visible, (shown) => shown), undefined), Stream.as(voice.signIns, undefined), host.changed], { concurrency: "unbounded" })
   try Stream.runForEach(changes, effect () => {
     const owner = try sessions.owner()
-    if (owner === ledger.owner()) return
+    if (owner === ledger.owner()) {
+      if (!owner) return
+      const state = try auth.get()
+      if (state.step !== "Idle") return
+      const active = ledger.connectedMetas(state.connected.map((grant) => grant.workspace))
+      const keys = (try sessions.keys()).filter((key) => key.startsWith("slack:"))
+      let changed = keys.length !== active.length
+      for (const meta of active) {
+        if (try holdsWorkspace(meta)) continue
+        changed = true
+        try host.withdraw({ provider: "slack", workspace: meta.teamId, scope: try slackNoticeScope(meta) })
+      }
+      if (!changed) return
+      ledger.bindOwner(undefined)
+    }
     const [event] = try connectionsFor(owner)
     if (Auth.canRestoreConnections(try auth.get(), event.entries)) try contained(auth.send(event), "switching Slack owner")
   })
