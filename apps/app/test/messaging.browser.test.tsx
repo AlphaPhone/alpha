@@ -188,10 +188,8 @@ describe("Messaging E2E", () => {
       message: "Live SSE ping from browser test",
     });
     await until(alpha, alpha.runtime, TelegramNotices.Machine, (s) => s.posts > 0);
-    await expect.element(page.getByText(/Live SSE ping from browser test/)).toBeVisible();
-    await later(alpha, 10_000);
-
-    await page.getByRole("button", { name: /^Telegram/ }).first().click();
+    await page.getByRole("button", { name: /Live SSE ping from browser test/ }).click();
+    await expect.element(page.getByRole("log", { name: "Telegram messages" }).getByText("Live SSE ping from browser test")).toBeVisible();
     await page.getByRole("button", { name: "Back to chats" }).click();
     await page.getByRole("button", { name: "Account options" }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();

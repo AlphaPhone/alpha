@@ -30,7 +30,7 @@ import {
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { ArrowLeft, Bell, BellOff, LogOut, MessageSquare, MoreVertical, RefreshCw } from "lucide-react";
-import { type ReactNode, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useState } from "react";
 import type { Machine as ChatListMachine } from "../../gen/app__telegram.effect.vibe";
 import { type Filter } from "../../gen/app__telegram.ts";
 import { useMachine as useChatList } from "../../gen/app__telegram.react.ts";
@@ -45,13 +45,13 @@ import { useMachine as useConversation } from "../../gen/app__telegram__conversa
 import { useMachine as useNotices } from "../../gen/app__telegram__notices.react.ts";
 import type { Machine as NoticesMachine } from "../../gen/app__telegram__notices.effect.vibe";
 import { MessagingNotices, type MessagingSessions, Telegram, type TelegramDialogSummary } from "../platform/index.vibe";
+import { useTelegramSnapshot } from "./Notice.tsx";
 import { openTelegramNotice } from "./notices.vibe";
 import { useTimed } from "../runtime/ui.tsx";
 import { swapComposerTarget } from "../messaging/composer.ts";
 import { untimed } from "../runtime/index.vibe";
 import { Time } from "../runtime/index.vibe";
 import {
-  type TelegramSnapshot,
   TelegramStore,
   chatKindOf,
   dialogTitle,
@@ -85,11 +85,6 @@ const QUICK_REACTION = "👍";
 
 function withStore<A>(runtime: Runtime, fn: (store: TelegramStore["Service"]) => Effect.Effect<A>): A {
   return runtime.runSync(Effect.flatMap(TelegramStore, fn));
-}
-
-function useTelegramSnapshot(runtime: Runtime): TelegramSnapshot {
-  const store = withStore(runtime, (service) => Effect.succeed(service));
-  return useSyncExternalStore((listener) => store.subscribe(listener), () => store.snapshot(), () => store.snapshot());
 }
 
 function formatUnixTime(seconds: number): string {

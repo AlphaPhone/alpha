@@ -22,6 +22,7 @@ import * as Notices from "../gen/app__telegram__notices.effect.vibe";
 import home from "../src/home/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { toasts } from "../src/notices/toasts.vibe";
+import { openTelegramNotice } from "../src/telegram/notices.vibe";
 import { browserDevice } from "../src/platform/device.vibe";
 import { browserMessagingNotices } from "../src/platform/messaging-notices.vibe";
 import { MessagingSessions, messagingSessions, secretOf } from "../src/platform/messaging.vibe";
@@ -564,7 +565,17 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     });
     await until(rt, noticeChanges, (s) => s.posts >= 1 && s.upChats.length >= 1);
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Telegram notifications"]')?.textContent).toContain("Live SSE ping from Maya"));
+    const [target] = (await rt.runPromise(TelegramStore.use((store) => store.get()))).notices;
+    await controlJson(provider.origin, "/__control/fault", { path: "/rpc/messages.getHistory", status: 503, remaining: 1 });
+    expect(await rt.runPromise(openTelegramNotice(target.scope, target.peerKey))).toBe("pending");
+    await controlJson(provider.origin, "/__control/fault", { path: "/rpc/messages.getHistory", status: 400, remaining: 1,
+      body: { ok: false, error_code: 400, error_message: "PEER_ID_INVALID" } });
     await clickRowContaining("Live SSE ping from Maya");
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Telegram notifications"]')).toBeNull());
+    expect((await rt.runPromise(Conversation.Machine.use((m) => m.get()))).chat).toBe(0);
+    await controlJson(provider.origin, "/__control/inject", { kind: "message", peer: "user:2001", from_id: 2001, text: "New available message from Maya" });
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Telegram notifications"]')?.textContent).toContain("New available message from Maya"));
+    await clickRowContaining("New available message from Maya");
     await until(rt, convChanges, (state) => state.front && state.chat > 0 && state.newestLoaded);
     const selected = await rt.runPromise(Conversation.Machine.use((machine) => machine.get()));
     expect(await rt.runPromise(TelegramStore.use((store) => store.peerKeyOf(selected.chat)))).toBe("user:2001");
@@ -641,9 +652,10 @@ describe("Telegram on a phone", () => {
     await clickButton("Verify code");
     await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "Authenticated");
     const tray = phone.messagingNotices;
-    const incoming = (id: number) => {
+    const incoming = (id: number, missingGroup = false) => {
       const date = 1_700_000_000;
-      const message = { _type: "message", id, peer_id: { _type: "peerUser", user_id: 420 }, peer_key: "user:420", from_id: 420,
+      const peer = missingGroup ? { peer_id: { _type: "peerChat", chat_id: 131 }, peer_key: "chat:131" } : { peer_id: { _type: "peerUser", user_id: 420 }, peer_key: "user:420" };
+      const message = { _type: "message", id, ...peer, from_id: 420,
         date, message: `Notice ${id}`, out: false, reactions: [], mentioned: false };
       const update = { _type: "updateNewMessage", pts: ++phone.telegram.pts, date, message };
       for (const send of phone.telegram.listeners) send(update);
@@ -654,6 +666,11 @@ describe("Telegram on a phone", () => {
     expect(tray.posted()).toEqual([]);
     await clickButton("Enable Telegram notifications");
     await untilArea(alpha, alpha.runtime, Notices.Machine, (state) => state.notifyAllowed);
+    incoming(21, true);
+    await vi.waitFor(() => expect(tray.posted().map((entry) => entry.body)).toEqual(["Notice 21"]));
+    expect(tray.tap(tray.posted()[0].token)).toBe(true);
+    await vi.waitFor(() => expect(tray.pending()).toBeUndefined());
+    expect((await alpha.runtime.runPromise(Conversation.Machine.use((machine) => machine.get()))).chat).toBe(0);
     incoming(11);
     await vi.waitFor(() => expect(tray.posted().map((entry) => entry.body)).toEqual(["Notice 11"]));
     const delivery = tray.posted()[0];

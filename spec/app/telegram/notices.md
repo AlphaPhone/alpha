@@ -134,7 +134,7 @@ pure def polled(s: Notices, ticket: int, ok: bool, point: int, incoming: Incomin
 
 ### Visible chat read withdraws posted notices for that chat, and tapping a posted notice deep-links to its chat
 
-Android taps and the notice rows in Telegram resolve the original provider peer under the active Alpha owner and verified Telegram grant. A tap from a replaced or revoked session cannot open a chat.
+Android taps and the notice rows in Telegram resolve the original provider peer under the active Alpha owner and verified Telegram grant. A tap from a replaced or revoked session cannot open a chat. If Telegram confirms the peer is unavailable, the notice is retired. A temporary network failure leaves the tap pending.
 
 ```quint
 pure def mayOpenNotice(s: Notices, chat: int, sameGrant: bool): bool =
