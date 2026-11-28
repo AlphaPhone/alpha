@@ -1,18 +1,23 @@
 package ai.alphacompute.localllm;
 
 import android.content.Context;
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
+import android.net.LocalSocketAddress;
+import android.os.Process;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.Method;
-import java.net.StandardProtocolFamily;
-import java.net.UnixDomainSocketAddress;
-import java.nio.channels.Channels;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -65,12 +70,33 @@ public final class AlphaLocalInferenceHost {
         void onDelta(String delta) throws IOException;
     }
 
+    /** Accepted client stream connection on the local inference socket. */
+    public interface ClientConnection extends Closeable {
+        /** Returns the client input stream. */
+        InputStream inputStream() throws IOException;
+        /** Returns the client output stream. */
+        OutputStream outputStream() throws IOException;
+    }
+
+    /** Bound Unix domain socket server accepting local inference connections. */
+    public interface SocketServer extends Closeable {
+        /** Accepts the next incoming client connection. */
+        ClientConnection accept() throws IOException;
+    }
+
+    /** Factory binding the Unix domain socket server (Android LocalServerSocket by default). */
+    public interface SocketServerFactory {
+        /** Binds a Unix domain socket server at {@code socketPath}. */
+        SocketServer bind(Path socketPath) throws IOException;
+    }
+
     private static final Object SINGLETON_LOCK = new Object();
     private static AlphaLocalInferenceHost sharedInstance;
 
     private final Path socketPath;
     private final AlphaLocalModelManager modelManager;
     private final NativeLlmEngine engine;
+    private final SocketServerFactory socketFactory;
     private final Object textLock = new Object();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
@@ -80,7 +106,7 @@ public final class AlphaLocalInferenceHost {
         return thread;
     });
 
-    private volatile ServerSocketChannel serverChannel;
+    private volatile SocketServer serverSocket;
     private long textContextHandle;
     private String loadedBundleDir;
     private String loadedModelId;
@@ -104,9 +130,20 @@ public final class AlphaLocalInferenceHost {
         AlphaLocalModelManager modelManager,
         NativeLlmEngine engine
     ) {
+        this(socketPath, modelManager, engine, androidSocketServerFactory());
+    }
+
+    /** Creates a local inference host with an explicit {@code socketFactory} for JVM tests. */
+    public AlphaLocalInferenceHost(
+        Path socketPath,
+        AlphaLocalModelManager modelManager,
+        NativeLlmEngine engine,
+        SocketServerFactory socketFactory
+    ) {
         this.socketPath = socketPath;
         this.modelManager = modelManager;
         this.engine = engine;
+        this.socketFactory = socketFactory;
         this.modelManager.setMemoryReleaseHook(this::unload);
     }
 
@@ -128,10 +165,9 @@ public final class AlphaLocalInferenceHost {
             Files.createDirectories(parent);
         }
         Files.deleteIfExists(socketPath);
-        ServerSocketChannel server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
-        server.bind(UnixDomainSocketAddress.of(socketPath));
+        SocketServer server = socketFactory.bind(socketPath);
         restrictSocketPermissions(socketPath);
-        serverChannel = server;
+        serverSocket = server;
         running.set(true);
         Thread acceptThread = new Thread(this::acceptLoop, "AlphaLocalLlmAccept");
         acceptThread.setDaemon(true);
@@ -142,11 +178,11 @@ public final class AlphaLocalInferenceHost {
     public synchronized void stop() {
         running.set(false);
         cancel();
-        ServerSocketChannel channel = serverChannel;
-        serverChannel = null;
-        if (channel != null) {
+        SocketServer server = serverSocket;
+        serverSocket = null;
+        if (server != null) {
             try {
-                channel.close();
+                server.close();
             } catch (IOException ignored) {
             }
         }
@@ -298,21 +334,23 @@ public final class AlphaLocalInferenceHost {
 
     private void acceptLoop() {
         while (running.get()) {
-            ServerSocketChannel server = serverChannel;
+            SocketServer server = serverSocket;
             if (server == null) break;
             try {
-                SocketChannel client = server.accept();
-                workers.execute(() -> serveClient(client));
+                ClientConnection client = server.accept();
+                if (client != null) {
+                    workers.execute(() -> serveClient(client));
+                }
             } catch (IOException stopped) {
                 if (!running.get()) break;
             }
         }
     }
 
-    private void serveClient(SocketChannel client) {
-        try (SocketChannel socket = client;
-             BufferedReader reader = new BufferedReader(new InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8));
-             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8))) {
+    private void serveClient(ClientConnection client) {
+        try (ClientConnection socket = client;
+             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.inputStream(), StandardCharsets.UTF_8));
+             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.outputStream(), StandardCharsets.UTF_8))) {
             String line;
             while (running.get() && (line = reader.readLine()) != null) {
                 if (line.isBlank()) continue;
@@ -448,6 +486,69 @@ public final class AlphaLocalInferenceHost {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
         } catch (IOException | UnsupportedOperationException ignored) {
         }
+        try {
+            Os.chmod(path.toString(), 0600);
+        } catch (ErrnoException | RuntimeException | LinkageError ignored) {
+        }
+    }
+
+    private static SocketServerFactory androidSocketServerFactory() {
+        return path -> {
+            LocalSocket bound = new LocalSocket(LocalSocket.SOCKET_STREAM);
+            boolean transferred = false;
+            try {
+                bound.bind(new LocalSocketAddress(path.toString(), LocalSocketAddress.Namespace.FILESYSTEM));
+                restrictSocketPermissions(path);
+                LocalServerSocket server = new LocalServerSocket(bound.getFileDescriptor());
+                transferred = true;
+                int ownUid = Process.myUid();
+                return new SocketServer() {
+                    @Override public ClientConnection accept() throws IOException {
+                        LocalSocket client = server.accept();
+                        try {
+                            if (client.getPeerCredentials().getUid() != ownUid) {
+                                client.close();
+                                return null;
+                            }
+                        } catch (IOException | RuntimeException ignored) {
+                        }
+                        return new ClientConnection() {
+                            @Override public InputStream inputStream() throws IOException {
+                                return client.getInputStream();
+                            }
+                            @Override public OutputStream outputStream() throws IOException {
+                                return client.getOutputStream();
+                            }
+                            @Override public void close() throws IOException {
+                                client.close();
+                            }
+                        };
+                    }
+
+                    @Override public void close() throws IOException {
+                        try {
+                            Os.shutdown(server.getFileDescriptor(), OsConstants.SHUT_RDWR);
+                        } catch (ErrnoException | RuntimeException ignored) {
+                        }
+                        try {
+                            server.close();
+                        } finally {
+                            try {
+                                bound.close();
+                            } catch (IOException ignored) {
+                            }
+                        }
+                    }
+                };
+            } finally {
+                if (!transferred) {
+                    try {
+                        bound.close();
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+        };
     }
 
     /** Reflection adapter invoking {@code ai.eliza.voice.VoiceNative} without modifying {@code .eliza/}. */

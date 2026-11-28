@@ -13,10 +13,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
-import java.net.StandardProtocolFamily;
-import java.net.UnixDomainSocketAddress;
+import java.lang.reflect.Method;
+import java.net.ProtocolFamily;
+import java.net.SocketAddress;
 import java.nio.channels.Channels;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -233,20 +236,23 @@ public final class AlphaLocalLlmTest {
                 if (step >= pieces.size()) return "{\"text\":\"\",\"done\":true,\"nout\":0}";
                 String text = pieces.get(step++);
                 boolean done = step >= pieces.size();
-                return new JSONObject().put("text", text).put("done", done).put("nout", 2).toString();
+                try {
+                    return new JSONObject().put("text", text).put("done", done).put("nout", 2).toString();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             }
             @Override public void resetStream(long streamHandle) {}
             @Override public void closeStream(long streamHandle) {}
         };
 
-        AlphaLocalInferenceHost host = new AlphaLocalInferenceHost(socketPath, manager, fakeEngine);
+        AlphaLocalInferenceHost host = new AlphaLocalInferenceHost(socketPath, manager, fakeEngine, hostUnixSocketServerFactory());
         host.start();
         try {
             assertEquals("rw-------", Files.getPosixFilePermissions(socketPath).toString().length() > 0
                 ? java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(socketPath))
                 : "");
-            try (SocketChannel client = SocketChannel.open(StandardProtocolFamily.UNIX)) {
-                client.connect(UnixDomainSocketAddress.of(socketPath));
+            try (SocketChannel client = openHostUnixClient(socketPath)) {
                 BufferedWriter out = new BufferedWriter(new OutputStreamWriter(Channels.newOutputStream(client), StandardCharsets.UTF_8));
                 BufferedReader in = new BufferedReader(new InputStreamReader(Channels.newInputStream(client), StandardCharsets.UTF_8));
 
@@ -284,6 +290,64 @@ public final class AlphaLocalLlmTest {
         } finally {
             host.stop();
         }
+    }
+
+    private static AlphaLocalInferenceHost.SocketServerFactory hostUnixSocketServerFactory() {
+        return path -> {
+            try {
+                ProtocolFamily unix = unixProtocolFamily();
+                SocketAddress address = unixDomainSocketAddress(path);
+                Method openServer = ServerSocketChannel.class.getMethod("open", ProtocolFamily.class);
+                ServerSocketChannel server = (ServerSocketChannel) openServer.invoke(null, unix);
+                server.bind(address);
+                return new AlphaLocalInferenceHost.SocketServer() {
+                    @Override public AlphaLocalInferenceHost.ClientConnection accept() throws IOException {
+                        SocketChannel client = server.accept();
+                        return new AlphaLocalInferenceHost.ClientConnection() {
+                            @Override public InputStream inputStream() {
+                                return Channels.newInputStream(client);
+                            }
+                            @Override public OutputStream outputStream() {
+                                return Channels.newOutputStream(client);
+                            }
+                            @Override public void close() throws IOException {
+                                client.close();
+                            }
+                        };
+                    }
+
+                    @Override public void close() throws IOException {
+                        server.close();
+                    }
+                };
+            } catch (ReflectiveOperationException e) {
+                throw new IOException("Host JDK Unix domain sockets unavailable", e);
+            }
+        };
+    }
+
+    private static SocketChannel openHostUnixClient(Path path) throws IOException {
+        try {
+            ProtocolFamily unix = unixProtocolFamily();
+            SocketAddress address = unixDomainSocketAddress(path);
+            Method openClient = SocketChannel.class.getMethod("open", ProtocolFamily.class);
+            SocketChannel client = (SocketChannel) openClient.invoke(null, unix);
+            client.connect(address);
+            return client;
+        } catch (ReflectiveOperationException e) {
+            throw new IOException("Host JDK Unix domain sockets unavailable", e);
+        }
+    }
+
+    private static ProtocolFamily unixProtocolFamily() throws ReflectiveOperationException {
+        Class<?> familyEnum = Class.forName("java.net.StandardProtocolFamily");
+        return (ProtocolFamily) familyEnum.getField("UNIX").get(null);
+    }
+
+    private static SocketAddress unixDomainSocketAddress(Path path) throws ReflectiveOperationException {
+        Class<?> addrClass = Class.forName("java.net.UnixDomainSocketAddress");
+        Method ofMethod = addrClass.getMethod("of", Path.class);
+        return (SocketAddress) ofMethod.invoke(null, path);
     }
 
     private static String sha256(byte[] data) throws Exception {

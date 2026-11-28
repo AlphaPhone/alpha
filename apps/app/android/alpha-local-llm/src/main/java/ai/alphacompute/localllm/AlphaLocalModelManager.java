@@ -657,7 +657,7 @@ public final class AlphaLocalModelManager {
     private void loadState() {
         if (!stateFile.isFile()) return;
         try {
-            String raw = Files.readString(stateFile.toPath(), StandardCharsets.UTF_8);
+            String raw = new String(Files.readAllBytes(stateFile.toPath()), StandardCharsets.UTF_8);
             JSONObject obj = new JSONObject(raw);
             String savedMode = obj.optString("mode", "cloud");
             String savedModel = obj.optString("activeModelId", AlphaLocalLlmCatalog.DEFAULT_MODEL_ID);
@@ -677,7 +677,7 @@ public final class AlphaLocalModelManager {
                 .put("activeModelId", activeModelId)
                 .put("activeStatus", activeStatus);
             File temp = new File(modelsRoot, "state.json.tmp");
-            Files.writeString(temp.toPath(), obj.toString(2) + "\n", StandardCharsets.UTF_8);
+            Files.write(temp.toPath(), (obj.toString(2) + "\n").getBytes(StandardCharsets.UTF_8));
             Files.move(temp.toPath(), stateFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException | JSONException ignored) {
         }
