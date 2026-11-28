@@ -258,11 +258,14 @@ describe("Messaging E2E", () => {
       team_id: "T01ALPHA",
       channel: "C02ENG",
       user: "U02MAYA",
-      text: "Hey <@U01OWNER> check the Chromium Slack SSE test",
+      text: "Hey <@U01OWNER> check the Chromium Slack mailbox test",
     });
+    await later(alpha, 5_000);
     await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => s.posts > 0);
+    await expect.element(page.getByRole("status").getByText(/check the Chromium Slack mailbox test/)).toBeVisible();
 
     await controlJson(slackOrigin, "/__control/revoke", { team_id: "T02DESIGN" });
+    await later(alpha, 5_000);
     await until(
       alpha,
       alpha.runtime,
