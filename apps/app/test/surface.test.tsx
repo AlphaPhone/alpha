@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/settings/preferences.md, "Story: Keep my preferences through a restart"; spec/app/platform/index.md, "Story: Reach the phone's native capabilities"; spec/app/control/index.md, "The kill-switch immediately revokes any active lease, clears any in-flight operation, and signals the native bridge and overlay"
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import { build } from "vite";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -43,6 +46,28 @@ underAct();
 afterEach(closeAll);
 
 describe("Multi-surface parser, mount filtering, OCR gating, and lock scoping", () => {
+  it('opens the assigned view from a compiled standalone web bundle (spec/app/shell/index.md, "Story: Move between Home and the apps")', async () => {
+    const artifact = await build({
+      configFile: false,
+      logLevel: "silent",
+      define: {
+        "import.meta.env.VITE_ALPHA_SURFACE": JSON.stringify("app"),
+        "import.meta.env.VITE_ALPHA_VIEW": JSON.stringify("Clock"),
+      },
+      build: {
+        write: false,
+        lib: { entry: resolve("src/surface.ts"), formats: ["es"], fileName: "surface" },
+      },
+    });
+    const result = Array.isArray(artifact) ? artifact[0] : artifact;
+    if (!result || !("output" in result)) throw new Error("The surface build produced no output");
+    const script = result.output.find((chunk) => chunk.type === "chunk" && chunk.isEntry);
+    if (script?.type !== "chunk") throw new Error("The surface build produced no entry module");
+    const module = "data:text/javascript;base64," + Buffer.from(script.code).toString("base64");
+    const value = execFileSync(process.execPath, ["--input-type=module", "-e",
+      "const {currentSurface} = await import(process.argv[1]); process.stdout.write(JSON.stringify(currentSurface()))", module], { encoding: "utf8" });
+    expect(JSON.parse(value)).toEqual({ mode: "app", view: "Clock" });
+  });
   // spec/app/shell/index.md, "Story: Move between Home and the apps"
   it('resolves monolith, overlay, and app surfaces with scoped locks and lean mount filtering (spec/app/shell/index.md, "Story: Move between Home and the apps")', () => {
     const monolith = parseSurface({});

@@ -55,12 +55,10 @@ export function parseSurface({ envSurface, envView, search }: SurfaceInputs): Al
 
 /** Resolve the active surface for the current page from Vite env and `location.search`. @throws {never} */
 export function currentSurface(): AlphaSurface {
-  const meta = import.meta as unknown as { readonly env?: Record<string, unknown> };
-  const env = meta.env;
-  const envSurface = env !== undefined && typeof env.VITE_ALPHA_SURFACE === "string" ? env.VITE_ALPHA_SURFACE : undefined;
-  const envView = env !== undefined && typeof env.VITE_ALPHA_VIEW === "string" ? env.VITE_ALPHA_VIEW : undefined;
+  const envSurface: unknown = import.meta.env.VITE_ALPHA_SURFACE;
+  const envView: unknown = import.meta.env.VITE_ALPHA_VIEW;
   const search = typeof location !== "undefined" ? location.search : undefined;
-  return parseSurface({ envSurface, envView, search });
+  return parseSurface({ envSurface: typeof envSurface === "string" ? envSurface : undefined, envView: typeof envView === "string" ? envView : undefined, search });
 }
 
 /** Lock key scoped to `surface` so multi-surface tabs do not contend with one another. @throws {never} */
