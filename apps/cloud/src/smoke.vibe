@@ -7,7 +7,7 @@ import { entryOf, registrationAt, statementsIn } from "./alpha.vibe"
 import { jsonOf } from "./json.ts"
 import { publicP256 } from "./keys.ts"
 
-const messagingGates = ["SlackRegistration", "SlackMailbox", "TelegramRegistration"] as const
+const messagingGates = ["SlackRegistration", "SlackMailbox", "TelegramRegistration", "SlackBrowser", "SlackBrowserReturn"] as const
 type PublicGate = Gate | typeof messagingGates[number]
 
 /** One gate's outcome: passed, or why not. */
@@ -48,9 +48,19 @@ effect function assetLinksFit(text: string, environment: Environment) {
 }
 
 /** The problem with what a gate's address answered, or undefined when it passes. */
-effect function judged(gate: PublicGate, answer: Answer, at: { readonly name: string; readonly environment: Environment; readonly signInReturn: string }) {
+effect function judged(gate: PublicGate, answer: Answer, at: { readonly name: string; readonly web: string; readonly environment: Environment; readonly signInReturn: string }) {
   const body = parsed(answer.text)
   switch (gate) {
+    case "SlackBrowser": case "SlackBrowserReturn": {
+      const entry = /<script\b[^>]*\bsrc="(\/alpha-slack-assets\/assets\/[A-Za-z0-9_.-]+\.js)"/.exec(answer.text)?.[1]
+      if (!entry || !/^text\/html\b/i.test(answer.type) || !answer.cache.includes("no-store"))
+        return "expected the uncached Slack browser document and its same-origin module"
+      const expected = gate === "SlackBrowserReturn" ? "alpha-slack-return-" : "slack-"
+      if (!entry.split("/").at(-1)?.startsWith(expected)) return "the Slack browser returned the wrong entry document"
+      const script = try fetched(HttpClientRequest.get(new URL(entry, at.web).href))
+      return typeof script !== "string" && script.status === 200 && /(?:java|ecma)script/i.test(script.type) && script.text.length > 0
+        ? undefined : "the Slack browser entry module is unavailable"
+    }
     case "SlackMailbox": return body.ok === false && body.error === "invalid_auth" && /^application\/json\b/i.test(answer.type) ? undefined : "expected the Slack mailbox to require an enrolled grant"
     case "SlackRegistration": case "TelegramRegistration": {
       if (!/^application\/json\b/i.test(answer.type) || !answer.cache.split(",").some(value => value.trim().toLowerCase() === "no-store"))
@@ -83,6 +93,8 @@ effect function judged(gate: PublicGate, answer: Answer, at: { readonly name: st
 
 function addressOf(gate: PublicGate, origins: Origins, environment: CloudEnvironment, signInReturn: string): string {
   switch (gate) {
+    case "SlackBrowser": return `${origins.web}/slack`
+    case "SlackBrowserReturn": return `${origins.web}/alpha-slack-return`
     case "SlackMailbox": return `${origins.api}/api/slack/events/read`
     case "SlackRegistration": return `${origins.api}/.well-known/alpha-slack`
     case "TelegramRegistration": return `${origins.api}/.well-known/alpha-telegram`
@@ -106,7 +118,7 @@ export effect function smoke(environment: CloudEnvironment, origins: Origins, na
     const address = addressOf(gate, origins, environment, signInReturn)
     const answer = try fetched(gate === "SlackMailbox" ? HttpClientRequest.post(address) : HttpClientRequest.get(address))
     const expected = gate === "SlackMailbox" ? 401 : 200
-    const problem = typeof answer === "string" ? answer : answer.status !== expected ? `HTTP ${answer.status}` : try judged(gate, answer, { name, environment: which, signInReturn })
+    const problem = typeof answer === "string" ? answer : answer.status !== expected ? `HTTP ${answer.status}` : try judged(gate, answer, { name, web: origins.web, environment: which, signInReturn })
     results.push({ gate, passed: problem === undefined, detail: problem ?? `HTTP ${expected}` })
   }
   return results

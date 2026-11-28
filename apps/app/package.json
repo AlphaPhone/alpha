@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "eliza-harness --ready && vite build",
+    "build:slack-web": "eliza-harness --ready && ELIZA_DEV_ALLOW_TEST_MOCKS= ALPHA_FAKES= TELEGRAM_API_ID= TELEGRAM_API_HASH= VITE_ALPHA_SURFACE=app VITE_ALPHA_VIEW=Slack vite build --mode hosted-slack --base /alpha-slack-assets/ --outDir .cache/hosted-slack --emptyOutDir",
     "typecheck": "eliza-harness --ready && vibelang --noEmit -p .",
     "test": "eliza-harness --ready && vitest run",
     "test:browser": "eliza-harness --ready && vitest run --project browser",

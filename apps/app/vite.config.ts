@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { type Plugin, defineConfig } from "vite";
 import { eliza } from "@repo/eliza-harness";
+import deployments from "@repo/deployment/deployments.json" with { type: "json" };
 import { production } from "./capacitor.config.ts";
 import { fakePhone, fakes } from "./test/fakes/serve.ts";
 import { localOcrAssets } from "./scripts/ocr-assets.ts";
@@ -93,8 +94,8 @@ function pruneSurfaceMounts(surface: AlphaSurface): Plugin {
   };
 }
 
-export default defineConfig({
-  build: { rolldownOptions: { input: ["index.html", "alpha-slack-return.html"].map((page) => fileURLToPath(new URL(page, import.meta.url))) } },
+export default defineConfig(({ mode }) => ({
+  build: { rolldownOptions: { input: [mode === "hosted-slack" ? "slack.html" : "index.html", "alpha-slack-return.html"].map((page) => fileURLToPath(new URL(page, import.meta.url))) } },
   plugins: [vibelang(), react(), tailwindcss(), guarded, localOcr(buildSurface), pruneSurfaceMounts(buildSurface), ...(faked ? [fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone")] : [eliza(), ...(phoned ? [fakePhone()] : [])])],
   /** eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page. */
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
@@ -103,7 +104,10 @@ export default defineConfig({
   // spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight": About names the version this build was made as where the phone names none.
   define: { "import.meta.env.VITE_ALPHA_VERSION": JSON.stringify(version),
     "import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN": JSON.stringify(production.cloud),
+    "import.meta.env.VITE_ALPHA_SLACK_BROWSER_APIS": JSON.stringify(mode === "hosted-slack"
+      ? Object.fromEntries([deployments.production, deployments.staging].map((row) => [`https://${row.appLinkHost}`, row.cloud]))
+      : {}),
     "import.meta.env.VITE_TELEGRAM_API_ID": JSON.stringify(process.env.TELEGRAM_API_ID ?? ""),
     "import.meta.env.VITE_TELEGRAM_API_HASH": JSON.stringify(process.env.TELEGRAM_API_HASH ?? ""),
   },
-});
+}));

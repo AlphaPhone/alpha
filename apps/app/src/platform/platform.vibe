@@ -3,13 +3,15 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Install, install, type Time, timeOver } from "../runtime/index.vibe"
 import { type Agent, agentAt, relayedAgent } from "./agent.vibe"
 import { type Cloud, cloudAt, relayedCloud } from "./cloud.vibe"
-import { allowsTestOrigin, cloudApiOrigin } from "./build.ts"
+import { allowsTestOrigin, browserCloudOrigin, cloudApiOrigin } from "./build.ts"
 import { Device, browserDevice, phoneDevice } from "./device.vibe"
+import { browserMessagingNotices } from "./messaging-notices.vibe"
+import { browserVoiceBridge } from "./voice.vibe"
 import { phoneMessagingSessions } from "./messaging-sessions.vibe"
 import { type MessagingSessions, messagingSessions } from "./messaging.vibe"
 import { type Plugins, browserPlugins, phonePlugins } from "./plugins.vibe"
 import { sharedStore } from "./sharedStore.vibe"
-import { nativeSlackHttp } from "./slack-oauth.vibe"
+import { browserSlackHttp, nativeSlackHttp } from "./slack-oauth.vibe"
 import { type Slack, slackAt } from "./slack.vibe"
 import { personalTelegram } from "./telegram-mtproto.vibe"
 import { type Telegram, telegramAt } from "./telegram.vibe"
@@ -66,13 +68,23 @@ export function pagePlatform(agent: Layer.Layer<Agent>, cloud: Layer.Layer<Cloud
   return Layer.provideMerge(grounded, Layer.provideMerge(Layer.mergeAll(browserDevice, browserVault, agent, cloud, browserPlugins, messagingLayers(messaging)), store))
 }
 
+/** The Slack client shared by the browser app and its hosted workspace page. */
+function browserSlack(origin: string) {
+  return Layer.provide(allowsTestOrigin() ? slackAt(`${origin}/slack`, `${origin}/slack`, "browser") : slackAt("https://slack.com", browserCloudOrigin(origin), "browser"), browserSlackHttp)
+}
+
+/** The hosted Slack page uses its browser tab as the session owner. */
+export function hostedSlackPlatform(origin: string) {
+  return Layer.provideMerge(Layer.mergeAll(grounded, browserVoiceBridge, browserMessagingNotices, messagingSessions, browserSlack(origin)), Layer.provideMerge(browserDevice, store))
+}
+
 /** A browser page: the agent, cloud, Slack, and Telegram at the page's own `/agent`, `/cloud`, `/slack`, and `/telegram`, which the dev server answers. */
 export function browserPlatform(origin: string): Layer.Layer<Platform> {
   return pagePlatform(
     Layer.provide(agentAt(`${origin}/agent`), FetchHttpClient.layer),
     Layer.provide(cloudAt(`${origin}/cloud`), FetchHttpClient.layer),
     {
-      slack: Layer.provide(allowsTestOrigin() ? slackAt(`${origin}/slack`) : slackAt("https://slack.com", cloudApiOrigin), FetchHttpClient.layer),
+      slack: browserSlack(origin),
       telegram: allowsTestOrigin() ? Layer.provide(telegramAt(`${origin}/telegram`), FetchHttpClient.layer) : personalTelegram,
     },
   )

@@ -4,7 +4,7 @@ import { parseProfile } from "@elizaos/cloud"
 import { cloudWorker, observeIdentity, storeLayer, type CloudBindings, type WorkerExecution, type Store } from "@elizaos/cloud-worker"
 import { dispatchSlackEvents, slackNotifications, slackRelay, type SlackBindings } from "./slack-events.vibe"
 import { pruneSlackMailbox } from "./slack-mailbox.vibe"
-import { EdgeResponse } from "./edge-platform.ts"
+import { EdgeHeaders, EdgeRequest, EdgeResponse, isSlackBrowserReturn } from "./edge-platform.ts"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
 /** The API Worker's bindings: eliza's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */
@@ -78,6 +78,26 @@ const alphaCloudWorker = {
     const bound = await bindingsOf(env)
     if (bound === undefined) return profileUnavailable()
     const path = new URL(request.url).pathname
+    const asset = path === "/slack" ? "/alpha-slack-assets/opener"
+      : isSlackBrowserReturn(path) ? "/alpha-slack-assets/return"
+      : /^\/alpha-slack-assets\/assets\/[A-Za-z0-9_@.-]+$/.test(path) ? path : undefined
+    if (asset === undefined && path.startsWith("/alpha-slack-assets/")) return new EdgeResponse(null, { status: 404 })
+    if (asset !== undefined) {
+      if (request.headers.get("x-forwarded-proto") !== "https" || !bound.WEB_ORIGIN || request.headers.get("x-forwarded-host") !== new URL(bound.WEB_ORIGIN).host)
+        return new EdgeResponse(null, { status: 404 })
+      if (request.method !== "GET" && request.method !== "HEAD") return new EdgeResponse(null, { status: 405, headers: { Allow: "GET, HEAD" } })
+      const answer = await env.ASSETS.fetch(new EdgeRequest(new URL(asset, request.url), { method: request.method, redirect: "manual" }))
+      if (!answer.ok) return new EdgeResponse(null, { status: answer.status === 404 ? 404 : 503, headers: { "Cache-Control": "no-store" } })
+      const headers = new EdgeHeaders(answer.headers)
+      headers.set("Referrer-Policy", "no-referrer")
+      headers.set("X-Content-Type-Options", "nosniff")
+      if (path !== asset) {
+        headers.set("Content-Type", "text/html; charset=utf-8")
+        headers.set("Cache-Control", "no-store")
+        headers.set("Content-Security-Policy", "frame-ancestors 'none'")
+      }
+      return new EdgeResponse(answer.body, { headers })
+    }
     if (path.startsWith("/api/slack/")) {
       const response = await serveMailbox(request, env, bound)
       if (path === "/api/slack/events" && request.method === "POST" && response.ok && execution) {

@@ -3,11 +3,17 @@ import { isTelegramApplicationId } from "@repo/deployment";
 declare global {
   interface ImportMetaEnv {
     readonly VITE_ALPHA_CLOUD_API_ORIGIN: string;
+    readonly VITE_ALPHA_SLACK_BROWSER_APIS: Readonly<Record<string, string>>;
   }
 }
 
 /** The API origin selected for the packaged phone by its build configuration. */
 export const cloudApiOrigin: string = import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN;
+
+/** Select the reviewed API paired with the browser's App Link origin. @throws {never} */
+export function browserCloudOrigin(origin: string): string {
+  return import.meta.env.VITE_ALPHA_SLACK_BROWSER_APIS?.[origin] ?? cloudApiOrigin;
+}
 
 /** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). @throws {never} */
 export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";

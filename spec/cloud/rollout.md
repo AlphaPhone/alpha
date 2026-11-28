@@ -203,6 +203,12 @@ from the Alpha Slack app with PKCE enabled. Register
 `alphaphone://slack/oauth/standalone` for the standalone Slack app. For browser
 access, also register `/alpha-slack-return` on the deployment’s `WEB_ORIGIN`,
 for example `https://cloud.alphaphone.dev/alpha-slack-return` in production.
+The owner opens `/slack` on that same web origin. The opener keeps the verifier
+and Slack user grant in memory for its tab. A separate return document removes
+the code from browser history and sends it to the waiting tab on its own
+origin. The API Worker serves these two documents and their bundled assets
+from the reviewed deployment. Native callbacks continue to use the registered
+launcher and standalone app addresses.
 An absent or malformed ID yields a retryable 503. For live workspace
 notices, the operator enables token rotation and the Slack Events API, subscribes
 on behalf of users to `message.channels`, `message.groups`, `message.im` and
@@ -257,9 +263,12 @@ pure def bindingsRepeatTheProfile(bindings: Bindings, api: str, web: str, databa
 
 The web host Worker answers its own health and hands every other address of
 its origin to the API Worker of its environment, through a service binding;
-the API Worker serves the asset links and eliza's return pages.
+the API Worker serves the asset links and eliza's return pages. For the Slack
+browser consent return the web host omits the query when forwarding the static
+document request. The browser itself retains the state and result until that
+document delivers them to the opener.
 
-### The web host answers its own health, hands each other https address of its own origin, without credentials, to the same path and query on the API origin, and refuses every other address
+### The web host answers its own health, hands each other https address of its own origin, without credentials, to the same path on the API origin, preserves the query except for the in-page Slack consent return, and refuses every other address
 
 ```quint
 type Route = Health | Forward | NotFound
@@ -312,6 +321,7 @@ It reads both of the phone's public registration endpoints and checks for
 uncached JSON, Slack's OAuth client ID and live event configuration, and
 Telegram's numeric application ID. It also asks the Slack mailbox for events
 without a credential and verifies that the running relay requires a grant.
+It fetches the Slack browser opener, its return document and their entry modules on the web host.
 It reports each result independently.
 Account consent is checked on the phone.
 

@@ -417,7 +417,20 @@ describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "St
     const answer = try tryPromise(() => alphaCloudWorker.fetch(new EdgeRequest("https://api.alphaphone.dev/api/health"), env))
     try holds(() => assert.deepStrictEqual([answer.status, answer.headers.get("retry-after")], [503, "30"]))
     const registration = new EdgeRequest("https://api.alphaphone.dev/.well-known/alpha-slack")
-    const ready = { ...env, ASSETS: holding(profile) }
+    const origin = "https://cloud.alphaphone.dev"
+    const apiOrigin = "https://api.alphaphone.dev"
+    const browserAssets = new Map([
+      ["/alpha-slack-assets/opener", '<script type="module" src="/alpha-slack-assets/assets/slack-example.js"></script>'],
+      ["/alpha-slack-assets/return", '<script type="module" src="/alpha-slack-assets/assets/alpha-slack-return-example.js"></script>'],
+    ])
+    const ready = { ...env, WEB_ORIGIN: origin, PUBLIC_API_ORIGIN: apiOrigin, ASSETS: { fetch: (request: Request) => {
+      const path = new URL(request.url).pathname
+      const document = browserAssets.get(path)
+      if (document !== undefined) return Promise.resolve(new EdgeResponse(document))
+      if (path === "/alpha-slack-assets/assets/slack-example.js" || path === "/alpha-slack-assets/assets/alpha-slack-return-example.js")
+        return Promise.resolve(new EdgeResponse("export {};", { headers: { "Content-Type": "text/javascript" } }))
+      return holding(profile).fetch(request)
+    } } }
     const telegram = new EdgeRequest("https://api.alphaphone.dev/.well-known/alpha-telegram")
     const absentTelegram = try tryPromise(() => alphaCloudWorker.fetch(telegram, ready))
     const registeredTelegram = try tryPromise(() => alphaCloudWorker.fetch(telegram, { ...ready, TELEGRAM_API_ID: "2147483647" }))
@@ -428,7 +441,13 @@ describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "St
     const body = try tryPromise(() => published.json())
     try holds(() => assert.deepStrictEqual([missing.status, published.status, body], [503, 200, { clientId: "123.456" }]))
     const registrations = (bindings: typeof ready) => {
-      const reach: typeof fetch = (input, init) => alphaCloudWorker.fetch(new EdgeRequest(input, init), bindings)
+      const api = { fetch: (request: Request) => alphaCloudWorker.fetch(request, bindings) }
+      const reach: typeof fetch = (input, init) => {
+        const request = new EdgeRequest(input, init)
+        return new URL(request.url).origin === origin
+          ? edgeWorker.fetch(request, { CLOUD_ENVIRONMENT: "production", WEB_ORIGIN: origin, PUBLIC_API_ORIGIN: apiOrigin, API: api })
+          : api.fetch(request)
+      }
       return smoke("production", { api: "https://api.alphaphone.dev", web: "https://cloud.alphaphone.dev" }, "Alpha Cloud", "messaging")
         |> Effect.provide(%, FetchHttpClient.layer) |> Effect.provideService(%, FetchHttpClient.Fetch, reach)
     }
@@ -436,10 +455,10 @@ describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "St
     try holds(() => assert.deepStrictEqual(invalidId.find(gate => gate.gate === "TelegramRegistration"), { gate: "TelegramRegistration", passed: false, detail: "HTTP 503" }))
     const offline = try registrations(ready)
     const partial = try registrations({ ...ready, SLACK_CLIENT_ID: "123.456", TELEGRAM_API_ID: "1234" })
-    const disconnectedMailbox = try registrations({ ...ready, ...receiverEnv, TELEGRAM_API_ID: "1234" })
-    try holds(() => assert.deepStrictEqual(offline.map(gate => [gate.gate, gate.passed, gate.detail]), [["SlackRegistration", false, "HTTP 503"], ["SlackMailbox", false, "HTTP 503"], ["TelegramRegistration", false, "HTTP 503"]]))
-    try holds(() => assert.deepStrictEqual(partial.map(gate => gate.passed), [false, false, true]))
-    try holds(() => assert.deepStrictEqual(disconnectedMailbox.map(gate => gate.passed), [true, false, true]))
+    const disconnectedMailbox = try registrations({ ...ready, ...receiverEnv, WEB_ORIGIN: origin, TELEGRAM_API_ID: "1234" })
+    try holds(() => assert.deepStrictEqual(offline.map(gate => [gate.gate, gate.passed, gate.detail]), [["SlackRegistration", false, "HTTP 503"], ["SlackMailbox", false, "HTTP 503"], ["TelegramRegistration", false, "HTTP 503"], ["SlackBrowser", true, "HTTP 200"], ["SlackBrowserReturn", true, "HTTP 200"]]))
+    try holds(() => assert.deepStrictEqual(partial.map(gate => gate.passed), [false, false, true, true, true]))
+    try holds(() => assert.deepStrictEqual(disconnectedMailbox.map(gate => gate.passed), [true, false, true, true, true]))
   })
 })
 
@@ -514,6 +533,8 @@ describe(`The web host returns the owner to the app (spec/cloud/rollout.md, "Sto
   it.effect("hands its own addresses to the API Worker as the web host, answers its health, and refuses every other address", () => effect {
     const routeOf = (address: string) => edgeRouteOf(new URL(address), env)
     const signIn = routeOf("https://cloud.alphaphone.dev/alphaphone/auth/callback?state=x")
+    const slackReturn = routeOf("https://cloud.alphaphone.dev/alpha-slack-return?state=private-state&code=single-use-code")
+    try holds(() => assert.deepStrictEqual([slackReturn.route, slackReturn.target?.href], ["Forward", "https://api.alphaphone.dev/alpha-slack-return"]))
     try holds(() => assert.deepStrictEqual([signIn.route, signIn.target?.href], ["Forward", "https://api.alphaphone.dev/alphaphone/auth/callback?state=x"]))
     try holds(() => assert.deepStrictEqual(["https://cloud.alphaphone.dev/health", "https://other.alphaphone.dev/x", "http://cloud.alphaphone.dev/x", "https://user:pass@cloud.alphaphone.dev/"].map((address) => routeOf(address).route), ["Health", "NotFound", "NotFound", "NotFound"]))
     const seen: string[] = []

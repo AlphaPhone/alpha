@@ -361,6 +361,20 @@
         "storybook-static/**"
       ]
     },
+    "@repo/cloud#build:pages": {
+      "dependsOn": ["@repo/app#build:slack-web"],
+      "inputs": ["pack-pages.ts", "package.json", "$TURBO_ROOT$/eliza.lock.json"],
+      "outputs": [".cache/public-pages/**"]
+    },
+    "@repo/cloud#build": {
+      "dependsOn": ["gen", "//#gen", "^build", "build:pages"],
+      "outputs": ["dist/**"]
+    },
+    "@repo/app#build:slack-web": {
+      "dependsOn": ["//#gen", "@repo/design-system#build", "@repo/eliza-harness#build", "@repo/ui#gen"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/eliza.lock.json"],
+      "outputs": [".cache/hosted-slack/**"]
+    },
     "@repo/app#typecheck": {
       "dependsOn": [
         "gen",
