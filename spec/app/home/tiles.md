@@ -53,23 +53,19 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
 
-Home holds Alpha's sixteen default apps — including Telegram, Slack and
-Wallet — in Home order. Clock and Reminders stay off Home until the owner
-adds them through Add to Home.
+Home starts with every Alpha app this phone admits in Home order. Clock
+opens alarms and timers, and Reminders has its own tile beside Clock.
 
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera,
-  S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
-
-pure val homeCatalog: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera,
-  S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings,
-  S::Clock, S::Reminders)
+  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Clock, S::Reminders,
+  S::Browser, S::Camera, S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows,
+  S::Wallet, S::Settings)
 
 pure val defaults: List[Tile] = List(
   Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Telegram }),
-  Own({ view: S::Slack }), Own({ view: S::Calendar }), Own({ view: S::Browser }), Own({ view: S::Camera }),
+  Own({ view: S::Slack }), Own({ view: S::Calendar }), Own({ view: S::Clock }), Own({ view: S::Reminders }),
+  Own({ view: S::Browser }), Own({ view: S::Camera }),
   Own({ view: S::Photos }), Own({ view: S::Maps }), Own({ view: S::Notes }), Own({ view: S::Contacts }),
   Own({ view: S::Files }), Own({ view: S::Workflows }), Own({ view: S::Wallet }), Own({ view: S::Settings }))
 
@@ -87,14 +83,8 @@ pure def lawTheDefaultsAreHomeOrder(i: int): bool =
   defaults.length() == homeOrder.length()
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
 
-pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(i: int): bool =
-  homeCatalog.length() == homeOrder.length() + 2
-    and homeOrder.includes(S::Telegram)
-    and homeOrder.includes(S::Slack)
-    and homeOrder.includes(S::Wallet)
-    and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Clock
-    and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Reminders
-    and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
+pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(view: S::View): bool =
+  homeOrder.includes(view)
 ```
 
 ### What the simulator tries

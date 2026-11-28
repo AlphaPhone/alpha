@@ -39,8 +39,8 @@ const pulled = (startY = 68, dx = 0) => drawn(() => {
   zone?.dispatchEvent(pointer("pointerdown", 100, startY));
   zone?.dispatchEvent(pointer("pointerup", 100 + dx, startY + 80));
 });
-const alphaApps = ["view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
-const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
+const alphaApps = ["view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
+const homeOrder = ["view:Phone", "view:Messages", "view:Inbox", "view:Telegram", "view:Slack", "view:Calendar", "view:Clock", "view:Reminders", "view:Browser", "view:Camera", "view:Photos", "view:Maps", "view:Notes", "view:Contacts", "view:Files", "view:Workflows", "view:Wallet", "view:Settings"];
 const holdingHome = (world: Scene) => {
   world.settings.roles = world.settings.roles.map((role) => role.role === "home" ? { ...role, held: true, holders: ["ai.alphacompute.alphaphone"] } : role);
   return world;
@@ -96,19 +96,24 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed");
     expect(tiles()).toEqual(alphaApps.filter((tile) => tile !== "view:Notes"));
 
+    await press("Remove Clock");
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
+    await press("Remove Reminders");
+    await until(alpha, homes, Home.Machine, (h) => h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 3);
+
     // spec/app/home/index.md, "While editing, Add to Home lists Alpha's own apps that this phone admits and Home does not hold, and opens only if there is one"
     await press("Add to Home");
     await until(alpha, homes, Home.Machine, (h) => h.adding);
     await vi.waitFor(() => expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Add to Home"));
     await press("Notes");
-    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 2);
+    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
     expect(tiles().at(-1)).toBe("view:Notes");
-    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists": Clock and Reminders start off Home until added.
+    // spec/app/home/index.md, "Add to Home adds one of Alpha's own apps it lists"
     await press("Clock");
-    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 3);
+    await until(alpha, homes, Home.Machine, (h) => h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 5);
     await press("Reminders");
     // spec/app/home/index.md, "Add to Home closes once there is nothing left to add"
-    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 4);
+    await until(alpha, homes, Home.Machine, (h) => !h.adding && h.tiles.save.outcome === "Confirmed" && h.tiles.save.id === 6);
     const added = ["view:Notes", "view:Clock", "view:Reminders"];
     expect(tiles().slice(-added.length)).toEqual(added);
 
@@ -132,7 +137,7 @@ describe("Home on a phone", () => {
     await second.close();
     const third = await open({ ...world, image: true }, only("home"));
     await until(third.alpha, home.runtime(third.alpha), Home.Machine, (h) => h.tiles.load.status === "Loaded" && h.tiles.load.ticket === 3);
-    expect(tiles()).toEqual([...homeOrder.filter((tile) => tile !== "view:Notes"), ...added]);
+    expect(tiles()).toEqual([...homeOrder.filter((tile) => !added.includes(tile)), ...added]);
 
     // spec/app/home/tiles.md, "What was saved comes back as it was saved, an empty Home included; with no record Home shows its defaults"
     await third.close();
@@ -355,6 +360,7 @@ describe("Home on a phone", () => {
 
     await press("Telegram");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Telegram");
+    await vi.waitFor(() => expect(document.querySelector<HTMLAnchorElement>('a[href="https://web.telegram.org/a/"]')?.href).toBe("https://web.telegram.org/a/"));
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
     await press("Wallet");
