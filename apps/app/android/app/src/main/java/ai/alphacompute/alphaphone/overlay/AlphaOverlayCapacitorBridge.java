@@ -1,7 +1,9 @@
 package ai.alphacompute.alphaphone.overlay;
 
 import ai.alphacompute.alphaphone.AlphaCorePluginDispatch;
+import ai.alphacompute.alphaphone.AlphaCoreSignInHost;
 import ai.alphacompute.alphaphone.AlphaCoreSpeechHost;
+import ai.alphacompute.alphaphone.BillingReturn;
 import ai.alphacompute.alphaphone.BuildConfig;
 import ai.alphacompute.alphaphone.ipc.AlphaContextRegistryService;
 import ai.alphacompute.alphaphone.ipc.AlphaPreferencesProvider;
@@ -78,6 +80,8 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
     });
     private final AutoCloseable statusObserver;
     private final AutoCloseable signInObserver;
+    private final AutoCloseable signInHostObserver;
+    private final AutoCloseable billingReturnObserver;
     private final AutoCloseable callStateWatch;
     private final ContentObserver preferencesObserver;
     private volatile boolean closed;
@@ -102,6 +106,14 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
         this.signInObserver = AlphaCorePluginDispatch.observeSignIn(appContext, receipt ->
             emitPluginEvent("ElizaSignIn", "signInSettled", receipt)
         );
+        this.signInHostObserver = AlphaCoreSignInHost.shared(appContext).subscribe((eventName, data) ->
+            emitPluginEvent("ElizaSignIn", eventName, data)
+        );
+        this.billingReturnObserver = BillingReturn.subscribe(sessionId -> {
+            if (!closed) {
+                scriptSink.accept("window.dispatchEvent(new Event('alpha-billing-return'))");
+            }
+        });
         this.callStateWatch = AlphaCorePluginDispatch.watchCallState(appContext, state ->
             emitPluginEvent("AlphaCallState", "callState", state)
         );
@@ -182,7 +194,36 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
             + "  ]},"
             + "  { name: 'ElizaSignIn', methods: ["
             + "   { name: 'status', rtype: 'promise' }, { name: 'serviceInfo', rtype: 'promise' },"
-            + "   { name: 'openSignIn', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "   { name: 'startEmail', rtype: 'promise' }, { name: 'startPhone', rtype: 'promise' },"
+            + "   { name: 'startGoogle', rtype: 'promise' }, { name: 'reauthenticate', rtype: 'promise' },"
+            + "   { name: 'upgradeMailLease', rtype: 'promise' }, { name: 'cancelMailLeaseUpgrade', rtype: 'promise' },"
+            + "   { name: 'resend', rtype: 'promise' }, { name: 'verify', rtype: 'promise' },"
+            + "   { name: 'sendFactorCode', rtype: 'promise' }, { name: 'cancel', rtype: 'promise' },"
+            + "   { name: 'signOut', rtype: 'promise' }, { name: 'openSignIn', rtype: 'promise' },"
+            + "   { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaLocalLlm', methods: ["
+            + "   { name: 'catalog', rtype: 'promise' }, { name: 'status', rtype: 'promise' },"
+            + "   { name: 'download', rtype: 'promise' }, { name: 'cancelDownload', rtype: 'promise' },"
+            + "   { name: 'activate', rtype: 'promise' }, { name: 'unload', rtype: 'promise' },"
+            + "   { name: 'delete', rtype: 'promise' }, { name: 'generate', rtype: 'promise' },"
+            + "   { name: 'setMode', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaCarrierSetup', methods: ["
+            + "   { name: 'read', rtype: 'promise' }, { name: 'readEid', rtype: 'promise' },"
+            + "   { name: 'openSettings', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaInboxNotices', methods: ["
+            + "   { name: 'configure', rtype: 'promise' }, { name: 'withdraw', rtype: 'promise' },"
+            + "   { name: 'status', rtype: 'promise' }, { name: 'pending', rtype: 'promise' },"
+            + "   { name: 'consume', rtype: 'promise' }, { name: 'releaseQuestion', rtype: 'promise' },"
+            + "   { name: 'notificationSettings', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaHostedDigestDelivery', methods: ["
+            + "   { name: 'read', rtype: 'promise' }, { name: 'syncManual', rtype: 'promise' },"
+            + "   { name: 'setBackground', rtype: 'promise' }, { name: 'enableNotifications', rtype: 'promise' },"
+            + "   { name: 'peekNotice', rtype: 'promise' }, { name: 'settleNotice', rtype: 'promise' },"
+            + "   { name: 'addListener' }, { name: 'removeListener' }"
             + "  ]},"
             + "  { name: 'AlphaPreferences', methods: ["
             + "   { name: 'get', rtype: 'promise' }, { name: 'set', rtype: 'promise' },"
@@ -247,7 +288,9 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
             + "  { name: 'ElizaActionJournal', methods: ["
             + "   { name: 'reserve', rtype: 'promise' }, { name: 'markApplying', rtype: 'promise' },"
             + "   { name: 'finish', rtype: 'promise' }, { name: 'get', rtype: 'promise' },"
-            + "   { name: 'list', rtype: 'promise' }, { name: 'edit', rtype: 'promise' }"
+            + "   { name: 'list', rtype: 'promise' }, { name: 'edit', rtype: 'promise' },"
+            + "   { name: 'pending', rtype: 'promise' }, { name: 'undo', rtype: 'promise' },"
+            + "   { name: 'dismiss', rtype: 'promise' }, { name: 'telephonyDeletionReceipt', rtype: 'promise' }"
             + "  ]},"
             + "  { name: 'ElizaNotifications', methods: ["
             + "   { name: 'workflowPresentationCapabilities', rtype: 'promise' }, { name: 'status', rtype: 'promise' },"
@@ -357,6 +400,14 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
         }
         try {
             signInObserver.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            signInHostObserver.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            billingReturnObserver.close();
         } catch (Exception ignored) {
         }
         try {

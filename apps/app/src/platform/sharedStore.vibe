@@ -8,6 +8,8 @@ export const SHARED_PREFERENCE_KEYS = [
   "alpha.preferences",
   "alpha.textScale",
   "alpha.install",
+  "alpha.aiMode",
+  "alpha.localModel",
 ] as const
 
 /** Earlier read-only migration keys resolved through `AlphaPreferences` when present. */

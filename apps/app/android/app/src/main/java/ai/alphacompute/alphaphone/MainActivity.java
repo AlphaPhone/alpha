@@ -52,6 +52,23 @@ public class MainActivity extends BridgeActivity {
  private record TextAsk(int ticket, boolean returnExternally) {}
  private record OfferedAsk(String nonce, TextAsk visit) {}
 
+ static boolean isLive() {
+  MainActivity live = livePage.get();
+  return live != null && !live.isFinishing() && !live.isDestroyed();
+ }
+
+ static void notifyBillingReturn() {
+  MainActivity live = livePage.get();
+  if (live == null || live.isFinishing() || live.isDestroyed()) return;
+  live.runOnUiThread(() -> {
+   if (live.getBridge() == null) return;
+   WebView billingView = live.getBridge().getWebView();
+   if (billingView != null) {
+    billingView.evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
+   }
+  });
+ }
+
  static void openTextAsk(Activity source) {
   MainActivity live = livePage.get();
   boolean alreadyVisible = live != null && !live.isFinishing() && !live.isDestroyed()
@@ -180,6 +197,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
+  registerPlugin(ai.alphacompute.localllm.AlphaLocalLlmPlugin.class);
   registerPlugin(ai.alphacompute.alphaphone.overlay.AlphaOverlayHostPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
   telephonyAdmitted = image;

@@ -5,6 +5,7 @@ import { captureReviewedDraft, MediaHandoff, stageAttachment, stageTranscript } 
 import { readPage, stopPage } from "./assistant/read-aloud.vibe";
 import { executeMedia } from "./assistant/media-executors.ts";
 import { FileContext } from "./assistant/file-context.vibe";
+import { MapsContext } from "./assistant/maps-context.vibe";
 import { Machine as Shell, showing } from "../gen/app__shell.effect.vibe";
 import type { View } from "../gen/app__shell.ts";
 import { Machine as Layers, pageInert } from "../gen/app__shell__layers.effect.vibe";
@@ -227,6 +228,12 @@ function crossAreaLayers(getAlpha: () => Alpha) {
       }).pipe(Effect.orElseSucceed(() => false));
     }),
   });
+  const mapsContext = Layer.succeed(MapsContext, {
+    selected: () => Effect.tryPromise(async (signal) => {
+      const [{ default: maps }, { mapsSelected }] = await Promise.all([import("./maps/index.tsx"), import("./maps/agent.vibe")]);
+      return maps.runtime(getAlpha()).runPromise(mapsSelected(), { signal });
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  });
   const inboxCard = Layer.succeed(InboxCardEntry, {
     prepare: () => Effect.tryPromise(async (signal) => {
       const [{ default: inbox }, { prepareInboxCardEntry }] = await Promise.all([import("./inbox/index.tsx"), import("./inbox/message.vibe")]);
@@ -247,7 +254,7 @@ function crossAreaLayers(getAlpha: () => Alpha) {
       await calendar.runtime(getAlpha()).runPromise(relistRequests);
     }).pipe(Effect.orElseSucceed(() => undefined)),
   });
-  return Layer.mergeAll(media, executors, fileContext, downloads, agentPages, inboxLinks, inboxCard, scans, calendarReviews);
+  return Layer.mergeAll(media, executors, fileContext, mapsContext, downloads, agentPages, inboxLinks, inboxCard, scans, calendarReviews);
 }
 
 /**
@@ -278,6 +285,7 @@ export function boot(platform: Layer.Layer<Platform>, mounts: readonly Mount[] =
     verify: (code) => Effect.suspend(() => signedIn().verify(code)),
     resend: () => Effect.suspend(() => signedIn().resend()),
     back: () => Effect.suspend(() => signedIn().back()),
+    useLocalMode: () => Effect.suspend(() => signedIn().useLocalMode()),
   });
   const signIn = Layer.tap(startupSignIn(requireNativeSignIn), (context) => Effect.sync(() => { builtSignIn = Context.get(context, StartupSignIn); }));
   const startup = Layer.provideMerge(startupAccessLifecycle(requireNativeSignIn), Layer.provideMerge(signIn, Layer.provideMerge(resident, lateSignIn)));

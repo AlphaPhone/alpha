@@ -4,9 +4,14 @@ import ai.alphacompute.alphaphone.overlay.AlphaOverlayHostPlugin;
 import ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionService;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
+import ai.alphacompute.localllm.AlphaLocalLlmPlugin;
+import ai.alphacompute.localllm.AlphaLocalModelManager;
 import ai.eliza.os.agent.AgentConfig;
 import ai.eliza.plugins.actionjournal.ActionJournal;
 import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
+import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionCoordinator;
+import ai.eliza.plugins.actionjournal.deletion.DeferredDeletionJournal;
+import ai.eliza.plugins.notifications.MailHistoryReconciliation;
 import ai.eliza.plugins.notifications.NotificationMirrorPolicy;
 import ai.eliza.plugins.securestore.nativeonly.SecureSlotPolicy.Caller;
 import ai.eliza.plugins.securestore.nativeonly.SecureSlotPolicy.ExchangeOutcome;
@@ -39,16 +44,26 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
+import android.telephony.euicc.EuiccManager;
 import android.view.accessibility.AccessibilityManager;
 import android.view.autofill.AutofillManager;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -60,6 +75,8 @@ import org.json.JSONObject;
 public final class AlphaCorePluginDispatch {
     private static final String CAPACITOR_CONFIG = "capacitor.config.json";
     private static final double MAX_REVISION = 9_007_199_254_740_991d;
+    private static final long SYNC_DISPATCH_TIMEOUT_MS = 25_000L;
+    private static final Pattern DELETION_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
 
     private AlphaCorePluginDispatch() {}
 
@@ -217,38 +234,50 @@ public final class AlphaCorePluginDispatch {
         } catch (JSONException malformed) {
             options = new JSONObject();
         }
-        JSONObject envelope = new JSONObject();
-        boolean[] settled = { false };
-        dispatch(
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        boolean handled = dispatch(
             context,
             policy,
             pluginName,
             method,
             options,
             data -> {
-                settled[0] = true;
+                JSONObject envelope = new JSONObject();
                 try {
                     envelope.put("ok", true).put("result", data == null ? new JSONObject() : data);
                 } catch (JSONException ignored) {
                 }
+                pending.complete(envelope.toString());
             },
             (code, message) -> {
-                settled[0] = true;
+                JSONObject envelope = new JSONObject();
                 try {
                     envelope.put("ok", false)
                         .put("error", code == null ? "ERROR" : code)
                         .put("message", message == null ? "Plugin call failed" : message);
                 } catch (JSONException ignored) {
                 }
+                pending.complete(envelope.toString());
             }
         );
-        if (!settled[0]) {
+        if (!handled) {
+            JSONObject envelope = new JSONObject();
             try {
                 envelope.put("ok", false).put("error", "UNIMPLEMENTED").put("message", "Unsupported plugin call");
             } catch (JSONException ignored) {
             }
+            return envelope.toString();
         }
-        return envelope.toString();
+        try {
+            return pending.get(SYNC_DISPATCH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (Exception timedOut) {
+            JSONObject envelope = new JSONObject();
+            try {
+                envelope.put("ok", false).put("error", "TIMEOUT").put("message", "Plugin call timed out");
+            } catch (JSONException ignored) {
+            }
+            return envelope.toString();
+        }
     }
 
     /** Routes a non-streaming AlphaCore plugin call directly in-process. */
@@ -265,7 +294,21 @@ public final class AlphaCorePluginDispatch {
         JSONObject args = options == null ? new JSONObject() : options;
         switch (pluginName) {
             case "ElizaSignIn" -> {
-                handleSignIn(appContext, method, resolve, reject);
+                AlphaCoreSignInHost.shared(appContext).dispatch(
+                    AlphaIpcContract.CORE_PACKAGE,
+                    method,
+                    args,
+                    resolve,
+                    reject
+                );
+                return true;
+            }
+            case "AlphaLocalLlm" -> {
+                handleLocalLlm(appContext, method, args, resolve, reject);
+                return true;
+            }
+            case "AlphaCarrierSetup" -> {
+                handleCarrierSetup(appContext, method, args, resolve, reject);
                 return true;
             }
             case "ElizaCloud" -> {
@@ -320,7 +363,7 @@ public final class AlphaCorePluginDispatch {
                 return true;
             }
             case "AlphaHostedDigestDelivery" -> {
-                handleHostedDigestDelivery(method, args, resolve, reject);
+                handleHostedDigestDelivery(appContext, method, args, resolve, reject);
                 return true;
             }
             case "AlphaInboxNotices" -> {
@@ -337,30 +380,23 @@ public final class AlphaCorePluginDispatch {
         }
     }
 
-    private static void handleSignIn(
+    private static void handleLocalLlm(
         Context context,
         String method,
+        JSONObject options,
         Consumer<JSONObject> resolve,
         BiConsumer<String, String> reject
     ) {
-        if ("status".equals(method)) {
-            resolve.accept(signInStatus(context));
-            return;
+        try {
+            resolve.accept(AlphaLocalLlmPlugin.invoke(context, method, options));
+        } catch (AlphaLocalModelManager.ModelRefusedException refused) {
+            reject.accept(refused.code, refused.getMessage());
+        } catch (IOException | JSONException failed) {
+            reject.accept(
+                "LOCAL_LLM_FAILED",
+                failed.getMessage() == null ? "Local LLM operation failed" : failed.getMessage()
+            );
         }
-        if ("serviceInfo".equals(method)) {
-            resolve.accept(signInServiceInfo());
-            return;
-        }
-        if ("openSignIn".equals(method)) {
-            try {
-                context.startActivity(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                resolve.accept(jsonPair("opened", true));
-            } catch (RuntimeException unavailable) {
-                reject.accept("UNAVAILABLE", "Sign-in activity unavailable");
-            }
-            return;
-        }
-        reject.accept("RequiresCoreActivity", "Interactive sign-in runs inside AlphaCore");
     }
 
     private static void handleCloudOpenExternal(
@@ -376,6 +412,7 @@ public final class AlphaCorePluginDispatch {
             reject.accept("link-refused", "link-refused");
             return;
         }
+        BillingReturn.recordCheckoutCaller(AlphaIpcContract.CORE_PACKAGE);
         Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url))
             .addCategory(Intent.CATEGORY_BROWSABLE)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -753,11 +790,54 @@ public final class AlphaCorePluginDispatch {
                     );
                     resolve.accept(jsonPair("kept", kept));
                 }
+                case "pending" -> {
+                    DeferredDeletionCoordinator deletions = requireTelephonyDeletions(context);
+                    resolve.accept(deletions.pendingWithOrigins());
+                }
+                case "undo" -> {
+                    DeferredDeletionCoordinator deletions = requireTelephonyDeletions(context);
+                    resolve.accept(deletions.undo(options.optString("kind", null), options.optString("id", null)));
+                }
+                case "dismiss" -> {
+                    DeferredDeletionCoordinator deletions = requireTelephonyDeletions(context);
+                    resolve.accept(deletions.dismiss(options.optString("kind", null), options.optString("id", null)));
+                }
+                case "telephonyDeletionReceipt" -> {
+                    String kind = options.optString("kind", "");
+                    String id = options.optString("id", "");
+                    if (!("message".equals(kind) || "voicemail".equals(kind) || "contact".equals(kind))
+                        || !DELETION_ID.matcher(id).matches()) {
+                        reject.accept("INVALID", "Invalid telephony deletion identity");
+                        return;
+                    }
+                    DeferredDeletionCoordinator coordinator = requireTelephonyDeletions(context);
+                    JSONObject row = coordinator.receipt(kind, id);
+                    if (row == null || !DeferredDeletionJournal.same(row.getJSONObject("owner"), coordinator.manualOwner())) {
+                        resolve.accept(new JSONObject());
+                        return;
+                    }
+                    String phase = row.getString("phase");
+                    JSONObject reply = switch (phase) {
+                        case "deleted", "undone", "conflict", "unknown" -> new JSONObject()
+                            .put("kind", kind)
+                            .put("id", id)
+                            .put("phase", phase);
+                        default -> new JSONObject();
+                    };
+                    resolve.accept(reply);
+                }
                 default -> reject.accept("UNIMPLEMENTED", "Unsupported ElizaActionJournal method: " + method);
             }
         } catch (Exception failed) {
             reject.accept("FAILED", "Action journal unavailable or transition rejected");
         }
+    }
+
+    private static DeferredDeletionCoordinator requireTelephonyDeletions(Context context) {
+        if (!AlphaImageCapability.verified(context) || !AlphaAssistActivity.unlocked(context)) {
+            throw new SecurityException("Open and unlock Alpha to review pending deletions.");
+        }
+        return AlphaTelephonyDeletions.get(context);
     }
 
     private static void handleNotifications(
@@ -985,6 +1065,7 @@ public final class AlphaCorePluginDispatch {
     }
 
     private static void handleHostedDigestDelivery(
+        Context context,
         String method,
         JSONObject options,
         Consumer<JSONObject> resolve,
@@ -1023,6 +1104,27 @@ public final class AlphaCorePluginDispatch {
                     delivery.setBackground(enabled, lease);
                     resolve.accept(new JSONObject());
                 }
+                case "enableNotifications" -> {
+                    if (!AlphaAssistActivity.unlocked(context)) {
+                        reject.accept("LOCKED", "Unlock Alpha to open digest notification settings");
+                        return;
+                    }
+                    String lease = options.optString("lease", "");
+                    if (!lease.matches("[a-f0-9-]{36}")) {
+                        reject.accept("INVALID", "Invalid digest view");
+                        return;
+                    }
+                    delivery.admitted(lease).check();
+                    boolean granted = Build.VERSION.SDK_INT < 33
+                        || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+                    Intent intent = new Intent(granted ? Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS : Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (granted) intent.putExtra(Settings.EXTRA_CHANNEL_ID, HostedDigestNotices.CHANNEL);
+                    context.startActivity(intent);
+                    delivery.refreshNotices();
+                    resolve.accept(new JSONObject());
+                }
                 case "settleNotice" -> {
                     String token = options.optString("token", "");
                     if (!token.matches("[a-f0-9-]{36}")) {
@@ -1054,10 +1156,67 @@ public final class AlphaCorePluginDispatch {
     ) {
         try {
             InboxNoticeDelivery inbox = InboxNoticeDelivery.get(context);
+            MailHistoryReconciliation.Guard unlockedGuard = () -> {
+                if (!AlphaAssistActivity.unlocked(context)) {
+                    throw new SecurityException("Unlock Alpha to manage Inbox notices");
+                }
+            };
             switch (method) {
                 case "status" -> resolve.accept(inbox.delivery.status().put("notificationsAllowed", inbox.allowed()));
+                case "configure" -> {
+                    unlockedGuard.check();
+                    String grant = options.optString("grantId", "");
+                    if (!grant.matches("[A-Za-z0-9_-]{1,256}")) {
+                        reject.accept("INVALID", "An exact Gmail grant is required");
+                        return;
+                    }
+                    long attempt = inbox.delivery.begin(grant);
+                    try {
+                        if (!inbox.allowed()) {
+                            throw new SecurityException("Gmail notifications are disabled");
+                        }
+                        JSONObject status = inbox.delivery.configure(
+                            attempt,
+                            options.optString("credentialId", null),
+                            grant,
+                            options.optString("userId", null),
+                            options.optString("organizationId", null),
+                            unlockedGuard
+                        );
+                        inbox.changed();
+                        resolve.accept(status);
+                    } finally {
+                        inbox.delivery.releaseUnadmittedAttempt(attempt);
+                    }
+                }
                 case "withdraw" -> {
                     inbox.delivery.withdraw(options.optString("grantId", null));
+                    inbox.changed();
+                    resolve.accept(new JSONObject());
+                }
+                case "pending" -> {
+                    unlockedGuard.check();
+                    resolve.accept(inbox.delivery.pending(unlockedGuard));
+                }
+                case "consume" -> {
+                    unlockedGuard.check();
+                    inbox.delivery.consume(options.optString("token", null), unlockedGuard);
+                    resolve.accept(new JSONObject());
+                }
+                case "releaseQuestion" -> {
+                    unlockedGuard.check();
+                    inbox.delivery.releaseQuestion(options.optString("token", null), unlockedGuard);
+                    resolve.accept(new JSONObject());
+                }
+                case "notificationSettings" -> {
+                    unlockedGuard.check();
+                    boolean granted = Build.VERSION.SDK_INT < 33
+                        || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+                    Intent intent = new Intent(granted ? Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS : Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (granted) intent.putExtra(Settings.EXTRA_CHANNEL_ID, InboxNoticeDelivery.CHANNEL);
+                    context.startActivity(intent);
                     inbox.changed();
                     resolve.accept(new JSONObject());
                 }
@@ -1066,6 +1225,205 @@ public final class AlphaCorePluginDispatch {
         } catch (Exception unavailable) {
             reject.accept("UNAVAILABLE", "Inbox notices are unavailable");
         }
+    }
+
+    private static void handleCarrierSetup(
+        Context context,
+        String method,
+        JSONObject options,
+        Consumer<JSONObject> resolve,
+        BiConsumer<String, String> reject
+    ) {
+        if (!AlphaAssistActivity.unlocked(context)) {
+            reject.accept("LOCKED", "Unlock Alpha before reading carrier setup.");
+            return;
+        }
+        switch (method) {
+            case "read" -> {
+                try {
+                    resolve.accept(readCarrierSetup(context));
+                } catch (RuntimeException unavailable) {
+                    reject.accept("UNAVAILABLE", "Carrier setup is unavailable.");
+                }
+            }
+            case "readEid" -> {
+                try {
+                    EuiccManager esim = context.getSystemService(EuiccManager.class);
+                    JSObject result = esim == null
+                        ? AlphaCarrierSetupPlugin.field(() -> { throw new UnsupportedOperationException(); })
+                        : AlphaCarrierSetupPlugin.field(esim::getEid);
+                    resolve.accept(result);
+                } catch (RuntimeException unavailable) {
+                    reject.accept("UNAVAILABLE", "EID is unavailable.");
+                }
+            }
+            case "openSettings" -> {
+                String page = options.optString("page", "");
+                String action = switch (page) {
+                    case "sim" -> Build.VERSION.SDK_INT >= 31 ? Settings.ACTION_MANAGE_ALL_SIM_PROFILES_SETTINGS : Settings.ACTION_WIRELESS_SETTINGS;
+                    case "apn" -> Settings.ACTION_APN_SETTINGS;
+                    default -> null;
+                };
+                if (action == null) {
+                    reject.accept("INVALID", "Unsupported carrier settings page.");
+                    return;
+                }
+                boolean specific = !("sim".equals(page) && Build.VERSION.SDK_INT < 31);
+                try {
+                    try {
+                        context.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    } catch (android.content.ActivityNotFoundException missing) {
+                        specific = false;
+                        context.startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    }
+                    resolve.accept(new JSONObject().put("status", "opened").put("page", page).put("specific", specific));
+                } catch (JSONException | RuntimeException unavailable) {
+                    reject.accept("UNAVAILABLE", "Android carrier settings are unavailable.");
+                }
+            }
+            default -> reject.accept("UNIMPLEMENTED", "Unsupported AlphaCarrierSetup method: " + method);
+        }
+    }
+
+    private static JSObject readCarrierSetup(Context context) {
+        JSObject out = new JSObject();
+        out.put("status", "ready");
+        out.put("aospImage", AlphaImageCapability.verified(context));
+        RoleManager roles = context.getSystemService(RoleManager.class);
+        out.put("smsRole", AlphaCarrierSetupPlugin.field(() -> carrierRole(roles, RoleManager.ROLE_SMS)));
+        out.put("dialerRole", AlphaCarrierSetupPlugin.field(() -> carrierRole(roles, RoleManager.ROLE_DIALER)));
+        boolean canChooseSms = false;
+        try {
+            canChooseSms = AlphaImageCapability.verified(context)
+                && roles != null
+                && roles.isRoleAvailable(RoleManager.ROLE_SMS)
+                && !roles.isRoleHeld(RoleManager.ROLE_SMS);
+        } catch (RuntimeException ignored) {
+        }
+        out.put("canChooseSms", canChooseSms);
+        JSObject hardware = new JSObject();
+        hardware.put("manufacturer", AlphaCarrierSetupPlugin.field(() -> Build.MANUFACTURER));
+        hardware.put("model", AlphaCarrierSetupPlugin.field(() -> Build.MODEL));
+        hardware.put("device", AlphaCarrierSetupPlugin.field(() -> Build.DEVICE));
+        hardware.put("android", AlphaCarrierSetupPlugin.field(() -> Build.VERSION.RELEASE));
+        hardware.put("baseband", AlphaCarrierSetupPlugin.field(Build::getRadioVersion));
+        out.put("hardware", hardware);
+        TelephonyManager phone = context.getSystemService(TelephonyManager.class);
+        JSArray slots = new JSArray();
+        int count = 0;
+        try {
+            if (phone != null) {
+                count = Build.VERSION.SDK_INT >= 30 ? phone.getSupportedModemCount() : phone.getPhoneCount();
+            }
+        } catch (RuntimeException ignored) {
+        }
+        for (int index = 0; index < Math.min(Math.max(count, 0), 8); index++) {
+            final int slot = index;
+            JSObject row = new JSObject();
+            row.put("slotIndex", slot);
+            row.put("imei", AlphaCarrierSetupPlugin.field(() -> phone.getImei(slot)));
+            row.put("simState", AlphaCarrierSetupPlugin.field(() -> carrierSimState(phone.getSimState(slot))));
+            slots.put(row);
+        }
+        out.put("slots", slots);
+        boolean euicc = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY_EUICC);
+        JSObject eid = new JSObject();
+        eid.put("status", euicc ? "not-read" : "unsupported");
+        out.put("eid", eid);
+        JSObject subscriptions = new JSObject();
+        JSArray items = new JSArray();
+        SubscriptionManager manager = context.getSystemService(SubscriptionManager.class);
+        try {
+            if (manager == null) {
+                subscriptions.put("status", "unavailable");
+            } else {
+                List<SubscriptionInfo> active = manager.getActiveSubscriptionInfoList();
+                subscriptions.put("status", active == null ? "unavailable" : "available");
+                if (active != null) {
+                    for (SubscriptionInfo sub : active) {
+                        JSObject row = new JSObject();
+                        int id = sub.getSubscriptionId();
+                        row.put("subscriptionId", id);
+                        row.put("slotIndex", sub.getSimSlotIndex());
+                        row.put("embedded", sub.isEmbedded());
+                        row.put("carrier", AlphaCarrierSetupPlugin.field(sub::getCarrierName));
+                        row.put("name", AlphaCarrierSetupPlugin.field(sub::getDisplayName));
+                        row.put("iccid", AlphaCarrierSetupPlugin.field(sub::getIccId));
+                        TelephonyManager line = phone == null ? null : phone.createForSubscriptionId(id);
+                        row.put("operator", line == null ? carrierUnavailable() : AlphaCarrierSetupPlugin.field(line::getNetworkOperatorName));
+                        JSObject operatorCode = line == null ? carrierUnavailable() : AlphaCarrierSetupPlugin.field(line::getNetworkOperator);
+                        row.put("operatorCode", operatorCode);
+                        row.put("dataState", line == null ? carrierUnavailable() : AlphaCarrierSetupPlugin.field(() -> carrierDataState(line.getDataState())));
+                        row.put("networkType", line == null ? carrierUnavailable() : AlphaCarrierSetupPlugin.field(() -> carrierNetworkType(line.getDataNetworkType())));
+                        row.put("dataEnabled", line == null ? carrierUnavailable() : AlphaCarrierSetupPlugin.field(() -> line.isDataEnabled() ? "On" : "Off"));
+                        row.put("roaming", line == null || !"available".equals(operatorCode.optString("status"))
+                            ? carrierUnavailable()
+                            : AlphaCarrierSetupPlugin.field(() -> line.isNetworkRoaming() ? "Roaming" : "Not roaming"));
+                        row.put("defaultData", id == SubscriptionManager.getDefaultDataSubscriptionId());
+                        items.put(row);
+                    }
+                }
+            }
+        } catch (SecurityException denied) {
+            subscriptions.put("status", "permission-denied");
+        } catch (RuntimeException unavailable) {
+            subscriptions.put("status", "unavailable");
+        }
+        subscriptions.put("items", items);
+        out.put("subscriptions", subscriptions);
+        return out;
+    }
+
+    private static JSObject carrierUnavailable() {
+        return AlphaCarrierSetupPlugin.field(() -> null);
+    }
+
+    private static String carrierRole(RoleManager roles, String name) {
+        return roles == null || !roles.isRoleAvailable(name) ? null : roles.isRoleHeld(name) ? "held" : "not-held";
+    }
+
+    private static String carrierSimState(int state) {
+        return switch (state) {
+            case TelephonyManager.SIM_STATE_ABSENT -> "No SIM";
+            case TelephonyManager.SIM_STATE_PIN_REQUIRED -> "SIM PIN required";
+            case TelephonyManager.SIM_STATE_PUK_REQUIRED -> "SIM PUK required";
+            case TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "Network locked";
+            case TelephonyManager.SIM_STATE_READY -> "Ready";
+            case TelephonyManager.SIM_STATE_NOT_READY -> "Not ready";
+            case TelephonyManager.SIM_STATE_PERM_DISABLED -> "Permanently disabled";
+            case TelephonyManager.SIM_STATE_CARD_IO_ERROR -> "SIM read error";
+            case TelephonyManager.SIM_STATE_CARD_RESTRICTED -> "SIM restricted";
+            default -> null;
+        };
+    }
+
+    private static String carrierDataState(int state) {
+        return switch (state) {
+            case TelephonyManager.DATA_DISCONNECTED -> "Disconnected";
+            case TelephonyManager.DATA_CONNECTING -> "Connecting";
+            case TelephonyManager.DATA_CONNECTED -> "Connected";
+            case TelephonyManager.DATA_SUSPENDED -> "Suspended";
+            default -> null;
+        };
+    }
+
+    private static String carrierNetworkType(int type) {
+        return switch (type) {
+            case TelephonyManager.NETWORK_TYPE_NR -> "5G NR";
+            case TelephonyManager.NETWORK_TYPE_LTE -> "LTE";
+            case TelephonyManager.NETWORK_TYPE_HSPAP -> "HSPA+";
+            case TelephonyManager.NETWORK_TYPE_HSPA -> "HSPA";
+            case TelephonyManager.NETWORK_TYPE_HSDPA -> "HSDPA";
+            case TelephonyManager.NETWORK_TYPE_HSUPA -> "HSUPA";
+            case TelephonyManager.NETWORK_TYPE_UMTS -> "UMTS";
+            case TelephonyManager.NETWORK_TYPE_EDGE -> "EDGE";
+            case TelephonyManager.NETWORK_TYPE_GPRS -> "GPRS";
+            case TelephonyManager.NETWORK_TYPE_GSM -> "GSM";
+            case TelephonyManager.NETWORK_TYPE_CDMA -> "CDMA";
+            case TelephonyManager.NETWORK_TYPE_IWLAN -> "IWLAN";
+            case TelephonyManager.NETWORK_TYPE_UNKNOWN -> null;
+            default -> "Android network type " + type;
+        };
     }
 
     private static JSONObject roleEntry(RoleManager manager, String name, String androidRole) throws JSONException {

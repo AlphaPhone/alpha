@@ -100,6 +100,8 @@ describe("Shared preference store split routing", () => {
   // spec/app/settings/preferences.md, "Story: Keep my preferences through a restart"
   it('routes allowlisted shared keys to AlphaPreferences while isolating app-private keys locally (spec/app/settings/preferences.md, "Story: Keep my preferences through a restart")', async () => {
     expect(SHARED_PREFERENCE_KEYS.every((key) => isSharedPreferenceReadKey(key) && isSharedPreferenceWriteKey(key))).toBe(true);
+    expect(SHARED_PREFERENCE_KEYS).toContain("alpha.aiMode");
+    expect(SHARED_PREFERENCE_KEYS).toContain("alpha.localModel");
     expect(isSharedPreferenceReadKey("alpha.appearance.v1")).toBe(true);
     expect(isSharedPreferenceWriteKey("alpha.appearance.v1")).toBe(false);
     expect(isSharedPreferenceReadKey("notes.draft.1")).toBe(false);
@@ -153,9 +155,13 @@ describe("Shared preference store split routing", () => {
           const store = yield* KeyValueStore.KeyValueStore;
           yield* store.set("alpha.appearance", "dark");
           yield* store.set("alpha.textScale", "115");
+          yield* store.set("alpha.aiMode", "local");
+          yield* store.set("alpha.localModel", "gemma-4-e2b-it-q4");
           yield* store.set("app.private.draft", "secret-note");
           const migration = yield* store.get("alpha.appearance.v1");
           const scaleBytes = yield* store.getUint8Array("alpha.textScale");
+          const aiMode = yield* store.get("alpha.aiMode");
+          const localModel = yield* store.get("alpha.localModel");
           const keysBeforeClear = yield* store.keys;
           yield* store.clear;
           const afterClearPrivate = yield* store.get("app.private.draft");
@@ -165,6 +171,8 @@ describe("Shared preference store split routing", () => {
           return {
             migration,
             scaleText: scaleBytes === undefined ? undefined : new TextDecoder().decode(scaleBytes),
+            aiMode,
+            localModel,
             keysBeforeClear: [...keysBeforeClear].sort(),
             afterClearPrivate,
             afterClearShared,
@@ -175,9 +183,13 @@ describe("Shared preference store split routing", () => {
 
       expect(result.migration).toBe("light");
       expect(result.scaleText).toBe("115");
+      expect(result.aiMode).toBe("local");
+      expect(result.localModel).toBe("gemma-4-e2b-it-q4");
       expect(result.keysBeforeClear).toEqual([
+        "alpha.aiMode",
         "alpha.appearance",
         "alpha.appearance.v1",
+        "alpha.localModel",
         "alpha.textScale",
         "app.private.draft",
       ]);
@@ -185,7 +197,11 @@ describe("Shared preference store split routing", () => {
       expect(result.afterClearShared).toBe("dark");
       expect(result.afterRemoveScale).toBeUndefined();
       expect(remoteData.has("app.private.draft")).toBe(false);
+      expect(remoteData.get("alpha.aiMode")).toBe("local");
+      expect(remoteData.get("alpha.localModel")).toBe("gemma-4-e2b-it-q4");
       expect(remoteCalls).toContain("set:alpha.appearance");
+      expect(remoteCalls).toContain("set:alpha.aiMode");
+      expect(remoteCalls).toContain("set:alpha.localModel");
       expect(remoteCalls).toContain("remove:alpha.textScale");
       expect(remoteCalls.some((call) => call.includes("app.private.draft"))).toBe(false);
 

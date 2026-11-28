@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone.ipc;
 
+import ai.alphacompute.alphaphone.AlphaAgentService;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
 import android.content.ContentProvider;
@@ -96,6 +97,7 @@ public final class AlphaPreferencesProvider extends ContentProvider {
         }
         if (committed) {
             context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+            notifyAgentIfAiPreference(context, key);
         }
         Bundle reply = new Bundle();
         reply.putBoolean(AlphaIpcContract.PREF_RESULT_OK, committed);
@@ -112,6 +114,7 @@ public final class AlphaPreferencesProvider extends ContentProvider {
         }
         if (committed) {
             context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+            notifyAgentIfAiPreference(context, key);
         }
         Bundle reply = new Bundle();
         reply.putBoolean(AlphaIpcContract.PREF_RESULT_OK, committed);
@@ -153,6 +156,7 @@ public final class AlphaPreferencesProvider extends ContentProvider {
         }
         if (committed) {
             context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+            notifyAgentIfAiPreference(context, key);
         }
         return committed;
     }
@@ -167,8 +171,15 @@ public final class AlphaPreferencesProvider extends ContentProvider {
         }
         if (committed) {
             context.getContentResolver().notifyChange(AlphaIpcContract.preferenceKeyUri(key), null);
+            notifyAgentIfAiPreference(context, key);
         }
         return committed;
+    }
+
+    private static void notifyAgentIfAiPreference(Context context, String key) {
+        if (AlphaIpcContract.KEY_AI_MODE.equals(key) || AlphaIpcContract.KEY_LOCAL_MODEL.equals(key)) {
+            AlphaAgentService.onAiPreferenceChanged(context);
+        }
     }
 
     /** In-process snapshot helper for AlphaCore's overlay surface. */

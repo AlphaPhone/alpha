@@ -1,7 +1,9 @@
 package ai.alphacompute.alphaphone.ipc;
 
 import ai.alphacompute.alphaphone.AlphaCorePluginDispatch;
+import ai.alphacompute.alphaphone.AlphaCoreSignInHost;
 import ai.alphacompute.alphaphone.AlphaCoreSpeechHost;
+import ai.alphacompute.alphaphone.BillingReturn;
 import ai.alphacompute.alphaphone.BuildConfig;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
@@ -69,6 +71,8 @@ public final class AlphaPlatformBrokerService extends Service {
     private CloudRequests cloudRequests;
     private AlphaCoreSpeechHost speechHost;
     private AutoCloseable signInSubscription;
+    private AutoCloseable signInHostSubscription;
+    private AutoCloseable billingReturnSubscription;
 
     private final IAlphaPlatformBroker.Stub binder = new IAlphaPlatformBroker.Stub() {
         @Override public void cloudRequest(
@@ -109,6 +113,9 @@ public final class AlphaPlatformBrokerService extends Service {
                 notifyCloudError(cb, callId, AlphaIpcContract.CLOUD_INVALID_REQUEST, "Invalid cloud request");
                 return;
             }
+            if (path.startsWith("/api/v1/subscriptions/checkout") || path.startsWith("/api/v1/subscriptions/portal")) {
+                BillingReturn.recordCheckoutCaller(callingPkg);
+            }
             Map<String, String> headers = parseStringMap(headersJson);
             boolean billingSession = expectedSessionCredentialId != null && !expectedSessionCredentialId.isBlank();
             String bindingId = billingSession ? expectedSessionCredentialId : expectedCredentialId;
@@ -125,7 +132,7 @@ public final class AlphaPlatformBrokerService extends Service {
             if (!policy.isSignInMethodAllowed(callingPkg, method)) {
                 return signInError("Rejected", "Sign-in method not permitted for " + callingPkg);
             }
-            return handleSignInMethod(method);
+            return handleSignInMethod(callingPkg, method, argsJson);
         }
 
         @Override public String secureStoreCall(String op, String key, String expected, String value) {
@@ -225,6 +232,8 @@ public final class AlphaPlatformBrokerService extends Service {
             cloudRequests = new CloudRequests(cloudPolicy, grants);
         }
         signInSubscription = AlphaCorePluginDispatch.observeSignIn(this, this::broadcastSignInSettled);
+        signInHostSubscription = AlphaCoreSignInHost.shared(this).subscribe(this::broadcastSignInEvent);
+        billingReturnSubscription = BillingReturn.subscribe(this::broadcastBillingReturn);
     }
 
     @Override public IBinder onBind(Intent intent) {
@@ -232,13 +241,12 @@ public final class AlphaPlatformBrokerService extends Service {
     }
 
     @Override public void onDestroy() {
-        if (signInSubscription != null) {
-            try {
-                signInSubscription.close();
-            } catch (Exception ignored) {
-            }
-            signInSubscription = null;
-        }
+        closeAutoQuietly(signInSubscription);
+        signInSubscription = null;
+        closeAutoQuietly(signInHostSubscription);
+        signInHostSubscription = null;
+        closeAutoQuietly(billingReturnSubscription);
+        billingReturnSubscription = null;
         signInObservers.kill();
         if (speechHost != null) {
             speechHost.close();
@@ -317,14 +325,8 @@ public final class AlphaPlatformBrokerService extends Service {
         return out.toByteArray();
     }
 
-    private String handleSignInMethod(String method) {
-        if ("status".equals(method)) {
-            return AlphaCorePluginDispatch.signInStatus(this).toString();
-        }
-        if ("serviceInfo".equals(method)) {
-            return AlphaCorePluginDispatch.signInServiceInfo().toString();
-        }
-        return signInError("RequiresCoreActivity", "Interactive sign-in runs inside AlphaCore");
+    private String handleSignInMethod(String callingPkg, String method, String argsJson) {
+        return AlphaCoreSignInHost.shared(this).invokeSync(callingPkg, method, argsJson);
     }
 
     private synchronized AlphaCoreSpeechHost ensureSpeechHost() {
@@ -365,18 +367,41 @@ public final class AlphaPlatformBrokerService extends Service {
     }
 
     private void broadcastSignInSettled(JSONObject receipt) {
+        broadcastSignInEvent("signInSettled", receipt);
+    }
+
+    private void broadcastBillingReturn(String sessionId) {
+        JSONObject payload = new JSONObject();
+        try {
+            payload.put("session", sessionId == null ? JSONObject.NULL : sessionId);
+        } catch (JSONException ignored) {
+        }
+        broadcastSignInEvent("billingReturned", payload);
+    }
+
+    private void broadcastSignInEvent(String eventName, JSONObject data) {
         long seq = signInEventSeq.incrementAndGet();
-        String payload = receipt == null ? "{}" : receipt.toString();
+        String name = eventName == null || eventName.isBlank() ? "signInSettled" : eventName;
+        String payload = data == null ? "{}" : data.toString();
         int count = signInObservers.beginBroadcast();
         try {
             for (int index = 0; index < count; index++) {
                 try {
-                    signInObservers.getBroadcastItem(index).onEvent("signInSettled", seq, payload);
+                    signInObservers.getBroadcastItem(index).onEvent(name, seq, payload);
                 } catch (RemoteException ignored) {
                 }
             }
         } finally {
             signInObservers.finishBroadcast();
+        }
+    }
+
+    private static void closeAutoQuietly(AutoCloseable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
