@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import timersPromises from "node:timers/promises";
 import type { CliContext, CommandResult } from "../runner.ts";
-import { resolveAndroidSdkRoot } from "./alpha-next-validate.ts";
+import { resolveAapt2Path, resolveAndroidSdkRoot } from "./alpha-next-validate.ts";
 
 const DEFAULT_AVD_NAME = "alpha_next_api35";
 const DEFAULT_SYSTEM_IMAGE = "system-images;android-35;google_apis;x86_64";
@@ -327,11 +327,17 @@ export function inspectCorePackageDump(coreDump: string): CorePackageInspection 
   };
 }
 
-/** Inspect `query-services VoiceInteractionService` and `dumpsys package` output for overlay & voice readiness. */
-export function inspectVoiceAndOverlayDump(voiceDump: string, coreDump: string): VoiceOverlayInspection {
+/** Inspect `query-services VoiceInteractionService`, `dumpsys package`, and optional APK manifest xmltree for overlay & voice readiness. */
+export function inspectVoiceAndOverlayDump(
+  voiceDump: string,
+  coreDump: string,
+  coreManifestDump = "",
+): VoiceOverlayInspection {
   const hasVoiceService = voiceDump.includes("AlphaVoiceInteractionService");
-  const hasSessionService = coreDump.includes("AlphaVoiceInteractionSessionService");
-  const hasOverlayIntake = coreDump.includes("AlphaOverlayIntakeActivity");
+  const hasSessionService = coreDump.includes("AlphaVoiceInteractionSessionService")
+    || coreManifestDump.includes("AlphaVoiceInteractionSessionService");
+  const hasOverlayIntake = coreDump.includes("AlphaOverlayIntakeActivity")
+    || coreManifestDump.includes("AlphaOverlayIntakeActivity");
   return {
     passed: hasVoiceService && hasSessionService && hasOverlayIntake,
     hasVoiceService,
@@ -734,6 +740,19 @@ export function stopBootedEmulator(
   return null;
 }
 
+function dumpCoreApkManifest(plan: EmulatorToolchainPlan, rootDir: string): string {
+  const aapt2Path = resolveAapt2Path();
+  const coreRel = plan.discoveredApks.find((item) => isCoreApkPath(item)) ?? plan.discoveredApks[0];
+  if (!aapt2Path || !coreRel) return "";
+  const coreAbs = path.join(rootDir, coreRel);
+  if (!fs.existsSync(coreAbs)) return "";
+  try {
+    return runTool(aapt2Path, ["dump", "xmltree", coreAbs, "--file", "AndroidManifest.xml"]);
+  } catch {
+    return "";
+  }
+}
+
 async function verifyDeviceSuite(
   adbPath: string,
   serial: string,
@@ -789,7 +808,8 @@ async function verifyDeviceSuite(
     "-a",
     "android.service.voice.VoiceInteractionService",
   ]);
-  const voiceCheck = inspectVoiceAndOverlayDump(voiceDump, coreDump);
+  const coreManifestDump = dumpCoreApkManifest(plan, rootDir);
+  const voiceCheck = inspectVoiceAndOverlayDump(voiceDump, coreDump, coreManifestDump);
   results.push({
     stage: "verify-voice-interaction",
     status: voiceCheck.passed ? "passed" : "failed",

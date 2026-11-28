@@ -177,18 +177,28 @@ async function captureWebViews(
   fs.mkdirSync(webDir, { recursive: true });
 
   let viteProcess: ChildProcess | undefined;
+  let viteLogs = "";
   const baseUrl = plan.url ?? `http://127.0.0.1:${String(DEFAULT_WALKTHROUGH_PORT)}`;
   if (!plan.url) {
-    const viteBin = path.join(rootDir, "apps/app/node_modules/.bin/vite");
+    const appVite = path.join(rootDir, "apps/app/node_modules/.bin/vite");
+    const rootVite = path.join(rootDir, "node_modules/.bin/vite");
+    const viteBin = fs.existsSync(appVite) ? appVite : rootVite;
     viteProcess = spawn(viteBin, ["--host", "127.0.0.1", "--port", String(DEFAULT_WALKTHROUGH_PORT), "--strictPort"], {
       cwd: path.join(rootDir, "apps/app"),
       env: { ...process.env, ALPHA_FAKES: "phone" },
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    await waitForHttpReady(baseUrl, 45_000);
+    viteProcess.stdout?.on("data", (chunk: Buffer) => {
+      viteLogs = `${viteLogs}${chunk.toString("utf8")}`.slice(-4000);
+    });
+    viteProcess.stderr?.on("data", (chunk: Buffer) => {
+      viteLogs = `${viteLogs}${chunk.toString("utf8")}`.slice(-4000);
+    });
+    await waitForHttpReady(baseUrl, 90_000);
   }
 
   const captures: CapturedArtifact[] = [];
+  const pageErrors: string[] = [];
   const playwrightMod = await import("playwright");
   const browser = await playwrightMod.chromium.launch({ headless: true });
   try {
@@ -198,9 +208,24 @@ async function captureWebViews(
       colorScheme: "light",
     });
     const page = await context.newPage();
+    page.on("pageerror", (err) => {
+      pageErrors.push(err.message);
+    });
 
+    let firstLoad = true;
     const shoot = async (name: string, query: string, afterLoad?: () => Promise<void>) => {
-      await page.goto(`${baseUrl}/${query}`, { waitUntil: "domcontentloaded", timeout: 25_000 });
+      await page.goto(`${baseUrl}/${query}`, { waitUntil: "commit", timeout: 60_000 });
+      await page.waitForFunction(
+        () => {
+          const root = document.getElementById("root");
+          if (!root) return false;
+          const text = root.textContent?.trim() ?? "";
+          return text.length > 0 || root.querySelectorAll("button, input, textarea, main, section").length > 0;
+        },
+        undefined,
+        { timeout: firstLoad ? 240_000 : 120_000 },
+      );
+      firstLoad = false;
       await timersPromises.scheduler.wait(1200);
       if (afterLoad) await afterLoad();
       const outPath = path.join(webDir, `${name}.png`);
@@ -218,6 +243,40 @@ async function captureWebViews(
     }
 
     for (const scene of OVERLAY_SCENES) {
+      if (scene.detent === "control") {
+        await page.route("**/api/alpha/control/state", async (route) => {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              tier: "TierAccessibility",
+              capabilities: ["ui.observe.v1", "ui.act.v1", "app.launch.v1"],
+              foreground: {
+                snapId: 7,
+                packageName: "org.mozilla.firefox",
+                activityName: "org.mozilla.fenix.HomeActivity",
+                webUri: "https://example.com",
+                targetKind: "AllowedApp",
+                protection: "ScreenClear",
+                windowCount: 1,
+                observedAtMs: Date.now(),
+              },
+              lease: {
+                leaseId: 1,
+                packageName: "org.mozilla.firefox",
+                maxOps: 12,
+                usedOps: 3,
+                expiresAtMs: Date.now() + 55_000,
+                status: "LeaseActive",
+              },
+              leaseRequest: null,
+              pending: { active: true, opId: 4, type: "ui_scroll" },
+              lastResult: "done",
+              killed: false,
+            }),
+          });
+        });
+      }
       await shoot(scene.id, scene.query, async () => {
         if (scene.detent === "typing") {
           const input = page.locator("textarea, input[type='text'], [contenteditable='true']").first();
@@ -235,13 +294,21 @@ async function captureWebViews(
           if (await talkButton.count() > 0) {
             await talkButton.click({ timeout: 2000 }).catch(() => undefined);
           }
+        } else if (scene.detent === "control") {
+          await timersPromises.scheduler.wait(1800);
         }
         await timersPromises.scheduler.wait(500);
       });
+      if (scene.detent === "control") {
+        await page.unroute("**/api/alpha/control/state");
+      }
     }
 
     await shoot("monolith-home", "?surface=monolith");
     await context.close();
+  } catch (error: unknown) {
+    const baseMsg = error instanceof Error ? error.message : String(error);
+    throw new Error(viteLogs ? `${baseMsg}\nVite output:\n${viteLogs.slice(-1200)}` : baseMsg, { cause: error });
   } finally {
     await browser.close();
     if (viteProcess && viteProcess.exitCode === null) {
@@ -251,7 +318,7 @@ async function captureWebViews(
 
   fs.writeFileSync(
     path.join(webDir, "manifest.json"),
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), baseUrl, captures }, null, 2)}\n`,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), baseUrl, pageErrors, captures }, null, 2)}\n`,
     "utf8",
   );
   return captures;

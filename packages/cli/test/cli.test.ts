@@ -681,7 +681,13 @@ describe("project CLI", () => {
     ).passed).toBe(true);
     expect(inspectVoiceAndOverlayDump(
       "ai.alphacompute.alphaphone/.overlay.AlphaVoiceInteractionService",
-      "AlphaVoiceInteractionSessionService",
+      "AlphaOverlayIntakeActivity",
+      'A: android:name="ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionSessionService"',
+    ).passed).toBe(true);
+    expect(inspectVoiceAndOverlayDump(
+      "ai.alphacompute.alphaphone/.overlay.AlphaVoiceInteractionService",
+      "AlphaOverlayIntakeActivity",
+      "",
     ).passed).toBe(false);
 
     const healthyThinLog = "11-27 15:00:01.000 500 500 I AlphaThinApp: event=launch app=notes coreSignatureMatch=true prefsConnected=true agentBrokerBound=true";
