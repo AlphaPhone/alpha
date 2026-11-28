@@ -1,18 +1,7 @@
 // spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"; spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"
-import { MessagingSessions, type StoredSecret, refreshTokenValue, sameCredential, secretOf, tokenValue } from "./messaging.vibe"
+import { MessagingSessions, SavedGrant, type StoredSecret, sameCredential, secretOf } from "./messaging.vibe"
 import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
 import { Vault, type MessagingSlot } from "./vault.vibe"
-
-schema SavedGrant {
-  readonly owner: string
-  readonly key: string
-  readonly access: string
-  readonly refresh?: string
-  readonly expiresAt?: number
-  readonly clientId?: string
-  readonly rotation?: { readonly id: string; readonly until: number }
-  readonly workspace?: { readonly teamId: string; readonly name: string; readonly ownerUserId: string; readonly brokered?: boolean }
-}
 
 schema SavedGrants {
   readonly grants: ReadonlyArray<SavedGrant>
@@ -29,22 +18,14 @@ function slotOf(key: string): MessagingSlot | undefined {
 }
 
 function pack(owner: string, key: string, grant: StoredSecret): SavedGrant {
-  const refresh = refreshTokenValue(grant)
-  return { owner, key, access: tokenValue(grant),
-    ...(refresh === undefined ? {} : { refresh }),
-    ...(grant.expiresAt === undefined ? {} : { expiresAt: grant.expiresAt }),
-    ...(grant.clientId === undefined ? {} : { clientId: grant.clientId }),
-    ...(grant.rotation === undefined ? {} : { rotation: grant.rotation }),
-    ...(grant.workspace === undefined ? {} : { workspace: grant.workspace }),
-  }
+  const { accessToken, refreshToken, ...metadata } = grant
+  return { ...metadata, owner, key, access: Redacted.value(accessToken),
+    ...(refreshToken === undefined ? {} : { refresh: Redacted.value(refreshToken) }) }
 }
 
 function unpack(grant: SavedGrant): StoredSecret {
-  return { ...secretOf(grant.access, grant.refresh, grant.expiresAt),
-    ...(grant.clientId === undefined ? {} : { clientId: grant.clientId }),
-    ...(grant.rotation === undefined ? {} : { rotation: grant.rotation }),
-    ...(grant.workspace === undefined ? {} : { workspace: grant.workspace }),
-  }
+  const { owner: _owner, key: _key, access, refresh, ...metadata } = grant
+  return { ...metadata, ...secretOf(access, refresh) }
 }
 
 /** The signed-in owner's messaging grants, replaced against the exact encrypted record read by each operation. */
