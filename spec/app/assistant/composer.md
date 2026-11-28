@@ -467,7 +467,9 @@ the conversation's one read tells. If the message arrived, or the slot no
 longer holds the mark under review because the Alpha that marked it
 settled it, the mark is written away and nothing is shown; if it was never
 recorded, it goes back into the editor, ahead of what the owner typed
-since, for the owner to send. Nothing is ever sent by itself. Once those
+since, for the owner to send. A history read without the exact key leaves
+the mark under review while the original request may still arrive.
+Nothing is ever sent by itself. Once those
 tries cannot tell, the conversation shows one card that the message may
 already have been sent, with its text, Check again, It was sent, and Put
 back in the field: It was sent keeps only what the owner typed since
