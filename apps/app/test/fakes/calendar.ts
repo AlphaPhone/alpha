@@ -379,6 +379,7 @@ export function elizaCalendar(scene: CalendarScene): Faked {
     },
     pendingCreations: () => Promise.resolve({ status: "ready", creations: [...scene.creations].map(([creationId, status]) => ({ creationId, status })) }),
     inspectDeletion({ id, expected }) {
+      if (document.visibilityState !== "visible") return Promise.resolve({ status: "unavailable" });
       const series = scene.phoneEvents.filter((event) => event.id === id);
       const event = series.find((one) => one.begin === expected.begin);
       if (!event) return Promise.resolve({ status: "conflict" });
@@ -409,8 +410,10 @@ export function elizaCalendar(scene: CalendarScene): Faked {
         .map((event) => ({ id: event.id, calendarId: event.calendarId, revision: "0".repeat(64), title: event.title ?? "", start: new Date(event.begin).toISOString(), end: new Date(event.end).toISOString(), allDay: event.allDay }));
       return Promise.resolve({ status: "ready", events });
     },
-    dispatchDeletion({ id, change, originalStart }) {
+    dispatchDeletion({ id, change, originalStart, revision }) {
       const occurrence = change === "ExcludeOccurrence";
+      const event = scene.phoneEvents.find((one) => one.id === id && (!occurrence || one.begin === originalStart));
+      if (!event || revisionOf(event) !== revision) return Promise.resolve({ status: "conflict" });
       scene.phoneEvents = scene.phoneEvents.filter((event) => event.id !== id || (occurrence && event.begin !== originalStart));
       return Promise.resolve({ status: "committed", readback: { parentAfter: occurrence ? "ParentLive" : "ParentGone", fieldsMatch: true, exclusionExact: true, cancelledAtStart: 0, instanceRemains: false } });
     },

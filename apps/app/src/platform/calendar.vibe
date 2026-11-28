@@ -141,7 +141,11 @@ export service PhoneCalendar {
   create(creation: CalendarCreation, creationId: string, separate: boolean): Written!!
   created(creationId: string): boolean!CalendarUnread
   update(pick: CalendarPick, fields: AndroidCalendarEditorFields): Written!!
-  /** Stage the deletion through the phone's review, which inspects the event as it is now. */
+  /**
+   * Stage the deletion through the phone's review, which inspects the event as it is now, and only while Alpha is in front
+   * and the phone unlocked; where it can review nothing now, a deletion of the same occurrences it staged before is the one
+   * it staged, with what is left of its window, and the phone still refuses it if the event changed since.
+   */
   stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Staged!!
   /** Send a staged deletion once its window is over; one the review still holds is refused, and nothing is sent. */
   dispatch(id: string): Written!!
@@ -163,7 +167,7 @@ const lost: Written = { confirmed: false, known: false }
 const refused: Written = { confirmed: false, known: true }
 
 interface CalendarShelfState {
-  readonly staged: ReadonlyMap<string, ReturnType<CalendarClient["review"]>>
+  readonly staged: ReadonlyMap<string, { readonly review: ReturnType<CalendarClient["review"]>; readonly scope: AndroidCalendarDeletionScope; readonly begin: number; readonly expiresElapsed: number }>
   readonly writableCalendarId: string | undefined
 }
 
@@ -185,7 +189,7 @@ export const phoneCalendar = Layer.effect(PhoneCalendar, effect {
       next.delete(id)
       return { ...current, staged: next }
     })
-    return review
+    return review?.review
   }
   return {
     present,
@@ -252,11 +256,14 @@ export const phoneCalendar = Layer.effect(PhoneCalendar, effect {
       const deadline = await review.stageDeletion(inspected.ticket)
       shelf.update((current) => {
         const next = new Map(current.staged)
-        next.set(pick.event.id, review)
+        next.set(pick.event.id, { review, scope, begin: pick.event.begin, expiresElapsed: deadline.expiresElapsed })
         return { ...current, staged: next }
       })
       return { kind: "ready", window: untilElapsed(deadline.expiresElapsed) }
-    }), (): Staged => ({ kind: "refused" })),
+    }), (): Staged => {
+      const kept = shelf.get().staged.get(pick.event.id)
+      return kept !== undefined && kept.scope === scope && kept.begin === pick.event.begin ? { kind: "ready", window: untilElapsed(kept.expiresElapsed) } : { kind: "refused" }
+    }),
     dispatch: (id: string) => !present ? succeed(refused) : Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
       const review = dropStaged(id)
       if (review === undefined) return refused

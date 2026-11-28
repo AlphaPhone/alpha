@@ -891,12 +891,17 @@ describe("on a phone", () => {
     return { world, first };
   }
 
-  async function finishPhoneDelete(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
-    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Sent");
+  /** Let the phone's own window for a staged deletion pass, on the fake performance clock, then go back to real timers. */
+  async function letStagedWindowPass(alpha: Alpha) {
     await drawn(() => {});
     vi.advanceTimersByTime(20_000);
     await later(alpha, 10_000);
     vi.useRealTimers();
+  }
+
+  async function finishPhoneDelete(alpha: Alpha, runtime: ReturnType<typeof calendar.runtime>) {
+    await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Sent");
+    await letStagedWindowPass(alpha);
     await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.outcome === "Confirmed");
   }
 
@@ -916,6 +921,30 @@ describe("on a phone", () => {
       { id: "p3", calendarId: "local", title: "Walk", begin: world.at(0, 17), end: world.at(0, 18), allDay: false, recurring: false },
     );
   }
+
+  it(`A deletion confirmed in front is sent, though the owner then leaves Alpha or locks the phone before it goes (spec/app/calendar/deletions.md, "Confirming the review holds the deletion; a deletion still waiting is sent first, so the only Undo shown is the newest")`, async () => {
+    const world = morning(true);
+    world.calendar.granted = true;
+    addExtraPhoneEvents(world);
+    const { alpha, runtime } = await mountCalendar(world, only("view:Calendar", "notice"), (s) => s.phoneRows === 3 && s.google.status === "Loaded");
+    const written = () => runtime.runPromise(Effect.flatMap(Editor, (e) => e.get()));
+    const sendAfterLeaving = async (title: string, meanwhile: () => void = () => {}) => {
+      const before = (await written()).write.id;
+      vi.useFakeTimers({ toFake: ["performance"] });
+      await queueDeletion(alpha, runtime, title);
+      await seen(false);
+      meanwhile();
+      await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.id > before);
+      await letStagedWindowPass(alpha);
+      await until(alpha, runtime, Editor, (e) => e.kind === "Remove" && e.write.id > before && e.write.outcome !== "Sent");
+      await seen(true);
+      return (await written()).write.outcome;
+    };
+    expect([await sendAfterLeaving("Gym"), world.calendar.phoneEvents.map((event) => event.title)]).toEqual(["Confirmed", ["Piano", "Walk"]]);
+    // spec/app/calendar/deletions.md, "A refused send shows the event again and says it was not deleted, and whether it changed; a sent deletion hides it until a read no longer has it unchanged": the phone still refuses what it reviewed once the event changed while Alpha was away.
+    const piano = world.calendar.phoneEvents.find((event) => event.title === "Piano");
+    expect([await sendAfterLeaving("Piano", () => { if (piano) piano.title = "Piano lesson"; }), world.calendar.phoneEvents.map((event) => event.title)]).toEqual([expect.not.stringMatching(/^Confirmed$/), ["Piano lesson", "Walk"]]);
+  });
 
   it("A deletion a restart paused is for the event the owner confirmed, though the phone's calendar gained events before it (spec/app/calendar/deletions.md, \"A restart pauses a deletion still in its window; the owner sends it or keeps the event\")", async () => {
     const { world, first } = await openGrantedGymDeletion();
