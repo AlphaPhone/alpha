@@ -4843,7 +4843,7 @@ SOFTWARE.
 
 ==============================================================================
 elizaOS (@elizaos/agent, @elizaos/os, @elizaos/cloud)
-Version: ed7c6499dc9c7e8d2bda833858014f7a735a9a28
+Version: ad48a9b2c1784946a38c2f5fe9d162b1de4d4035
 License: MIT
 Source: https://github.com/elizaOS/eliza.git (develop)
 
