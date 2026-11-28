@@ -22,7 +22,7 @@ jobs:
   verify-fresh:
     name: Fresh verification, specs, browser tests and notices
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v7
         with:
