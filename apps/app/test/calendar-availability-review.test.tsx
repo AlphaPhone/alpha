@@ -146,7 +146,7 @@ async function approveAndCompleteShare(review: TextReviewScene) {
 }
 
 describe("Calendar availability review card in Ask Alpha", () => {
-  it("renders Check availability from Home when requestMessageId is omitted, shares via sheet, and completes read reply", async () => {
+  it(`renders Check availability from Home when requestMessageId is omitted, shares via sheet, and completes read reply (spec/app/calendar/sharing.md, "Story: Choose the calendars and see the answer before it is shared")`, async () => {
     const { review, operation } = await launchAndAsk({ screen: "home", originMode: "exact" });
     expect(review.proposal.payload.requestMessageId).toBeUndefined();
 
@@ -169,14 +169,14 @@ describe("Calendar availability review card in Ask Alpha", () => {
     });
   });
 
-  it("renders Check availability from Calendar view and completes the reviewed share", async () => {
+  it(`renders Check availability from Calendar view and completes the reviewed share (spec/app/calendar/sharing.md, "A check is asked only on Home or Calendar, while Alpha can be seen, on a screen that is not sensitive"; spec/app/calendar/sharing.md, "Story: Choose the calendars and see the answer before it is shared")`, async () => {
     const { review } = await launchAndAsk({ screen: "calendar", originMode: "exact" });
     await approveAndCompleteShare(review);
     await vi.waitFor(() => expect(review.completions).toHaveLength(1));
     expect(review.receipts[0]).toMatchObject({ outcome: "applied", operationId: review.proposal.id });
   });
 
-  it("still renders and settles availability review without matching readReplyOrigin (repeat or mismatched origin)", async () => {
+  it(`still renders and settles availability review without matching readReplyOrigin (repeat or mismatched origin) (spec/app/assistant/cards.md, "A phone step's result chip stands under the reply that offered it, and a reply that only offered the review gives way to it")`, async () => {
     for (const originMode of ["none", "mismatch"] as const) {
       const { review } = await launchAndAsk({ screen: "home", originMode });
       await approveAndCompleteShare(review);
@@ -186,7 +186,7 @@ describe("Calendar availability review card in Ask Alpha", () => {
     }
   });
 
-  it("reports Nothing was shared and skips read-completion when the owner cancels the availability sheet", async () => {
+  it(`reports Nothing was shared and skips read-completion when the owner cancels the availability sheet (spec/app/calendar/sharing.md, "The sheet offers the phone's calendars with none ticked, reads only the ticked ones, and shares only a free or busy answer it showed")`, async () => {
     for (const originMode of ["exact", "none"] as const) {
       const { review } = await launchAndAsk({ screen: "home", originMode });
       await vi.waitFor(() => expect(button("Approve")).toBeDefined());
@@ -202,7 +202,7 @@ describe("Calendar availability review card in Ask Alpha", () => {
     }
   });
 
-  it("drops the availability card for foreign enrollment, non-Review actions, or a sensitive screen", async () => {
+  it(`drops the availability card for foreign enrollment, non-Review actions, or a sensitive screen (spec/app/calendar/sharing.md, "A check is asked only on Home or Calendar, while Alpha can be seen, on a screen that is not sensitive"; spec/app/approvals/proposal.md, "An approval that ran out, a protected screen, another owner, and review first for a direct run each let nothing be sent")`, async () => {
     const cases = [
       { screen: "home" as const, originMode: "exact" as const, foreignEnrollment: true },
       { screen: "home" as const, originMode: "exact" as const, actionMode: "direct" as const },
