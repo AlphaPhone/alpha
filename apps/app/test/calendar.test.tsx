@@ -1553,7 +1553,9 @@ describe("on a phone", () => {
     const named = () => [askedCard().includes("Eliza Calendar"), askedCard().includes("Agent Calendar")];
     expect(named()).toEqual([true, false]);
     // spec/app/calendar/index.md, "Connecting an account reads the day from Google; disconnecting takes its rows away at once": opening Calendar reads the feed again, which still says unavailable
-    await reopenUnavailable(world, alpha, agent);
+    const reads = world.calendar.feedReads ?? 0;
+    await openCalendar(alpha);
+    await until(alpha, agent, View, (s) => s.front && !s.connected && (world.calendar.feedReads ?? 0) > reads);
     await drawn(() => {});
     expect([...named(), Boolean(button("Approve")), world.calendar.writes]).toEqual([true, false, true, []]);
   });
@@ -1578,14 +1580,6 @@ describe("on a phone", () => {
     await until(alpha, agent, Changes, (a) => a.stage === "Idle" && a.write.outcome === "Confirmed");
     expect(world.calendar.writes).toEqual(["approve approval-home", "create ev-camera-setup"]);
   });
-
-  /** Opening Calendar reads the feed again and waits until it has drawn the agent's rows gone. */
-  async function reopenUnavailable(world: ReturnType<typeof morning>, alpha: Alpha, agent: ReturnType<typeof calendar.runtime>) {
-    const reads = world.calendar.feedReads ?? 0;
-    await openCalendar(alpha);
-    await vi.waitFor(() => expect(world.calendar.feedReads ?? 0).toBeGreaterThan(reads));
-    await until(alpha, agent, View, (s) => s.front && !s.connected);
-  }
 
   /** Calendar reads "Family" for a signed-in owner, `change` alters the world and reopens Calendar, and a card filed from Home then tells which of Eliza Calendar, Family and Agent Calendar it names, whether its filing read the agent's list, and what was written. */
   async function namesAfterOwnerChange(approval: string, change: (world: ReturnType<typeof morning>, alpha: Alpha, agent: ReturnType<typeof calendar.runtime>, request: Awaited<ReturnType<typeof askingCalendar>>["request"]) => Promise<void>) {
@@ -1622,13 +1616,14 @@ describe("on a phone", () => {
   });
 
   it(`A card names the calendar the agent lists now, never one a Google account that went away listed before (spec/app/calendar/presentation.md, "The agent's calendar goes by the name the agent lists for it")`, async () => {
-    const { named } = await namesAfterOwnerChange("approval-account-gone", async (world, alpha, agent) => {
+    const { named, listed } = await namesAfterOwnerChange("approval-account-gone", async (world, alpha, agent) => {
       world.calendar.summary = undefined;
       world.calendar.feedState = "unavailable";
       world.calendar.events = [];
-      await reopenUnavailable(world, alpha, agent);
+      await openCalendar(alpha);
+      await until(alpha, agent, View, (s) => s.front && !s.connected);
     });
-    expect(named).toEqual([true, false, false]);
+    expect([...named, listed]).toEqual([true, false, false, true]);
   });
 
   /**
