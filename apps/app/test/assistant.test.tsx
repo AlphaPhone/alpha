@@ -1640,21 +1640,28 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   });
 
   // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
-  it("A restart after the message reached the agent settles by itself with nothing shown: it is never sent again, and the next message goes once", async () => {
+  it("A restart after a long message reached the agent settles its older mark without sending again, and the next long message goes once", async () => {
     const world = { ...scene(), phone: true };
+    const first = "書".repeat(50_000);
+    const next = "読".repeat(60_000);
     world.ask.holdPosts = "unanswered";
-    await diesMidSend(world, "Book the table");
-    expect(world.ask.said).toEqual(["Book the table"]);
+    await diesMidSend(world, first);
+    const slot = dinner(world);
+    const mark = kept(world, slot);
+    world.ask.drafts.set(slot, JSON.stringify({ ...mark, lastSentWire: "旧".repeat(30_000) }));
 
     delete world.ask.holdPosts;
     const { alpha, runtime } = await reopened(world);
     await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept");
-    expect([composerText(), kept(world, dinner(world)).sending, byTheField(), card(), detent(alpha), world.ask.said]).toEqual(["", false, [], [], "Bar", ["Book the table"]]);
+    expect([composerText(), kept(world, slot).sending, byTheField(), card(), detent(alpha), world.ask.said.map((said) => said === first)])
+      .toEqual(["", false, [], [], "Bar", [true]]);
 
     await sheet(alpha);
-    write("for four");
+    write(next);
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text && !s.long);
     await press("Send");
-    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Book the table", "for four"])));
+    const messages = [first, next];
+    await drawn(() => vi.waitFor(() => expect(world.ask.said.map((said, index) => said === messages[index])).toEqual([true, true])));
   });
 
   // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
