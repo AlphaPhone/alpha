@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
@@ -93,6 +94,7 @@ function pruneSurfaceMounts(surface: AlphaSurface): Plugin {
 }
 
 export default defineConfig({
+  build: { rolldownOptions: { input: ["index.html", "alpha-slack-return.html"].map((page) => fileURLToPath(new URL(page, import.meta.url))) } },
   plugins: [vibelang(), react(), tailwindcss(), guarded, localOcr(buildSurface), pruneSurfaceMounts(buildSurface), ...(faked ? [fakes(process.env.ALPHA_AGENT, process.env.ALPHA_FAKES === "phone")] : [eliza(), ...(phoned ? [fakePhone()] : [])])],
   /** eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page. */
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },

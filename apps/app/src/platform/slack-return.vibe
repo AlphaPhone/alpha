@@ -13,7 +13,7 @@ module web {
 
   /** Return a consent tab to its opener's waiting resident and remove the one-use code from browser history. @throws {never} */
   export function deliverSlackReturn(): boolean {
-    if (window.location.pathname !== browserPath || Capacitor.isNativePlatform()) return false
+    if (Capacitor.isNativePlatform() || (window.location.pathname !== browserPath && window.location.pathname !== `${browserPath}.html`)) return false
     const query = new URLSearchParams(window.location.search)
     window.history.replaceState(null, "", browserPath)
     const channel = returnChannel()
