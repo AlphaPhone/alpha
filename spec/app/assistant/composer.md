@@ -526,7 +526,12 @@ There must be text or an attachment, the slot open and saved or edited, no
 other send in hand, storage working, no mark from an earlier send left in
 the slot, and no message still moving from a new conversation. The
 conversation must be able to take it: the agent within reach, the screen
-not sensitive and no turn in flight; otherwise Send is not offered.
+not sensitive and no turn in flight; otherwise Send is not offered. A new
+chat offers Send on the same terms, so a message under review there is never
+sent by itself: a Send that waits for its conversation to be made is spent
+once the message comes under review, and only the owner's next Send sends
+it. A mark holds the message's text once. As the message leaves, Alpha
+keeps its send key beside the slot.
 
 ```quint
 pure def content(m: Message): bool = m.text or attachments(m) > 0
