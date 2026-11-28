@@ -98,8 +98,6 @@ lemma WorkflowsNotNativeC(i: int)
   ensures pageRoutesWorkflows[i] !in nativeSpeechRoutes
   ensures pageRoutesWorkflows[i] !in nativeControlRoutes
 {
-  if i == 20 { NotNativeSpeechOrControl(pageRoutesWorkflows[20]); } else if i == 21 { NotNativeSpeechOrControl(pageRoutesWorkflows[21]); } else if i == 22 { NotNativeSpeechOrControl(pageRoutesWorkflows[22]); } else if i == 23 { NotNativeSpeechOrControl(pageRoutesWorkflows[23]); } else if i == 24 { NotNativeSpeechOrControl(pageRoutesWorkflows[24]); }
-  else if i == 25 { NotNativeSpeechOrControl(pageRoutesWorkflows[25]); } else if i == 26 { NotNativeSpeechOrControl(pageRoutesWorkflows[26]); } else if i == 27 { NotNativeSpeechOrControl(pageRoutesWorkflows[27]); } else if i == 28 { NotNativeSpeechOrControl(pageRoutesWorkflows[28]); } else { NotNativeSpeechOrControl(pageRoutesWorkflows[29]); }
 }
 
 lemma WorkflowsNotNative(route: Route)
