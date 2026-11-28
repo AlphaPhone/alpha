@@ -787,6 +787,28 @@ async function talkingOnComposer(world: Scene, ready: (state: Voice.Voice) => bo
   return { alpha, area };
 }
 
+async function talkingWithTextComposer(world: Scene) {
+  const { alpha, area } = await onComposer(world);
+  await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+  await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+  await press("Talk");
+  await drawnUntil(alpha, area, Voice.Machine, listening);
+  return { alpha, area };
+}
+
+async function interruptStory(world: Scene, alpha: Alpha, area: ReturnType<typeof assistant.runtime>) {
+  world.ask.acknowledgment = "Let me think of one.";
+  world.ask.holdAfterTools = true;
+  world.ask.holdAborts = true;
+  world.ask.nextReplyChunks = ["Once there was a lighthouse."];
+  speakUtterance(world, "Tell me a story");
+  await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Speaking" && state.mic === "On" && state.queued > 0);
+  world.voice.emitLocal?.("liveCaptureBargeIn", { captureId: world.voice.activeMicSession });
+  await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.heard);
+  world.ask.acknowledgment = undefined;
+}
+
 /** Talk on `world`, stopped from its conversation once `meanwhile` has changed the phone, and quiet again. */
 async function stoppedOnComposer(world: Scene, meanwhile: (talking: Awaited<ReturnType<typeof talkingOnComposer>>) => void | Promise<void>) {
   const { alpha, area } = await talkingOnComposer(world);
@@ -1142,15 +1164,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   it("sends a turn the owner says over Alpha once, after the turn it interrupted has let go of the agent", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     const { alpha, area } = await talkingOnComposer(world);
-    world.ask.acknowledgment = "Let me think of one.";
-    world.ask.holdAfterTools = true;
-    world.ask.holdAborts = true;
-    world.ask.nextReplyChunks = ["Once there was a lighthouse."];
-    speakUtterance(world, "Tell me a story");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Speaking" && state.mic === "On" && state.queued > 0);
-    world.voice.emitLocal?.("liveCaptureBargeIn", { captureId: world.voice.activeMicSession });
-    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.heard);
-    world.ask.acknowledgment = undefined;
+    await interruptStory(world, alpha, area);
     world.ask.nextReplyChunks = ["It is noon."];
     const spokenBefore = world.voice.spoken.length;
     speakUtterance(world, "What time is it");
@@ -1167,12 +1181,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"
   it("sends a turn heard while a typed message is still reaching the agent once, after it, and gives one up quietly only after 30 s", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha, area } = await onComposer(world);
-    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
-    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, listening);
+    const { alpha, area } = await talkingWithTextComposer(world);
     world.ask.holdAfterTools = true;
     await fill("Message Alpha", "Typed first");
     await press("Send");
@@ -1210,12 +1219,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
   // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"
   it("sends a turn heard while a typed message waits for the conversation it asked for once, after the typed message", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
-    const { alpha, area } = await onComposer(world);
-    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
-    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
-    await press("Talk");
-    await drawnUntil(alpha, area, Voice.Machine, listening);
+    const { alpha, area } = await talkingWithTextComposer(world);
     world.ask.holdCreates = true;
     await fill("Message Alpha", "Typed first");
     await press("Send");
@@ -1293,15 +1297,7 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     expect(world.ask.spokenFiles?.map(({ images }) => images?.map((image) => (image as { name?: string }).name))).toEqual([undefined, ["notes.txt"], undefined]);
 
     await attachNotes();
-    world.ask.acknowledgment = "Let me think of one.";
-    world.ask.holdAfterTools = true;
-    world.ask.holdAborts = true;
-    world.ask.nextReplyChunks = ["Once there was a lighthouse."];
-    speakUtterance(world, "Tell me a story");
-    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Speaking" && state.mic === "On" && state.queued > 0);
-    world.voice.emitLocal?.("liveCaptureBargeIn", { captureId: world.voice.activeMicSession });
-    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.heard);
-    world.ask.acknowledgment = undefined;
+    await interruptStory(world, alpha, area);
     world.ask.holdAfterTools = false;
     const spokenBefore = world.voice.spoken.length;
     speakUtterance(world, "What time is it");
