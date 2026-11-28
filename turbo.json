@@ -611,6 +611,10 @@
       "dependsOn": [
         "^build"
       ],
+      "env": [
+        "ANDROID_HOME",
+        "ANDROID_SDK_ROOT"
+      ],
       "outputs": [
         ".cache/test-result-*.json"
       ]

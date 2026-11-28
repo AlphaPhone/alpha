@@ -336,8 +336,8 @@ pure def loggedOut(s: Auth, ticket: int): Auth = { ...s, work: Idle }
 
 ### A restart drops in-flight authentication work and restores only a previously authenticated user account
 
-The phone restores the active owner's sealed grant after Telegram confirms the
-user account. An owner change drops the previous account and any in-flight work.
+A restart keeps the flood-wait deadline and signs the public state out. The phone
+restores the active owner's sealed grant after Telegram confirms the user account. An owner change drops the previous account and any in-flight work.
 A late answer cannot replace a newer sign-in.
 
 ```quint
@@ -348,8 +348,7 @@ pure def restoreSession(s: Auth, account: int, ticket: int): Auth =
     account: account, ticket: ticket + 1, credentialRev: s.credentialRev + 1, clock: s.clock }
 
 pure def restart(s: Auth): Auth =
-  if (s.step == Authenticated) { ...s, work: Idle, trouble: Fine }
-  else { ...s, step: SignedOut, work: Idle, account: 0, trouble: Fine }
+  { ...s, step: SignedOut, work: Idle, account: 0, qrExpiresAt: 0, trouble: Fine }
 ```
 
 ### Bot tokens are never authenticated, an authenticated session always names a user account and positive credential revision, and FloodWait blocks submits

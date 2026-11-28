@@ -288,6 +288,8 @@ export effect function runPeerMutation<A>(
 }
 
 const machine = reacting(Auth, {
+  keep: 1,
+  open: [{ type: "restart" }],
   carry,
   timers: (state) => state.step === "QrPending" && state.qrExpiresAt > 0
     ? [due("qr", Auth.qrCheckAt(state), { type: "checkQr", ticket: state.ticket, now: untimed })] : [],
