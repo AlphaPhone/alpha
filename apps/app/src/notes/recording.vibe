@@ -215,9 +215,8 @@ effect function capture(fx: Extract<Rec.Effect, { readonly tag: "Captures" }>): 
   const folderId = (try (try NoteContent).collection()).folderByNumber.get(state.folder)?.id
   const mappedId = try takes.recordingFor(state.owner, fx.take)
   const existing = try currentTape()
-  const resumingOwned = mappedId !== undefined && existing?.recordingId === mappedId
-  const taken = resumingOwned
-    ? (device.command(mappedId, "Resume") catch () => undefined)
+  const taken = mappedId !== undefined && existing?.recordingId === mappedId
+    ? (existing.state === "recording" ? existing : device.command(mappedId, "Resume") catch () => undefined)
     : (device.start(try promise(() => ownerDigest(identity)), folderId) catch () => undefined)
   if (taken?.recordingId !== undefined) try takes.bind(state.owner, fx.take, taken.recordingId)
   if (taken === undefined) try ignore(recorder.send({ type: "broke", capture: fx.capture }, phone))
@@ -403,6 +402,7 @@ const updates = started(effect {
   const device = try NoteDevice
   if (!device.available) return
   const recorder = try Rec.Machine
+  const takes = try TakeRegistry
   const devicePage = try Device
   const shell = try Shell
   const shown = try RecordingDisplay
@@ -425,21 +425,21 @@ const updates = started(effect {
     }
     return identity
   }
-  /** The tape as the phone last reported it, so a pause or resume is followed only when the phone made it, never from a report older than Alpha's own command. */
-  let reported: Tape | undefined
-  const report = effect (tape: Tape) => {
+  type TapeUpdate = { readonly source: "change" | "sample"; readonly tape: Tape }
+  const report = effect ({ source, tape }: TapeUpdate) => {
     const owner = try project(tape)
     if (owner === undefined) return
-    const moved = reported !== undefined && reported.recordingId === tape.recordingId && reported.state !== tape.state
-    reported = tape
     try samples(tape, owner)
     const state = try recorder.get()
     if (tape.state === "stopped" && (state.phase === "Recording" || state.phase === "Paused")) {
       if (tape.stopReason === "user" || tape.stopReason === "done") try ignore(recorder.send({ type: "stop", take: state.take }, "Owner"))
       else try ignore(recorder.send({ type: "broke", capture: state.capture }, phone))
-    } else if (moved && tape.state === "paused" && state.phase === "Recording") {
+      return
+    }
+    if (source !== "change" || tape.recordingId === undefined || tape.recordingId !== (try takes.recordingFor(state.owner, state.take))) return
+    if (tape.state === "paused" && state.phase === "Recording") {
       try ignore(recorder.send({ type: "pause", take: state.take }, "Owner"))
-    } else if (moved && tape.state === "recording" && state.phase === "Paused") {
+    } else if (tape.state === "recording" && state.phase === "Paused") {
       try ignore(recorder.send({ type: "resume", take: state.take, room: try room() }, "Owner"))
     }
   }
@@ -447,6 +447,10 @@ const updates = started(effect {
   const poll = Stream.fromEffectSchedule(read, Schedule.spaced("1 second"))
   const playing = Stream.changes(Stream.map(recorder.changes, (state) => state.phase === "Recording" || state.phase === "Stopping"))
   const ticks = Stream.switchMap(playing, (polling) => polling ? Stream.filter(poll, (tape): tape is Tape => tape !== undefined) : Stream.empty)
+  const reports = Stream.merge(
+    Stream.map(device.changed, (tape): TapeUpdate => ({ source: "change", tape })),
+    Stream.map(ticks, (tape): TapeUpdate => ({ source: "sample", tape })),
+  )
   const visibility = Stream.concat(Stream.fromEffect(devicePage.showing()), devicePage.visible)
   const listening = Stream.changes(Stream.map(Stream.zipLatestAll(recorder.changes, shell.changes, visibility),
     ([state, place, visible]) => state.phase === "Recording" && visible && showing(place, "Notes")))
@@ -460,7 +464,7 @@ const updates = started(effect {
   try reopen()
   try Effect.all([
     Stream.runForEach(opened, reopen),
-    Stream.runForEach(Stream.merge(device.changed, ticks), report),
+    Stream.runForEach(reports, report),
     Stream.runForEach(meters, project),
   ], { concurrency: "unbounded" })
 }, "watch the phone’s Notes recorder")
