@@ -76,7 +76,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
       startEmail: () => Promise.resolve({ request: 1, attempt: 1, verdict: "code-on-its-way", expiresAt: world.now + 600_000, resendAt: world.now + 60_000 }),
       verify: ({ attempt }) => {
         world.signedIn = true;
-        world.wallet.unreachable = false;
+        world.platform.agentCredentialMissing = false;
         return Promise.resolve({ request: 2, attempt, verdict: "signed-in-as", credentialId: world.voice.credentialId, google: "not-requested" });
       },
     };
@@ -109,6 +109,12 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Ledger, (s) => s.standing.status === "Failed");
     expect([(await ledger()).held.length, Boolean(button("Try again"))]).toEqual([2, true]);
     if (phone) {
+      const lastRead = (await ledger()).standing.ticket;
+      world.wallet.unreachable = false;
+      world.platform.agentCredentialMissing = true;
+      await returned(alpha, runtime);
+      await until(alpha, runtime, Ledger, (s) => s.standing.ticket > lastRead && s.standing.status === "Failed");
+      expect(button("Sign in to Alpha")).toBeUndefined();
       world.signedIn = false;
       await returned(alpha, runtime);
       await until(alpha, runtime, Ledger, (s) => s.custody === "SignInRequired");
