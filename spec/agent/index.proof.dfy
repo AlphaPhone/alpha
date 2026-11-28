@@ -36,19 +36,32 @@ lemma CoreNotSpeech(route: Route)
   if i < 15 { CoreNotSpeechA(i); } else { CoreNotSpeechB(i); }
 }
 
+lemma AppsNotSpeechA(i: int)
+  requires 0 <= i < 15
+  ensures pageRoutesApps[i] !in nativeSpeechRoutes
+{
+  if i == 0 { NotSpeech(pageRoutesApps[0]); } else if i == 1 { NotSpeech(pageRoutesApps[1]); } else if i == 2 { NotSpeech(pageRoutesApps[2]); } else if i == 3 { NotSpeech(pageRoutesApps[3]); } else if i == 4 { NotSpeech(pageRoutesApps[4]); }
+  else if i == 5 { NotSpeech(pageRoutesApps[5]); } else if i == 6 { NotSpeech(pageRoutesApps[6]); } else if i == 7 { NotSpeech(pageRoutesApps[7]); } else if i == 8 { NotSpeech(pageRoutesApps[8]); } else if i == 9 { NotSpeech(pageRoutesApps[9]); }
+  else if i == 10 { NotSpeech(pageRoutesApps[10]); } else if i == 11 { NotSpeech(pageRoutesApps[11]); } else if i == 12 { NotSpeech(pageRoutesApps[12]); } else if i == 13 { NotSpeech(pageRoutesApps[13]); } else { NotSpeech(pageRoutesApps[14]); }
+}
+
+lemma AppsNotSpeechB(i: int)
+  requires 15 <= i < 31
+  ensures pageRoutesApps[i] !in nativeSpeechRoutes
+{
+  if i == 15 { NotSpeech(pageRoutesApps[15]); } else if i == 16 { NotSpeech(pageRoutesApps[16]); } else if i == 17 { NotSpeech(pageRoutesApps[17]); } else if i == 18 { NotSpeech(pageRoutesApps[18]); } else if i == 19 { NotSpeech(pageRoutesApps[19]); }
+  else if i == 20 { NotSpeech(pageRoutesApps[20]); } else if i == 21 { NotSpeech(pageRoutesApps[21]); } else if i == 22 { NotSpeech(pageRoutesApps[22]); } else if i == 23 { NotSpeech(pageRoutesApps[23]); } else if i == 24 { NotSpeech(pageRoutesApps[24]); }
+  else if i == 25 { NotSpeech(pageRoutesApps[25]); } else if i == 26 { NotSpeech(pageRoutesApps[26]); } else if i == 27 { NotSpeech(pageRoutesApps[27]); } else if i == 28 { NotSpeech(pageRoutesApps[28]); } else if i == 29 { NotSpeech(pageRoutesApps[29]); }
+  else { NotSpeech(pageRoutesApps[30]); }
+}
+
 lemma AppsNotSpeech(route: Route)
   requires route in pageRoutesApps
   ensures route !in nativeSpeechRoutes
 {
   assert |pageRoutesApps| == 31;
   var i :| 0 <= i < 31 && pageRoutesApps[i] == route;
-  if i == 0 { NotSpeech(pageRoutesApps[0]); } else if i == 1 { NotSpeech(pageRoutesApps[1]); } else if i == 2 { NotSpeech(pageRoutesApps[2]); } else if i == 3 { NotSpeech(pageRoutesApps[3]); } else if i == 4 { NotSpeech(pageRoutesApps[4]); }
-  else if i == 5 { NotSpeech(pageRoutesApps[5]); } else if i == 6 { NotSpeech(pageRoutesApps[6]); } else if i == 7 { NotSpeech(pageRoutesApps[7]); } else if i == 8 { NotSpeech(pageRoutesApps[8]); } else if i == 9 { NotSpeech(pageRoutesApps[9]); }
-  else if i == 10 { NotSpeech(pageRoutesApps[10]); } else if i == 11 { NotSpeech(pageRoutesApps[11]); } else if i == 12 { NotSpeech(pageRoutesApps[12]); } else if i == 13 { NotSpeech(pageRoutesApps[13]); } else if i == 14 { NotSpeech(pageRoutesApps[14]); }
-  else if i == 15 { NotSpeech(pageRoutesApps[15]); } else if i == 16 { NotSpeech(pageRoutesApps[16]); } else if i == 17 { NotSpeech(pageRoutesApps[17]); } else if i == 18 { NotSpeech(pageRoutesApps[18]); } else if i == 19 { NotSpeech(pageRoutesApps[19]); }
-  else if i == 20 { NotSpeech(pageRoutesApps[20]); } else if i == 21 { NotSpeech(pageRoutesApps[21]); } else if i == 22 { NotSpeech(pageRoutesApps[22]); } else if i == 23 { NotSpeech(pageRoutesApps[23]); } else if i == 24 { NotSpeech(pageRoutesApps[24]); }
-  else if i == 25 { NotSpeech(pageRoutesApps[25]); } else if i == 26 { NotSpeech(pageRoutesApps[26]); } else if i == 27 { NotSpeech(pageRoutesApps[27]); } else if i == 28 { NotSpeech(pageRoutesApps[28]); } else if i == 29 { NotSpeech(pageRoutesApps[29]); }
-  else { NotSpeech(pageRoutesApps[30]); }
+  if i < 15 { AppsNotSpeechA(i); } else { AppsNotSpeechB(i); }
 }
 
 lemma WorkflowsNotSpeechA(i: int)
