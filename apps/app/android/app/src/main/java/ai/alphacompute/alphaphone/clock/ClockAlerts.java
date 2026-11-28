@@ -195,7 +195,7 @@ final class ClockAlerts {
         for (int i = 0; i < alerts.length(); i++) {
             Alert alert = Alert.parse(alerts.getJSONObject(i));
             Entry old = previous.get(alert.key());
-            boolean same = old != null && (old.alert.at == alert.at || alert.ringing)
+            boolean same = old != null && old.alert.remoteId.equals(alert.remoteId) && (old.alert.at == alert.at || alert.ringing)
                 && old.alert.hour == alert.hour && old.alert.minute == alert.minute && old.alert.daysMask == alert.daysMask;
             long next = !alert.ringing ? alert.at : alert.daysMask == 0 ? 0 : alert.nextWallTime(System.currentTimeMillis());
             Entry row = same ? new Entry(alert, old.next, old.posted, old.token, old.delivering)
@@ -310,7 +310,7 @@ final class ClockAlerts {
                 rows.put(row.alert.key(), new Entry(row.alert, row.next, row.posted, "", false));
                 save(rows);
             }
-            return new JSONObject().put("kind", row.alert.kind).put("id", row.alert.id).put("token", token);
+            return new JSONObject().put("kind", row.alert.kind).put("remoteId", row.alert.remoteId).put("token", token);
         }
         return new JSONObject();
     }
