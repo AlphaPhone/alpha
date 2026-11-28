@@ -347,6 +347,7 @@ describe("Home on a phone", () => {
   // spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home"
   it('Shows Telegram, Slack and Wallet on Home by default without an Apps tile and opens them directly (spec/app/home/tiles.md, "Home\'s defaults use the product\'s Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home")', async () => {
     const world = { ...scene(), phone: true };
+    world.telegram.enabled = true;
     const { alpha } = await open(world, only("home", "assistant", "view:Telegram", "view:Slack", "view:Wallet"));
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
