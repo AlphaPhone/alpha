@@ -29,6 +29,34 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Use the Maven Central mirror for Android builds
+      if: runner.environment == 'github-hosted' && contains(fromJSON('["android","android-emulator","android-jvm-tests","release-candidate","resident-android"]'), inputs.job)
+      shell: bash
+      run: |
+        init_dir="${GRADLE_USER_HOME:-$HOME/.gradle}/init.d"
+        mkdir -p "$init_dir"
+        cat > "$init_dir/alpha-maven-central.gradle" <<'GRADLE'
+        import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+        def mirrorCentral = { repositories ->
+            repositories.withType(MavenArtifactRepository).configureEach { repository ->
+                if (repository.url?.toString()?.replaceAll('/+$', '') == 'https://repo.maven.apache.org/maven2') {
+                    repository.url = URI.create('https://maven-central.storage-download.googleapis.com/maven2/')
+                }
+            }
+        }
+
+        gradle.beforeSettings { settings ->
+            mirrorCentral(settings.buildscript.repositories)
+            mirrorCentral(settings.pluginManagement.repositories)
+            mirrorCentral(settings.dependencyResolutionManagement.repositories)
+        }
+
+        gradle.beforeProject { project ->
+            mirrorCentral(project.buildscript.repositories)
+            mirrorCentral(project.repositories)
+        }
+        GRADLE
     - id: setup-pnpm
       uses: pnpm/action-setup@v6
     - id: restore-dafny
