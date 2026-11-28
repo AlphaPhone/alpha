@@ -736,6 +736,45 @@ lemma StartAccounted(out: seq<Effect>, c: Camera)
   }
 }
 
+lemma tick_ensures(s: Camera, now: int, by_: app__photos__actor_Actor)
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysNoCameraWithoutAccess(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysNothingHeldAway(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysStartsAccounted(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysTorchBelongsToItsPreview(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysLensSettingsValid(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysFocusFollowsTheNewestTap(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysRecordingHoldsThePreview(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysOneShutterOnTheCamera(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> alwaysTheRequestWaitsOnTheCamera(tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepALostPreviewFails(s, "tick", tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepARetiredPreviewIsReleased(s, "tick", tick(s, now, by_).state, tick(s, now, by_).out))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepOneFocusWriteAtATime(s, "tick", tick(s, now, by_).state, tick(s, now, by_).out))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepSoundOnlyWithTheMicrophone(s, tick(s, now, by_).state, tick(s, now, by_).out))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepASavedVideoIsTheLast(s, tick(s, now, by_).state))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepTheShutterNeverFiresCovered(s, tick(s, now, by_).state, tick(s, now, by_).out))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepEachRequestIsAnsweredOnce(s, tick(s, now, by_).state, tick(s, now, by_).out))
+  ensures (inv(s) ==> canTick(s, now, by_) ==> stepTheAgentFailsOnlyForCause(s, "tick", tick(s, now, by_).state))
+{
+  hide *;
+  if inv(s) && canTick(s, now, by_) {
+    var f := app__camera__recording_tick(s.film, now);
+    assert tick(s, now, by_) == filming(f, now, s) by {
+      reveal tick;
+    }
+    assert app__camera__recording_alwaysWithinLimits(f) && app__camera__recording_alwaysSavedIsWhole(f)
+      && (app__camera__recording_recording(f) ==> recording(s))
+      && (f.stage.Running? ==> holds(s)) by {
+      reveal inv, canTick, alwaysRecordingHoldsThePreview, recording,
+        app__camera__recording_canTick, app__camera__recording_tick,
+        app__camera__recording_stopping, app__camera__recording_recording, app__camera__recording_opening,
+        app__camera__recording_alwaysWithinLimits, app__camera__recording_alwaysSavedIsWhole,
+        app__camera__recording_quotient_app__camera__recording, JSFloorDiv, MathAbs,
+        app__camera__recording_second, app__camera__recording_maxSeconds;
+    }
+    FilmingPreserves(s, f, now, "tick");
+  }
+}
+
 lemma chunk_ensures(s: Camera, piece: int, now: int, by_: app__photos__actor_Actor)
   ensures (inv(s) ==> canChunk(s, piece, by_) ==> alwaysNoCameraWithoutAccess(chunk(s, piece, now, by_).state))
   ensures (inv(s) ==> canChunk(s, piece, by_) ==> alwaysNothingHeldAway(chunk(s, piece, now, by_).state))
