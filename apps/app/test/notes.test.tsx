@@ -1104,4 +1104,31 @@ describe("Notes", () => {
     expect((await runtime.runPromise(Actions.use((a) => a.get()))).open).toBe(false);
     expect((await runtime.runPromise(Editor.use((e) => e.get()))).showing).toBe(true);
   });
+
+  it('Empty Notes offers direct New note and Record voice actions without Import (spec/app/notes/index.md, "Story: See my notes"; spec/app/notes/editor.md, "Story: Write a note"; spec/app/notes/recording.md, "Story: Record a voice note")', async () => {
+    const world = alphaImage();
+    world.notes.notes = [];
+    const { alpha, runtime } = await openLoadedNotes(world);
+    await rendered(() => {
+      expect(document.body.textContent).toContain("No notes");
+      expect(button("Import text note")).toBeUndefined();
+      expect(button(/Import/)).toBeUndefined();
+      expect(button("Record voice")).toBeDefined();
+      expect([...document.querySelectorAll("button")].filter((found) => found.textContent === "New note")).toHaveLength(1);
+    });
+
+    await press("Record voice");
+    await until(alpha, runtime, Recorder, (state) => state.phase === "Recording" && state.capture > 0);
+    await drawn(() => { world.notes.tape.durationMs = 1000; world.notes.tapeChanged(); });
+    await rendered(() => expect(button("Discard recording")?.disabled).toBe(false));
+    await press("Discard recording");
+    await control("Discard");
+    await press("Discard");
+    await until(alpha, runtime, Recorder, (state) => state.phase === "Idle");
+
+    const emptyNewNote = () => [...document.querySelectorAll("button")].find((found) => found.textContent === "New note");
+    await rendered(() => expect(emptyNewNote()).toBeDefined());
+    await drawn(() => emptyNewNote()?.click());
+    await until(alpha, runtime, Editor, (state) => state.showing && state.fresh);
+  });
 });

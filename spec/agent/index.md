@@ -610,7 +610,9 @@ start and end of their window, and Calendar may send a time zone.
 Calendar asks for up to fifty pending approvals, and when deleting an event
 sends the calendar, grant, recurrence scope, expected provider version,
 idempotency key, cancellation mode and attendee notice choice. Workflows lists the owner's
-visible tasks, reads a result page for its
+visible tasks, pages the agent's native notification inbox (`nativeTransport=true`,
+with optional UUID `nativeEpoch` and nonnegative decimal `limit`, `afterSequence`
+and `throughSequence`), reads a result page for its
 client, and supplies the exact reviewed revision when removing a trigger.
 Reminders says, when it deletes a custom list, whether the list's reminders
 move to the default list or go with it.
@@ -633,8 +635,11 @@ pure val pageQueries: List[RequestQuery] = List(
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMin", kind: AnyQuery, value: "", example: "2026-11-24T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeMax", kind: AnyQuery, value: "", example: "2026-11-25T00:00:00.000Z" },
   { method: Get, path: "/api/lifeops/calendar/feed", key: "timeZone", kind: AnyQuery, value: "", example: "America/New_York" },
-  { method: Get, path: "/api/notifications", key: "category", kind: FixedQuery, value: "workflow", example: "workflow" },
-  { method: Get, path: "/api/notifications", key: "limit", kind: FixedQuery, value: "50", example: "50" },
+  { method: Get, path: "/api/notifications", key: "nativeTransport", kind: FixedQuery, value: "true", example: "true" },
+  { method: Get, path: "/api/notifications", key: "nativeEpoch", kind: PatternQuery, value: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", example: "00000000-0000-0000-0000-000000000000" },
+  { method: Get, path: "/api/notifications", key: "limit", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "50" },
+  { method: Get, path: "/api/notifications", key: "afterSequence", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
+  { method: Get, path: "/api/notifications", key: "throughSequence", kind: PatternQuery, value: "0|[1-9][0-9]{0,15}", example: "0" },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "calendarId", kind: AnyQuery, value: "", example: "primary" },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "grantId", kind: AnyQuery, value: "", example: "grant-1" },
   { method: Delete, path: "/api/lifeops/calendar/events/{eventId}", key: "recurrenceScope", kind: PatternQuery, value: "instance|this_and_following|series", example: "instance" },

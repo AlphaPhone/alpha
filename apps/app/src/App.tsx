@@ -327,7 +327,7 @@ export function App({ alpha }: AppProps) {
             if (document && document.dataset.alphaCanGoBack !== canGoBack) document.dataset.alphaCanGoBack = canGoBack;
           }}
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]",
+            "relative flex min-h-0 min-w-0 flex-1 flex-col in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px] in-[main:has([data-alpha-call-strip=over])]:[--alpha-safe-top:0px]",
             showing !== undefined && "overflow-auto overscroll-contain",
             strip && "overflow-hidden",
             nativeHomeSide && "[--alpha-dock-overlap:0px]",
@@ -360,7 +360,7 @@ export function App({ alpha }: AppProps) {
                   {!viewHasHeader(showing) && <AppHeader
                     title={views[showing].label}
                     leading={back && <AppBack alpha={alpha} />}
-                    className="shrink-0"
+                    className="mt-[var(--alpha-safe-top)] shrink-0 in-data-[alpha-launcher]:mt-[max(--spacing(11),var(--alpha-safe-top))]"
                   />}
                   {alpha.slot(`view:${showing}`)}
                 </div>

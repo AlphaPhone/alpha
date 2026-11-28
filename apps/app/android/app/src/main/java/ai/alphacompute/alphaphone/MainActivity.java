@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
@@ -16,6 +18,7 @@ import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import com.getcapacitor.CapConfig;
 import com.getcapacitor.WebViewListener;
 import java.lang.ref.WeakReference;
@@ -165,6 +168,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMediaEnrollmentPlugin.class);
   registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
@@ -197,6 +201,11 @@ public class MainActivity extends BridgeActivity {
   page.setFilterTouchesWhenObscured(true);
   page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
   android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+  page.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+   @Override public Bitmap getDefaultVideoPoster() {
+    return Bitmap.createBitmap(new int[] { Color.BLACK }, 1, 1, Bitmap.Config.ARGB_8888);
+   }
+  });
   AlphaDevicePlugin.applyTextScale(this);
   followWindowInsets();
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {

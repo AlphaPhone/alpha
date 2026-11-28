@@ -79,6 +79,7 @@ export interface AskScene {
   beforeStatus?: () => Promise<void>;
   /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
   canRespond: boolean;
+  lastCloudFailure?: { readonly kind: string; readonly at: number };
   warmUps: Record<string, string>[];
   warmUpFails: boolean;
   statusReads: number;
@@ -378,7 +379,11 @@ export function askRoutes(scene: AskScene): Route[] {
       scene.statusReads += 1;
       const answer = () => scene.failStatus
         ? Response.json({ error: "status_unavailable" }, { status: 503 })
-        : Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
+        : Response.json({
+          ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }),
+          canRespond: scene.canRespond,
+          ...(scene.lastCloudFailure === undefined ? {} : { lastCloudFailure: scene.lastCloudFailure }),
+        });
       return scene.beforeStatus ? scene.beforeStatus().then(answer) : answer();
     },
     (request, url) => {
