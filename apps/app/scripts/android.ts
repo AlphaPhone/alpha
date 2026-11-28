@@ -158,6 +158,7 @@ function voiceRecord(directory: string) {
   return receipt.files.map(record);
 }
 
+/** Build pinned voice assets with the same scalar NumPy logarithm on Linux x64 runners. */
 function stageVoice(env: NodeJS.ProcessEnv) {
   const at = prepared();
   const module = join(at.root, "packages/os/android/local-inference");
@@ -175,9 +176,13 @@ function stageVoice(env: NodeJS.ProcessEnv) {
   }
   const directory = voiceDirectory();
   if (!existsSync(join(directory, "build-record.json"))) {
+    const converterEnvironment: NodeJS.ProcessEnv = { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine };
+    if (process.platform === "linux" && process.arch === "x64") {
+      converterEnvironment.NPY_DISABLE_CPU_FEATURES = [env.NPY_DISABLE_CPU_FEATURES, "AVX512_SKX"].filter(Boolean).join(",");
+    }
     run(process.execPath, [
       join(module, "scripts/build-native.ts"), "--workspace", join(android, ".cache", "voice-work", expectedEngine), "--out", directory,
-    ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
+    ], { env: converterEnvironment });
   }
   voiceRecord(directory);
   return { engine, directory };
