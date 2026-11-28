@@ -3,7 +3,6 @@ import { digestInbox, type DigestResult, hostedDigestProtocol } from "@elizaos/p
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import * as Home from "../gen/app__home.effect.vibe";
-import * as Drawer from "../gen/app__home__drawer.effect.vibe";
 import { Machine as DigestSchedules } from "../gen/app__digests__schedules.effect.vibe";
 import { Machine as WorkflowList } from "../gen/app__workflows__list.effect.vibe";
 import * as Cards from "../gen/app__home__cards.effect.vibe";
@@ -17,7 +16,6 @@ import { button, closeAll, drawn, fill, hardware, later, only, open, press, seen
 import { memoryIndexedDB } from "./fakes/indexeddb.ts";
 import { scene, type Scene } from "./fakes/scene.ts";
 import { agentEvent } from "./fakes/calendar.ts";
-import { actInApps, chooseApp, closeApps, openApps, told } from "../src/home/home.vibe";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { waiting } from "../src/home/waiting.vibe";
 import { fromAreas } from "../src/home/cards.vibe";
@@ -69,9 +67,9 @@ describe("Home on a phone", () => {
     const { alpha } = first;
     const homes = home.runtime(alpha);
 
-    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles"; spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home": with nothing saved Home shows Alpha's own apps that this phone admits, without an Apps tile.
+    // spec/app/home/index.md, "Startup says once per run how Alpha is presented, and Home then reads its saved tiles": with nothing saved Home shows Alpha's own apps that this phone admits, and the Apps drawer tile on the admitted phone.
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsLauncher" && h.tiles.load.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([alphaApps, true]);
 
     // spec/app/home/tiles.md, "Only Phone, Messages, Inbox, Telegram and Slack carry a badge, only when something waits there, and no tile does while Home is being edited"
     await drawn(() => {
@@ -181,7 +179,7 @@ describe("Home on a phone", () => {
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.assistant === "Sheet");
     expect(tileButton("view:Notes")?.closest("[inert]")).toBeNull();
-    expect(button("Apps")).toBeUndefined();
+    expect(button("Apps")?.closest("[inert]")).toBeNull();
     // spec/app/home/index.md, "A favorite on bare Home or beside the landscape Ask sheet opens the installed app and leaves Ask where it is"
     expect(tileButton(`app:${clock}`)?.closest("[inert]")).toBeNull();
     await drawn(() => tileButton(`app:${clock}`)?.click());
@@ -194,40 +192,50 @@ describe("Home on a phone", () => {
     expect(tileButton("view:Notes")?.closest("[inert]")).not.toBeNull();
     expect(tileButton(`app:${clock}`)?.closest("[inert]")).not.toBeNull();
     await press("Notes");
+    await press("Apps");
     await drawn(() => tileButton(`app:${clock}`)?.click());
     expect(world.launcher.opened).toEqual(["org.fixture.clock"]);
     expect(await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).toMatchObject({ trail: [], drawer: false, assistant: "Sheet" });
     await alpha.runtime.runPromise(Layers.use((layers) => layers.send({ type: "closeLayer", id: "review" })));
     await until(alpha, alpha.runtime, Layers, (state) => state.open.length === 0);
 
-    // spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home"
-    const routeBefore = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(openApps(routeBefore, true));
-    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(false);
-
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawerBeside", phone: true, landscapePhone: true })));
+    await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
-    expect(dialog()).toBeNull();
-    const drawerRoute = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(actInApps(drawerRoute, true, { type: "search", query: "clock", open: true }));
-    await until(alpha, homes, Drawer.Machine, (state) => state.query === "clock");
+    await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
+    expect(dialog()?.getAttribute("aria-modal")).toBeNull();
+    expect(button("Open Clock org.fixture.clock")).toBeDefined();
+    await fill("Search apps", "clock");
+    expect(button("Open Mail")).toBeUndefined();
 
     await rotate(false);
-    await homes.runPromise(closeApps(drawerRoute, true));
-    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(true);
+    expect(dialog()?.hasAttribute("inert")).toBe(true);
+    await press("Close apps");
+    expect(dialog()).not.toBeNull();
     expect(chat()).not.toBeNull();
     await rotate(true);
-    expect((await homes.runPromise(Drawer.Machine.use((state) => state.get()))).query).toBe("clock");
-    await homes.runPromise(closeApps(drawerRoute, true));
+    expect(dialog()?.hasAttribute("inert")).toBe(false);
+    expect(dialog()?.querySelector("input")?.value).toBe("clock");
+    await press("Close apps");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Sheet");
     expect(dialog()).toBeNull();
     expect(chat()).not.toBeNull();
 
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawerBeside", phone: true, landscapePhone: true })));
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
+    const search = dialog()?.querySelector("input");
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    await drawn(() => {
+      search?.focus();
+      search?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(chat()).not.toBeNull();
+
+    await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
-    expect(dialog()).toBeNull();
+    expect(dialog()?.getAttribute("aria-modal")).toBe("true");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.assistant === "Bar");
 
@@ -293,65 +301,73 @@ describe("Home on a phone", () => {
     expect(world.workflows.admissions).toEqual([]);
   });
 
-  it('Suppresses the Apps tile and drawer UI while keeping underlying drawer rules intact (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {
+  it('Find an installed app in Apps (spec/app/home/index.md, "Story: Find an installed app in Apps"; spec/app/home/drawer.md, "Story: Find an installed app by name")', async () => {
     const world = { ...scene(), phone: true };
     const { alpha } = await open(world, only("home", "assistant"));
     const homes = home.runtime(alpha);
     const dialog = () => document.querySelector('[role="dialog"][aria-label="Apps"]');
+    const search = () => dialog()?.querySelector<HTMLInputElement>('input[aria-label="Search apps"]');
+    const focusedAfterFrames = async (target: HTMLElement | null | undefined) => {
+      expect(target).toBeInstanceOf(HTMLElement);
+      for (let frame = 0; frame < 13 && document.activeElement !== target; frame += 1) await later(alpha, 16);
+      expect(document.activeElement).toBe(target);
+    };
     await until(alpha, homes, Home.Machine, (h) => h.host === "AsApp" && h.tiles.load.status === "Loaded");
     expect((await homes.runPromise(Home.Machine.use((m) => m.get()))).installed.read.status).toBe("Idle");
-    expect(button("Apps")).toBeUndefined();
 
-    const route0 = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(openApps(route0, false));
-    expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(false);
-
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawer", phone: true })));
+    const opener = button("Apps");
+    await press("Apps");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect(dialog()).toBeNull();
+    await focusedAfterFrames(dialog()?.querySelector("h1"));
+    expect(opener?.closest("[inert]")).not.toBeNull();
 
-    const route1 = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(actInApps(route1, false, { type: "search", query: "fíxture.clock", open: true }));
-    await until(alpha, homes, Drawer.Machine, (state) => state.query === "fíxture.clock");
-    await homes.runPromise(actInApps(route1, false, { type: "openApp", app: "org.fixture.clock/org.fixture.clock.Main", now: 0 }));
+    await drawn(() => search()?.focus());
+    await fill("Search apps", "fíxture.clock");
+    expect([Boolean(button("Open Clock org.fixture.clock")), Boolean(button("Open Clock")), Boolean(button("Open Mail"))]).toEqual([true, false, false]);
+    await press("Open Clock org.fixture.clock");
     await vi.waitFor(() => expect(world.launcher.opened).toEqual(["org.fixture.clock"]));
 
+    // spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
-    await until(alpha, homes, Drawer.Machine, (state) => state.query === "");
+    await focusedAfterFrames(opener);
 
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawer", phone: true })));
+    await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
-    expect(dialog()).toBeNull();
+    await vi.waitFor(() => expect([search()?.value, Boolean(button("Open Mail"))]).toEqual(["", true]));
 
     // spec/app/shell/index.md, "Back closes one layer: Ask Alpha by a step, then the app on top": Ask Alpha stays above the drawer and leaves first.
     await press("Open conversation");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Sheet");
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer && state.assistant === "Bar");
+    expect(dialog()).not.toBeNull();
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
+    await focusedAfterFrames(button("Apps"));
 
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawer", phone: true })));
+    await press("Apps");
     await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.length === 0);
     expect(dialog()).toBeNull();
   });
 
-  // spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home"
-  it('Shows Telegram, Slack and Wallet on Home by default without an Apps tile and opens them directly (spec/app/home/tiles.md, "Home\'s defaults use the product\'s Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "The Apps tile and Apps drawer are suppressed on Home")', async () => {
+  // spec/app/home/tiles.md, "Home's defaults use the product's Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "Apps also lists Alpha's own apps that are not on Home, and opens one as its tile would"
+  it('Shows Telegram, Slack and Wallet on Home by default, lists Clock and Reminders in Apps, and opens them (spec/app/home/tiles.md, "Home\'s defaults use the product\'s Home order, and Home holds at most 4096 tiles"; spec/app/home/index.md, "Apps also lists Alpha\'s own apps that are not on Home, and opens one as its tile would")', async () => {
     const world = { ...scene(), phone: true };
-    const { alpha } = await open(world, only("home", "assistant", "view:Telegram", "view:Slack", "view:Wallet"));
+    const { alpha } = await open(world, only("home", "assistant", "view:Telegram", "view:Slack", "view:Wallet", "view:Clock", "view:Reminders"));
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
     expect(tiles()).toContain("view:Telegram");
     expect(tiles()).toContain("view:Slack");
     expect(tiles()).toContain("view:Wallet");
+    expect(tiles()).not.toContain("view:Clock");
+    expect(tiles()).not.toContain("view:Reminders");
     expect(Boolean(button("Telegram"))).toBe(true);
     expect(Boolean(button("Slack"))).toBe(true);
     expect(Boolean(button("Wallet"))).toBe(true);
-    expect(Boolean(button("Apps"))).toBe(false);
+    expect(Boolean(button("Apps"))).toBe(true);
 
     await press("Telegram");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Telegram");
@@ -363,41 +379,64 @@ describe("Home on a phone", () => {
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
     await press("Slack");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Slack");
+    await hardware("home");
+    await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await vi.waitFor(() => expect(Boolean(button("Open Clock"))).toBe(true));
+    expect(Boolean(button("Open Reminders"))).toBe(true);
+    expect(Boolean(button("Open Telegram"))).toBe(false);
+    expect(Boolean(button("Open Phone"))).toBe(false);
+    await press("Open Clock");
+    await until(alpha, alpha.runtime, Shell, (state) => !state.drawer && state.trail.at(-1) === "Clock");
   });
 
-  it('Keeps underlying native app menu, App info and pin rules intact while Apps drawer UI is suppressed (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
+  it('Holds a native app for App info and to pin it (spec/app/home/drawer.md, "Story: Act on an installed app from its menu")', async () => {
     const world = { ...scene(), phone: true };
     const { alpha } = await open(world, only("home"));
     const homes = home.runtime(alpha);
-    const clockKey = "org.fixture.clock/org.fixture.clock.Main";
+    const menu = () => document.querySelector('[role="menu"][aria-label="Clock"]');
+    const action = (label: string) => [...(menu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])]
+      .find((item) => item.textContent === label);
+    const selectAction = async (label: string) => {
+      const item = action(label);
+      expect(item).toBeInstanceOf(HTMLElement);
+      await drawn(() => item?.click());
+    };
+    const holdClock = async () => {
+      const clock = button("Open Clock org.fixture.clock");
+      expect(clock).toBeInstanceOf(HTMLButtonElement);
+      await drawn(() => clock?.dispatchEvent(pointer("pointerdown", 100, 235)));
+      await later(alpha, 450);
+      await vi.waitFor(() => expect(menu()).not.toBeNull());
+      await drawn(() => clock?.dispatchEvent(pointer("pointerup", 100, 235)));
+    };
 
     await until(alpha, homes, Home.Machine, (state) => state.host === "AsApp" && state.tiles.load.status === "Loaded");
-    expect(button("Apps")).toBeUndefined();
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawer", phone: true })));
+    await press("Apps");
     await until(alpha, homes, Home.Machine, (state) => state.installed.read.status === "Loaded");
-    expect(document.querySelector('[role="dialog"][aria-label="Apps"]')).toBeNull();
-
-    const route1 = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(actInApps(route1, false, { type: "openMenu", app: clockKey, open: true, listed: [clockKey] }));
-    await until(alpha, homes, Drawer.Machine, (state) => state.menu === clockKey);
+    await holdClock();
     await hardware("back");
-    await until(alpha, homes, Drawer.Machine, (state) => state.menu === "");
+    await vi.waitFor(() => expect(menu()).toBeNull());
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).drawer).toBe(true);
     expect(world.launcher.opened).toEqual([]);
 
-    await homes.runPromise(actInApps(route1, false, { type: "openMenu", app: clockKey, open: true, listed: [clockKey] }));
-    await until(alpha, homes, Drawer.Machine, (state) => state.menu === clockKey);
-    await homes.runPromise(chooseApp(clockKey, "Info", route1, false));
+    await holdClock();
+    await selectAction("App info");
     await until(alpha, homes, Home.Machine, (state) => state.handoff.ask.tag === "AppInfo" && state.handoff.attempt.outcome === "Confirmed");
-    await until(alpha, homes, Drawer.Machine, (state) => state.menu === "");
-    expect([world.launcher.infos, world.launcher.opened]).toEqual([["org.fixture.clock"], []]);
+    expect([world.launcher.infos, world.launcher.opened, menu()]).toEqual([["org.fixture.clock"], [], null]);
 
-    await homes.runPromise(actInApps(route1, false, { type: "openMenu", app: clockKey, open: true, listed: [clockKey] }));
-    await until(alpha, homes, Drawer.Machine, (state) => state.menu === clockKey);
-    await homes.runPromise(chooseApp(clockKey, "Pin", route1, false));
+    await holdClock();
+    await selectAction("Add to Home");
     await until(alpha, homes, Home.Machine, (state) => state.tiles.save.outcome === "Confirmed");
     await until(alpha, alpha.runtime, Shell, (state) => !state.drawer);
-    expect(tiles()).toContain(`app:${clockKey}`);
+    expect(tiles()).toContain("app:org.fixture.clock/org.fixture.clock.Main");
+
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (state) => state.drawer);
+    await holdClock();
+    expect(action("On Home")?.getAttribute("aria-disabled")).toBe("true");
   });
 
   const agendaScene = (calendars: { id: string; name: string }[], events: { id: string; calendarId: string; title: string; startHour: number; endHour: number }[]) => {
@@ -577,16 +616,17 @@ describe("Home on a phone", () => {
     const { alpha } = await open(world, only("home"));
     const homes = home.runtime(alpha);
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
-    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openDrawer", phone: true })));
+    await press("Apps");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    const drawerRoute = (await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).route;
-    await homes.runPromise(actInApps(drawerRoute, false, { type: "openApp", app: "org.fixture.clock/org.fixture.clock.Main", now: 0 }));
+    await press("Open Clock org.fixture.clock");
     await until(alpha, homes, Home.Machine, (h) => h.handoff.attempt.outcome === "Refused");
-    await vi.waitFor(() => expect(told.snapshot()).toMatchObject({ place: "InDrawer", notice: { tag: "TellNotOpened" } }));
+    expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).toContain("Couldn't open Clock.");
 
     await hardware("back");
     await until(alpha, alpha.runtime, Shell, (s) => !s.drawer);
-    await vi.waitFor(() => expect(told.snapshot()).toBeUndefined());
+    await press("Apps");
+    await until(alpha, alpha.runtime, Shell, (s) => s.drawer);
+    expect(document.querySelector('[role="dialog"][aria-label="Apps"]')?.textContent).not.toContain("Couldn't open Clock.");
   });
 
   // spec/app/home/cards.md, "Story: The other cards"; spec/app/home/cards.md, "Story: Open my day from a card"
@@ -736,7 +776,7 @@ describe("Home on a phone", () => {
 
     // spec/app/home/index.md, "Once the saved tiles are read, the phone's apps are read if Home holds an installed app, and a record that could not be read is told"
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
-    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], false]);
+    expect([tiles(), Boolean(button("Apps"))]).toEqual([["view:Notes", "app:org.fixture.clock/org.fixture.clock.Main"], true]);
 
     // spec/app/home/index.md, "Only an app in the last reading is opened, never while Home is being edited"
     await drawn(() => tileButton("app:org.fixture.clock/org.fixture.clock.Main")?.click());

@@ -283,15 +283,13 @@ pure def stepReadingsAreTicketed(before: Home, via: str, after: Home, out: List[
 > As the owner, I want to open Apps on my phone, see the current launcher
 > catalog, and try again if it could not be read.
 
-### The Apps tile and Apps drawer are suppressed on Home
+### The Apps tile belongs to phone Home and leaves while Home is being edited
 
-The launcher does not show an Apps tile or render the Apps drawer UI, while
-keeping the underlying catalog-retry rule intact.
+The drawer uses the last accepted catalog, including while a new reading is
+on its way. The page displays reading, unreadable, empty and matching states.
 
 ```quint
-pure def offersDrawer(h: Home): bool = false
-
-pure def lawHomeSuppressesApps(home: Home): bool = not(offersDrawer(home))
+pure def offersDrawer(h: Home): bool = onPhone(h) and not(h.editing)
 
 pure def canTryAgain(h: Home, shell: S::Shell): bool =
   onPhone(h) and shell.drawer and h.installed.read.status == R::Failed
