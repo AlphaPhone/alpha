@@ -10,6 +10,12 @@ export interface AskScene {
   down: boolean;
   stalled: boolean;
   readonly turns: Map<string, () => void>;
+  /** While set, the agent holds each answer to an abort of a turn until the test lets it go, as an agent slow to stop a turn does. */
+  holdAborts?: boolean;
+  readonly heldAborts: (() => void)[];
+  /** While set, the agent holds each conversation it is asked to make until the test lets it go. */
+  holdCreates?: boolean;
+  readonly heldCreates: (() => void)[];
   afterStop?: Kept["messages"];
   readonly kept: Map<string, Kept>;
   searchDown: boolean;
@@ -92,7 +98,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, unheard: [], canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), heldAborts: [], heldCreates: [], kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, unheard: [], canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -254,9 +260,12 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/conversations") return;
       if (scene.down) return Response.json({ error: "starting" }, { status: 503 });
-      const id = ++scene.opened;
-      scene.kept.set(`c${id}`, { roomId: `r${id}`, title: "Ask Alpha", messages: [] });
-      return Response.json({ conversation: { id: `c${id}`, roomId: `r${id}`, title: "Ask Alpha", createdAt: 0, updatedAt: 0 } }, { status: 201 });
+      const made = () => {
+        const id = ++scene.opened;
+        scene.kept.set(`c${id}`, { roomId: `r${id}`, title: "Ask Alpha", messages: [] });
+        return Response.json({ conversation: { id: `c${id}`, roomId: `r${id}`, title: "Ask Alpha", createdAt: 0, updatedAt: 0 } }, { status: 201 });
+      };
+      return scene.holdCreates ? new Promise<void>((resolve) => { scene.heldCreates.push(resolve); }).then(made) : made();
     },
     (request, url) => {
       if (request.method !== "GET" || url.pathname !== "/api/conversations") return;
@@ -364,7 +373,8 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       const room = /^\/api\/turns\/([^/]+)\/abort$/.exec(url.pathname)?.[1];
       if (request.method !== "POST" || room === undefined) return;
-      return request.json().then(({ reason }: { reason: string }) => {
+      const held = scene.holdAborts ? new Promise<void>((resolve) => { scene.heldAborts.push(resolve); }) : Promise.resolve();
+      return Promise.all([request.json(), held]).then(([{ reason }]: [{ reason: string }, void]) => {
         const stop = scene.turns.get(room);
         scene.turns.delete(room);
         stop?.();
