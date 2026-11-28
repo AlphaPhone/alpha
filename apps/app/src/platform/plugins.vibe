@@ -6,6 +6,7 @@ import { type SystemSettings, browserSystemSettings, phoneSystemSettings } from 
 import { type WiFi, browserWiFi, phoneWiFi } from "./wifi.vibe"
 import { type PhoneCalendar, browserCalendar, phoneCalendar } from "./calendar.vibe"
 import { type PhoneReminders, browserReminders, phoneReminders } from "./reminders.vibe"
+import { type MessagingNotices, browserMessagingNotices, phoneMessagingNotices } from "./messaging-notices.vibe"
 import { type PhoneClockAlerts, browserClockAlerts, phoneClockAlerts } from "./clock-alerts.vibe"
 import { type CameraPort, browserCamera, phoneCamera } from "./camera.vibe"
 import { type PhotosPort, browserPhotos, phonePhotos } from "./photos.vibe"
@@ -31,6 +32,7 @@ export type Plugins =
   | PhoneCalendar
   | PhoneReminders
   | PhoneClockAlerts
+  | MessagingNotices
   | CameraPort
   | PhotosPort
   | Files
@@ -54,6 +56,7 @@ export const phonePlugins = Layer.mergeAll(
   phoneCalendar,
   phoneReminders,
   phoneClockAlerts,
+  phoneMessagingNotices,
   phoneFiles,
   phoneCamera,
   phonePhotos,
@@ -78,6 +81,7 @@ export const browserPlugins = Layer.mergeAll(
   browserCalendar,
   browserReminders,
   browserClockAlerts,
+  browserMessagingNotices,
   browserLibrary,
   browserCamera,
   browserPhotos,

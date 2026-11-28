@@ -207,6 +207,11 @@ export function createSessionStore(): SessionStore {
 /** Default `MessagingSessions` layer backed by an isolated in-memory secret map. */
 export const messagingSessions = Layer.sync(MessagingSessions, createSessionStore)
 
+/** Nonsecret identity for a notification bound to the current owner and messaging account. */
+export effect function noticeScope(parts: readonly string[]): string!! {
+  return try promise(() => sha256Base64Url(JSON.stringify(["alpha-messaging-notice", ...parts])))
+}
+
 /** OAuth2 PKCE S256 verifier/challenge pair. */
 export interface PkcePair {
   readonly verifier: string
