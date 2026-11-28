@@ -1607,7 +1607,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
     await later(alpha, 500);
     const putBack = composerText();
-    expect([putBack.endsWith("Hello"), world.ask.said]).toEqual([true, []]);
+    expect([putBack?.endsWith("Hello"), world.ask.said]).toEqual([true, []]);
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual([putBack])));
   });
