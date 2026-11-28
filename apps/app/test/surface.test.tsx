@@ -396,6 +396,7 @@ describe("Overlay external control kill-switch banner", () => {
 
     const clock = Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(1_000)), TestClock.layer());
     const base = Layer.mergeAll(
+      Layer.effectDiscard(Effect.promise(() => Promise.resolve())),
       KeyValueStore.layerMemory,
       Layer.provide(install, KeyValueStore.layerMemory),
       Layer.provide(timeOver(Stream.empty), Layer.merge(KeyValueStore.layerMemory, clock)),

@@ -1,7 +1,7 @@
 // spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"; spec/app/control/index.md, "The kill-switch immediately revokes any active lease, clears any in-flight operation, and signals the native bridge and overlay"
 import { Banner, Button, StatusDot } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { useMemo, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type { Machine as ControlMachine } from "../../gen/app__control.effect.vibe";
 import { useMachine } from "../../gen/app__control.react.ts";
 import type { Alpha } from "../runtime/ui.tsx";
@@ -9,6 +9,7 @@ import {
   type ControlLeaseRequests,
   ControlLeaseRequests as LeaseRequestsService,
   type ExternalControl,
+  type LeaseRequest,
   approvePendingLeaseRequest,
   dismissPendingLeaseRequest,
   externalControl,
@@ -20,6 +21,57 @@ export interface ControlBannerProps {
   readonly runtime: ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl | ControlLeaseRequests, unknown>;
 }
 
+type LeaseRequestStore = {
+  readonly get: () => LeaseRequest | undefined;
+  readonly subscribe: (notify: () => void) => () => void;
+};
+
+const requestStores = new WeakMap<object, LeaseRequestStore>();
+
+function leaseRequestStoreFor(
+  runtime: ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl | ControlLeaseRequests, unknown>,
+): LeaseRequestStore {
+  const existing = requestStores.get(runtime);
+  if (existing !== undefined) return existing;
+  let current: LeaseRequest | undefined;
+  const listeners = new Set<() => void>();
+  let active: object | undefined;
+  let stopInner: (() => void) | undefined;
+  const notify = (next: LeaseRequest | undefined) => {
+    if (Object.is(current, next)) return;
+    current = next;
+    for (const listener of [...listeners]) listener();
+  };
+  const store: LeaseRequestStore = {
+    get: () => current,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      if (active === undefined) {
+        const token = {};
+        active = token;
+        void runtime.runPromise(LeaseRequestsService).then((requests) => {
+          if (active !== token) return;
+          notify(requests.snapshot());
+          stopInner = requests.subscribe(() => {
+            if (active === token) notify(requests.snapshot());
+          });
+        }, () => undefined);
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          active = undefined;
+          stopInner?.();
+          stopInner = undefined;
+          current = undefined;
+        }
+      };
+    },
+  };
+  requestStores.set(runtime, store);
+  return store;
+}
+
 /**
  * Compact system-overlay banner showing pending owner control lease approvals and active
  * third-party app control leases with an immediate Stop kill-switch.
@@ -27,8 +79,8 @@ export interface ControlBannerProps {
  */
 export function ControlBanner({ runtime }: ControlBannerProps) {
   const { state, can } = useMachine(runtime);
-  const requests = useMemo(() => runtime.runSync(LeaseRequestsService), [runtime]);
-  const pendingRequest = useSyncExternalStore(requests.subscribe, requests.snapshot, requests.snapshot);
+  const requestStore = leaseRequestStoreFor(runtime);
+  const pendingRequest = useSyncExternalStore(requestStore.subscribe, requestStore.get, requestStore.get);
   if (state === undefined) return null;
   if (state.lease.status !== "LeaseActive" && !state.pending.active) {
     if (pendingRequest === undefined) return null;
