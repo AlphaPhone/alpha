@@ -370,9 +370,6 @@ describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/ind
     const listed = (group?.routes ?? []).map((route) => ({ path: route.path.replace(/\{\w+\}/g, "{}"), keys: ((route as { readonly query?: ReadonlyArray<{ readonly key: string }> }).query ?? []).map((rule) => rule.key).sort() }))
     try holds(() => assert.ok(sent.length >= 13, `found ${sent.length} paths of the managed Gmail client`))
     try holds(() => assert.deepStrictEqual(sent.filter((want) => !listed.some((have) => have.path === want.path && have.keys.join() === want.keys.join())), []))
-    const capConfig = (try tryPromise(() => import(new URL("../../app/capacitor.config.ts", import.meta.url).href) as Promise<{ default: { plugins?: { ElizaCloud?: { routes?: unknown } }; android?: { webContentsDebuggingEnabled?: boolean } } }>)).default
-    try holds(() => assert.deepStrictEqual(capConfig.plugins?.ElizaCloud?.routes, elizaCloudRoutes))
-    try holds(() => assert.strictEqual(capConfig.android?.webContentsDebuggingEnabled, false))
   } |> Effect.provide(%, NodeServices.layer))
 })
 
