@@ -26,7 +26,7 @@ const usage = [
   "     | preflight --environment <e> [--env-file <file>] [--resources <file>]",
   "     | migrate|register|prices --environment <e> --profile <file> --env-file <file>",
   "     | deploy --environment <e> --profile <file> --env-file <file> [--component api|edge|all] [--resources <file>]",
-  "     | smoke --environment <e>",
+  "     | smoke --environment <e> [--messaging]",
 ].join("\n")
 
 interface Flags { readonly values: ReadonlyMap<string, string>; readonly on: ReadonlySet<string> }
@@ -145,7 +145,7 @@ effect function smokeOf(found: Flags) {
   const environment = try environmentOf(found)
   const cloud = (try hostedClouds())[environment]
   provide FetchHttpClient.layer {
-    const gates = try smoke(environment, { api: cloud.cloud, web: `https://${cloud.appLinkHost}` }, ownCloudName)
+    const gates = try smoke(environment, { api: cloud.cloud, web: `https://${cloud.appLinkHost}` }, ownCloudName, found.on.has("messaging") ? "messaging" : "cloud")
     return { environment, ready: gates.every((gate) => gate.passed), gates }
   }
 }
@@ -165,7 +165,7 @@ export effect function operate(command: string | undefined, rest: ReadonlyArray<
       provide FetchHttpClient.layer { return try deploy(at) }
     }
     case "smoke": {
-      const result = try smokeOf(try flags(rest, ["environment"]))
+      const result = try smokeOf(try flags(rest, ["environment"], ["messaging"]))
       if (!result.ready) throw new NotReady({ report: JSON.stringify(result, null, 2) })
       return result
     }

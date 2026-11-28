@@ -303,6 +303,13 @@ pure def lawNoForwardingHeaderPasses(name: str): bool = not(headerKept(name, tru
 > from a deployed environment of Alpha's own cloud, gate by gate, before
 > anyone is asked to test it on a phone.
 
+Before connecting a workspace or a Telegram account, the operator runs
+`pnpm cloud smoke --environment staging --messaging` (or selects production).
+It reads both of the phone's public registration endpoints and checks for
+uncached JSON, Slack's OAuth client ID and live event configuration, and
+Telegram's numeric application ID. It reports each provider independently.
+Account consent is checked on the phone.
+
 ### Alpha's own cloud is ready only when each public gate passes: the provisioning smoke reads, then the entitlement keys, Alpha's sign-in configuration, the plans and the sign-in return page on the App Link host
 
 The first four are the smoke reads of `./provisioning.md`; the asset links

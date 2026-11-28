@@ -427,6 +427,17 @@ describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "St
     const published = try tryPromise(() => alphaCloudWorker.fetch(registration, { ...ready, SLACK_CLIENT_ID: "123.456" }))
     const body = try tryPromise(() => published.json())
     try holds(() => assert.deepStrictEqual([missing.status, published.status, body], [503, 200, { clientId: "123.456" }]))
+    const registrations = (bindings: typeof ready) => {
+      const reach: typeof fetch = (input, init) => alphaCloudWorker.fetch(new EdgeRequest(input, init), bindings)
+      return smoke("production", { api: "https://api.alphaphone.dev", web: "https://cloud.alphaphone.dev" }, "Alpha Cloud", "messaging")
+        |> Effect.provide(%, FetchHttpClient.layer) |> Effect.provideService(%, FetchHttpClient.Fetch, reach)
+    }
+    const offline = try registrations(ready)
+    const partial = try registrations({ ...ready, SLACK_CLIENT_ID: "123.456", TELEGRAM_API_ID: "1234" })
+    const connected = try registrations({ ...ready, ...receiverEnv, TELEGRAM_API_ID: "1234" })
+    try holds(() => assert.deepStrictEqual(offline.map(gate => [gate.gate, gate.passed, gate.detail]), [["SlackRegistration", false, "HTTP 503"], ["TelegramRegistration", false, "HTTP 503"]]))
+    try holds(() => assert.deepStrictEqual(partial.map(gate => gate.passed), [false, true]))
+    try holds(() => assert.deepStrictEqual(connected.map(gate => gate.passed), [true, true]))
   })
 })
 
