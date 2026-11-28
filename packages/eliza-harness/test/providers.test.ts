@@ -84,10 +84,13 @@ describe("Slack user-account HTTP+SSE provider", () => {
   });
 
   it("handles CORS preflight, OAuth2 PKCE user tokens, refresh, bot-token rejection, and multi-workspace isolation", async () => {
-    const preflight = await fetch(`${slack.origin}/api/users.conversations`, { method: "OPTIONS" });
+    const headers = { "access-control-request-headers": "authorization, content-type, idempotency-key" };
+    const preflight = await fetch(`${slack.origin}/api/users.conversations`, { method: "OPTIONS", headers });
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
-    expect(preflight.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
+    expect(preflight.headers.get("access-control-allow-headers")).toBe("x-slack-version-ts");
+    const mailbox = await fetch(`${slack.origin}/api/slack/events/read`, { method: "OPTIONS", headers });
+    expect(mailbox.headers.get("access-control-allow-headers")).toContain("authorization");
 
     const botAuthz = await fetch(`${slack.origin}/oauth/v2/authorize?client_id=alpha&scope=chat:write`);
     expect(botAuthz.status).toBe(400);

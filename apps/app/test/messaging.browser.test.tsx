@@ -18,6 +18,7 @@ import * as TelegramConversation from "../gen/app__telegram__conversation.effect
 import * as TelegramNotices from "../gen/app__telegram__notices.effect.vibe";
 import { savedKey, written } from "../src/home/saved.vibe";
 import { MessagingBridge, type MessagingDraftProposal } from "../src/messaging/bridge.vibe";
+import { browserSlackHttp } from "../src/platform/slack-oauth.vibe";
 import { messagingSessions } from "../src/platform/messaging.vibe";
 import { telegramAt } from "../src/platform/telegram.vibe";
 import type { Alpha } from "../src/runtime/area.tsx";
@@ -60,7 +61,7 @@ async function sendStagedDraft(alpha: Alpha, draft: MessagingDraftProposal) {
 async function openMessagingAlpha() {
   localStorage.setItem(savedKey, written(homeOrder.map((view) => ({ tag: "Own" as const, view }))));
   const platform = fakeWorld(scene(), {
-    slack: Layer.provide(slackAt(slackOrigin), FetchHttpClient.layer),
+    slack: Layer.provide(slackAt(slackOrigin, slackOrigin, "browser"), browserSlackHttp),
     telegram: Layer.provide(telegramAt(telegramOrigin), FetchHttpClient.layer),
     sessions: messagingSessions,
   });
@@ -241,13 +242,16 @@ describe("Messaging E2E", () => {
       target: "Alpha Team · #general",
       targetId: "C01GENERAL",
       workspaceId: "T01ALPHA",
-      body: "Alpha Chromium Slack draft",
+      body: "Alpha Chromium Slack draft & + = 👋",
       revision: 1,
       status: "draft",
     });
 
+    expect(new URL(slackOrigin).origin).not.toBe(location.origin);
     const slackPosts = await controlJson(slackOrigin, "/__control/requests?path=/api/chat.postMessage");
-    expect(((slackPosts.requests ?? []) as ReadonlyArray<unknown>).length).toBeGreaterThanOrEqual(1);
+    expect(slackPosts.requests).toEqual(expect.arrayContaining([expect.objectContaining({
+      method: "POST", query: {}, body: expect.objectContaining({ text: "Alpha Chromium Slack draft & + = 👋", client_msg_id: expect.any(String) }),
+    })]));
 
     await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goHome" })));
     await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => (s.watermarks[alphaWs] ?? 0) > 0 && (s.watermarks[designWs] ?? 0) > 0);

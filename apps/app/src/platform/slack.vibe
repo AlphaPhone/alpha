@@ -518,17 +518,23 @@ effect function callSlackAuthed<A>(
   }
 }
 
-function oauthRequest(path: string, fields: Readonly<Record<string, string | undefined>>) {
+type SlackFields = Readonly<Record<string, string | number | boolean | undefined>>
+
+function formPost(path: string, fields: SlackFields) {
   return HttpClientRequest.bodyUrlParams(HttpClientRequest.post(path), stringParams(fields))
 }
 
 /** Slack user-account client over HTTP+SSE at `base`. */
-export function slackAt(base: string, registrationBase = base) {
+export function slackAt(base: string, registrationBase = base, transport: "native" | "browser" = "native") {
   return Layer.effect(Slack, effect {
     const wired = try remoteAt(base)
     const registration = try remoteAt(registrationBase)
+    const browserMethod = (path: string, fields: SlackFields, token: string, clientMessageId?: string) =>
+      formPost(path, { ...fields, client_msg_id: clientMessageId, token })
+    const get = transport === "browser" ? browserMethod : queryGet
+    const post = transport === "browser" ? browserMethod : jsonPost
     const oauth = <A>(brokered: boolean | undefined, fields: Readonly<Record<string, string | undefined>>, response: Schema.Decoder<A>) => callSlack(
-      brokered ? registration : wired, oauthRequest(brokered ? "/api/slack/oauth" : "/api/oauth.v2.access", fields), response,
+      brokered ? registration : wired, formPost(brokered ? "/api/slack/oauth" : "/api/oauth.v2.access", fields), response,
     )
     return {
       effect registration() {
@@ -557,12 +563,12 @@ export function slackAt(base: string, registrationBase = base) {
       }, SlackRotatedGrant),
       readEvents: (token: string, cursor?: number) => callSlackAuthed(registration, token,
         (valid) => jsonPost("/api/slack/events/read", cursor === undefined ? {} : { cursor }, valid), SlackMailbox),
-      authTest: (token: string) => callSlackAuthed(wired, token, (t) => jsonPost("/api/auth.test", {}, t), SlackAuthTestResponse),
-      revoke: (token: string) => callSlackAuthed(wired, token, (t) => jsonPost("/api/auth.revoke", {}, t), SlackRevokeResponse),
+      authTest: (token: string) => callSlackAuthed(wired, token, (t) => post("/api/auth.test", {}, t), SlackAuthTestResponse),
+      revoke: (token: string) => callSlackAuthed(wired, token, (t) => post("/api/auth.revoke", {}, t), SlackRevokeResponse),
       listConversations: (token: string, opts?: SlackListConversationsOpts) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/users.conversations", {
+        (t) => get("/api/users.conversations", {
           types: opts?.types,
           exclude_archived: opts?.excludeArchived,
           cursor: opts?.cursor,
@@ -573,19 +579,19 @@ export function slackAt(base: string, registrationBase = base) {
       conversationInfo: (token: string, channel: string) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/conversations.info", { channel }, t),
+        (t) => get("/api/conversations.info", { channel }, t),
         SlackConversationInfoResponse,
       ),
       openConversation: (token: string, users: ReadonlyArray<string>) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/conversations.open", { users: users.join(",") }, t),
+        (t) => post("/api/conversations.open", { users: users.join(",") }, t),
         SlackConversationOpenResponse,
       ),
       history: (token: string, channel: string, opts?: SlackHistoryOpts) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/conversations.history", {
+        (t) => get("/api/conversations.history", {
           channel,
           cursor: opts?.cursor,
           limit: opts?.limit,
@@ -598,7 +604,7 @@ export function slackAt(base: string, registrationBase = base) {
       replies: (token: string, channel: string, ts: string, opts?: SlackPaginationOpts) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/conversations.replies", {
+        (t) => get("/api/conversations.replies", {
           channel,
           ts,
           cursor: opts?.cursor,
@@ -609,13 +615,13 @@ export function slackAt(base: string, registrationBase = base) {
       markRead: (token: string, channel: string, ts: string) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/conversations.mark", { channel, ts }, t),
+        (t) => post("/api/conversations.mark", { channel, ts }, t),
         SlackOkResponse,
       ),
       postMessage: (token: string, req: SlackPostMessageReq, idempotencyKey?: string) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/chat.postMessage", {
+        (t) => post("/api/chat.postMessage", {
           channel: req.channel,
           text: req.text,
           thread_ts: req.threadTs,
@@ -626,43 +632,43 @@ export function slackAt(base: string, registrationBase = base) {
       updateMessage: (token: string, req: SlackUpdateMessageReq) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/chat.update", { channel: req.channel, ts: req.ts, text: req.text }, t),
+        (t) => post("/api/chat.update", { channel: req.channel, ts: req.ts, text: req.text }, t),
         SlackUpdateMessageResponse,
       ),
       deleteMessage: (token: string, req: SlackDeleteMessageReq) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/chat.delete", { channel: req.channel, ts: req.ts }, t),
+        (t) => post("/api/chat.delete", { channel: req.channel, ts: req.ts }, t),
         SlackDeleteMessageResponse,
       ),
       addReaction: (token: string, req: SlackReactionReq) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/reactions.add", { channel: req.channel, timestamp: req.timestamp, name: req.name }, t),
+        (t) => post("/api/reactions.add", { channel: req.channel, timestamp: req.timestamp, name: req.name }, t),
         SlackOkResponse,
       ),
       removeReaction: (token: string, req: SlackReactionReq) => callSlackAuthed(
         wired,
         token,
-        (t) => jsonPost("/api/reactions.remove", { channel: req.channel, timestamp: req.timestamp, name: req.name }, t),
+        (t) => post("/api/reactions.remove", { channel: req.channel, timestamp: req.timestamp, name: req.name }, t),
         SlackOkResponse,
       ),
       searchMessages: (token: string, query: string, opts?: SlackSearchOpts) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/search.messages", { query, page: opts?.page, count: opts?.count }, t),
+        (t) => get("/api/search.messages", { query, page: opts?.page, count: opts?.count }, t),
         SlackSearchMessagesResponse,
       ),
       listUsers: (token: string, opts?: SlackPaginationOpts) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/users.list", { cursor: opts?.cursor, limit: opts?.limit }, t),
+        (t) => get("/api/users.list", { cursor: opts?.cursor, limit: opts?.limit }, t),
         SlackUsersListResponse,
       ),
       userInfo: (token: string, userId: string) => callSlackAuthed(
         wired,
         token,
-        (t) => queryGet("/api/users.info", { user: userId }, t),
+        (t) => get("/api/users.info", { user: userId }, t),
         SlackUserInfoResponse,
       ),
     }

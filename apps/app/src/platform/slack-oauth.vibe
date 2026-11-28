@@ -47,6 +47,12 @@ export const slackReturns = Stream.unwrap(effect {
   return Stream.filterMap(Stream.fromEventListener<MessageEvent>(channel, "message"), (event) => Schema.decodeUnknownResult(SlackReturn)(event.data))
 })
 
+/** Browser requests keep credentials on the chosen provider and omit cross-origin tracing headers. */
+export const browserSlackHttp = Layer.provide(FetchHttpClient.layer, Layer.merge(
+  Layer.succeed(FetchHttpClient.RequestInit, { redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" }),
+  Layer.succeed(HttpClient.TracerPropagationEnabled, false),
+))
+
 /** Android's HTTP client carries Slack's credentials to Slack outside the WebView. */
 export const nativeSlackHttp = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request, url) => effect {
   const body = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : undefined

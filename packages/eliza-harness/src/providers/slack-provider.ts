@@ -1002,7 +1002,7 @@ function handlePostMessage(
     sendJson(res, 200, { ok: false, error: "no_text" });
     return;
   }
-  const idemKey = req.headers["idempotency-key"];
+  const idemKey = asString(req.params.client_msg_id) ?? req.headers["idempotency-key"];
   const scopedIdem = idemKey ? `${auth.workspace.id}:${auth.userId}:${channel.id}:${idemKey}` : undefined;
   const cached = ownGet(state.idempotency, scopedIdem);
   if (cached) {
@@ -1458,6 +1458,7 @@ export async function startSlackProvider(options?: ProviderOptions): Promise<Run
   return createProviderServer<SlackState>({
     options,
     createInitial: createInitialSlackState,
+    preflightHeaders: (path) => /^\/api\/[a-zA-Z]+\.[a-zA-Z.]+$/.test(path) ? "x-slack-version-ts" : undefined,
     defaultFaultBody: defaultSlackFaultBody,
     onControl: handleSlackControl,
     onRequest: handleSlackApi,
