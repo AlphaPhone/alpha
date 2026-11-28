@@ -106,7 +106,7 @@ lemma AccessRevoked(s: Photos, grant: kit__permission_Grant, videos: bool, by_: 
   assert forall e :: e in d.out ==> e.Revoke? || e.Fetch? || e.DropCamera?;
 }
 
-lemma AccessAllowed(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
+lemma AccessAllowedKeepsLibrary(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
   requires inv(s) && canAccessIs(s, by_)
   requires kit__permission_allows(kit__permission_observe(s.access, grant))
   ensures alwaysVideosNeedTheirAccess(accessIs(s, grant, videos, by_).state)
@@ -117,6 +117,23 @@ lemma AccessAllowed(s: Photos, grant: kit__permission_Grant, videos: bool, by_: 
   ensures alwaysSelectionIsListed(accessIs(s, grant, videos, by_).state)
   ensures alwaysRunsAreTheOwners(accessIs(s, grant, videos, by_).state)
   ensures alwaysDialogNamesItsSubject(accessIs(s, grant, videos, by_).state)
+{
+  var after := accessIs(s, grant, videos, by_).state;
+  assert after.rows == s.rows && after.mine == s.mine;
+  assert after.albums == s.albums && after.album == s.album && after.tab == s.tab;
+  assert after.selecting == s.selecting && after.selected == s.selected && after.job == s.job;
+  app__photos__albums_closeDialog_ensures(s.shelf);
+  assert after.shelf == s.shelf || after.shelf == app__photos__albums_closeDialog(s.shelf);
+  if s.cameraAlbum != 0 {
+    assert s.visible;
+    assert after.shelf == app__photos__albums_closeDialog(s.shelf);
+  }
+  assert after.cameraAlbum == 0;
+}
+
+lemma AccessAllowedEffects(s: Photos, grant: kit__permission_Grant, videos: bool, by_: app__photos__actor_Actor)
+  requires inv(s) && canAccessIs(s, by_)
+  requires kit__permission_allows(kit__permission_observe(s.access, grant))
   ensures stepLosingAccessClosesWhatShowsTheLibrary(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
   ensures stepNothingChangesWithoutAccess(s, accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
   ensures stepAPageKeepsWhatWasListed(s, "accessIs", accessIs(s, grant, videos, by_).state)
@@ -124,11 +141,8 @@ lemma AccessAllowed(s: Photos, grant: kit__permission_Grant, videos: bool, by_: 
   ensures stepAFavouriteToggles(s, "accessIs", accessIs(s, grant, videos, by_).state)
   ensures stepAlbumChangesCarryTheSelection(s, "accessIs", accessIs(s, grant, videos, by_).state, accessIs(s, grant, videos, by_).out)
 {
-  app__photos__albums_closeDialog_ensures(s.shelf);
   var d := accessIs(s, grant, videos, by_);
-  assert d.state.rows == s.rows && d.state.mine == s.mine && d.state.starred == s.starred;
-  assert d.state.albums == s.albums && d.state.album == s.album && d.state.tab == s.tab;
-  assert d.state.selecting == s.selecting && d.state.selected == s.selected && d.state.job == s.job;
+  assert d.state.starred == s.starred;
   assert forall e :: e in d.out ==> e.Fetch? || e.DropCamera?;
 }
 
@@ -150,12 +164,11 @@ lemma accessIs_ensures(s: Photos, grant: kit__permission_Grant, videos: bool, by
 
 {
   if inv(s) && canAccessIs(s, by_) {
-    var d := accessIs(s, grant, videos, by_);
-    if !kit__permission_allows(kit__permission_observe(s.access, grant)) {
-      assert d.out[0].Revoke?;
-      assert d.out[0] in d.out;
+    if kit__permission_allows(kit__permission_observe(s.access, grant)) {
+      AccessAllowedKeepsLibrary(s, grant, videos, by_);
+      AccessAllowedEffects(s, grant, videos, by_);
     } else {
-      assert forall e :: e in d.out ==> !e.Revoke?;
+      AccessRevoked(s, grant, videos, by_);
     }
   }
 }
