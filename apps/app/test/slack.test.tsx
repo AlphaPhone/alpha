@@ -304,9 +304,17 @@ describe("Slack user-account client over live HTTP provider", () => {
     await app.close();
 
     phone.voice.organizationId = "other-owner-org";
-    const other = await mountSlack(provider.origin, phone);
+    const other = await mountSlack(provider.origin, phone, { initialExpirySeconds: 1 });
     expect(await other.runtime.runPromise(MessagingSessions.use((s) => s.keys()))).toEqual([]);
     expect((await other.runtime.runPromise(AuthMachine.use((m) => m.get()))).connected).toEqual([]);
+    await controlPost("/__control/fault", { path: "/.well-known/alpha-slack", status: 200, remaining: 1, body: { clientId: "123.456" } });
+    await underAct(() => findButton(other.host, "Connect workspace").click());
+    await underAct(() => findButton(other.host, "Approve & connect").click());
+    await waitFor(other.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    const direct = await other.runtime.runPromise(MessagingSessions.use((s) => s.get(key)));
+    expect(Option.map(direct, (grant) => grant.workspace?.brokered)).toEqual(Option.some(false));
+    const directGrants = (await controlRequests("/api/oauth.v2.access")).map((request) => request.body);
+    expect(directGrants).toEqual([expect.objectContaining({ code_verifier: expect.any(String) }), expect.objectContaining({ grant_type: "refresh_token" })]);
     await other.close();
 
     phone.voice.organizationId = ownerOrganization;
@@ -319,7 +327,7 @@ describe("Slack user-account client over live HTTP provider", () => {
     await reopened.close();
 
     phone.voice.organizationId = "pending-owner";
-    const switched = await mountSlack(provider.origin, phone, { beforeReturn: () => { phone.voice.organizationId = "other-owner-org"; } });
+    const switched = await mountSlack(provider.origin, phone, { beforeReturn: () => { phone.voice.organizationId = "cancelled-owner-org"; } });
     await underAct(() => findButton(switched.host, "Connect workspace").click());
     await underAct(() => findButton(switched.host, "Approve & connect").click());
     const refused = await waitFor(switched.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.step === "Idle" && s.trouble === "ExchangeFailed");
