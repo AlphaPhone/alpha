@@ -1,5 +1,6 @@
 // spec/app/slack/auth.md, "Adding a workspace presents scope consent first, then opens PKCE OAuth with a fresh state nonce"; spec/app/slack/auth.md, "OAuth callback verifies the state nonce and exchanges the secret code and PKCE verifier; only user tokens (`UserToken`) are admitted"
 import { native } from "./device.vibe"
+import { returnChannel } from "./slack-return.vibe"
 
 module host {
   import { native } from "./device.vibe"
@@ -7,11 +8,10 @@ module host {
   import type { HttpOptions, HttpResponse } from "@capacitor/core"
   import { plugin } from "./capacitor.ts"
 
-  const browserPath = "/alpha-slack-return"
-  const channelName = "alpha-slack-oauth"
+  import { browserSlackReturn } from "./slack-return.vibe"
   /** The redirect for the phone's registered app or the local development browser. @throws {never} */
   export function redirectUri(): string {
-    if (!native()) return new URL(browserPath, window.location.origin).href
+    if (!native()) return browserSlackReturn()
     return currentSurface().mode === "app" ? "alphaphone://slack/oauth/standalone" : "alphaphone://slack/oauth/callback"
   }
 
@@ -21,21 +21,6 @@ module host {
     return undefined
   }
 
-  /** Same-origin browser returns contain the code or refusal, and no token. @throws {never} */
-  export function returnChannel(): BroadcastChannel { return new BroadcastChannel(channelName) }
-
-  /** Return a consent tab to its opener's waiting resident and remove the one-use code from browser history. @throws {never} */
-  export function deliverSlackReturn(): boolean {
-    if (native() || window.location.pathname !== browserPath) return false
-    const query = new URLSearchParams(window.location.search)
-    window.history.replaceState(null, "", browserPath)
-    const channel = returnChannel()
-    channel.postMessage({ state: query.get("state"), code: query.get("code") ?? "", error: query.get("error") ?? "" })
-    channel.close()
-    window.close()
-    return true
-  }
-
   /** The native request is buffered: Slack's Web API disallows the authorization header in WebView CORS preflights. */
   export async function nativeRequest(url: string, method: string, headers: Readonly<Record<string, string>>, data: string | undefined): Promise<Response> {
     const http = plugin<{ request(options: HttpOptions): Promise<HttpResponse> }>("AlphaSlackOAuth")
@@ -43,8 +28,7 @@ module host {
     return new Response(typeof reply.data === "string" ? reply.data : JSON.stringify(reply.data), { status: reply.status, headers: reply.headers })
   }
 }
-import { authorize, nativeRequest, redirectUri, returnChannel } from host
-export { deliverSlackReturn } from host
+import { authorize, nativeRequest, redirectUri } from host
 
 export { redirectUri as slackRedirectUri }
 

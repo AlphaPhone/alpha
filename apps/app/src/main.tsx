@@ -1,23 +1,9 @@
-import { Alert, StartupMark } from "@repo/ui";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
-import { boot } from "./boot.tsx";
-import { deliverSlackReturn } from "./platform/slack-oauth.vibe";
-import { native } from "./platform/device.vibe";
-import { browserPlatform, phonePlatform } from "./platform/platform.vibe";
-import { single } from "./runtime/single.ts";
-import "./main.css";
+// spec/app/slack/auth.md, "OAuth callback verifies the state nonce and exchanges the secret code and PKCE verifier; only user tokens (`UserToken`) are admitted"
+import { deliverSlackReturn } from "./platform/slack-return.vibe";
 
-const root = createRoot(document.getElementById("root")!);
-
-root.render(<StrictMode><StartupMark className="fixed inset-0 z-sheet" /></StrictMode>);
-if (deliverSlackReturn()) root.render(<main className="p-6">Return to Alpha to finish connecting Slack.</main>);
-else if (await single()) root.render(<StrictMode><App alpha={boot(native() ? phonePlatform() : browserPlatform(location.origin), undefined, native())} /></StrictMode>);
-else root.render(
-  <StrictMode>
-    <main className="flex min-h-dvh items-center justify-center bg-background p-6 pt-[max(--spacing(6),var(--alpha-safe-top))] pb-[max(--spacing(6),var(--alpha-safe-bottom))] text-foreground">
-      <Alert variant="warn" className="max-w-sm">Alpha is open in another window</Alert>
-    </main>
-  </StrictMode>,
-);
+if (deliverSlackReturn()) {
+  const { createRoot } = await import("react-dom/client");
+  createRoot(document.getElementById("root")!).render(<main>Return to Alpha to finish connecting Slack.</main>);
+} else {
+  await import("./start.tsx");
+}
