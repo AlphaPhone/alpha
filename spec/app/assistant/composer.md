@@ -216,6 +216,8 @@ lets the slot the message came from be cleared. A write that finds a
 revision another Alpha marked as sending, such as a second window sending
 from the same conversation, puts that message under review as a slot read
 does, never into the editor: the editor keeps only the owner's own text.
+So does the first write of a message moved from a new conversation, whose
+old slot then keeps its copy, never cleared.
 
 ```quint
 type Wrote = Landed | Collided | Marked | Lost
@@ -228,10 +230,11 @@ pure def canWrote(c: Composer, ticket: int, revision: int): bool = D::canLand(c.
 pure def wrote(c: Composer, ticket: int, result: Wrote, revision: int): Moved =
   val landed = { ...c, draft: D::land(c.draft) }
   val clear = A::dispatch(A::record(A::plan(c.clear.id + 1)))
-  val review = result == Marked and c.slot == Open and c.source == 0
+  val review = result == Marked and c.slot == Open
   val stopped =
     if (result == Lost) { ...c, draft: D::interrupt(c.draft), failing: true }
-    else { ...c, draft: D::collide(c.draft, revision), unsettled: c.unsettled or review, marked: c.marked or review }
+    else { ...c, draft: D::collide(c.draft, revision), unsettled: c.unsettled or review, marked: c.marked or review,
+      source: if (review) 0 else c.source }
   if (result == Landed and c.away == Marking)
     { state: { ...landed, away: Asked, marked: true }, out: List(Ask({ hold: c.hold, attachments: attachments(c.held) })) }
   else if (result == Landed and c.source > 0)
@@ -437,8 +440,8 @@ pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
 Alpha settles a conflict by itself (restore saved). The editor takes the
 saved copy, followed on a new line by the current text, and that text is
 written to the slot as a new revision. Where one of the two is empty,
-equal to the other, or the start of the other, only the longer is kept, so
-nothing is written twice and nothing is dropped. Replace saved keeps the
+equal to the other, or the other's first lines, only the longer is kept,
+so no line is written twice and nothing is dropped. Replace saved keeps the
 current text over the saved copy directly. Restoring a message the slot
 marked as sending makes it an ordinary draft again, and the mark is
 written away.

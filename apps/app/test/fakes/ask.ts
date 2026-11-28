@@ -99,6 +99,16 @@ export function draftKey(owner: string, agent: string, conversation?: string, ro
   return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
 }
 
+/** The rows AlphaAssistantDraft writes, as `AlphaDraftRow.admits` checks a `next` before the plugin exchanges it: a whole revision of at least 1, a text, a sending flag, and only beside a sending mark a string `lastSentId` and `lastSentWire`. */
+function admitsRow(next: string) {
+  let row: unknown;
+  try { row = JSON.parse(next); } catch { return false; }
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return false;
+  const { revision, text, sending, ...mark } = row as Record<string, unknown>;
+  return Number.isSafeInteger(revision) && (revision as number) >= 1 && typeof text === "string" && typeof sending === "boolean"
+    && Object.entries(mark).every(([key, value]) => sending && (key === "lastSentId" || key === "lastSentWire") && typeof value === "string");
+}
+
 /** AlphaAssistantDraft derives the slot after admitting the supplied owner, agent and epoch as assertions. */
 export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<DraftAddress, "owner" | "agent" | "epoch">): Faked {
   function admitted(assertion: DraftAddress) {
@@ -122,6 +132,7 @@ export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<Draft
         scene.refusedDraftExchanges += 1;
         return { status: "denied" };
       }
+      if (address.next !== undefined && !admitsRow(address.next)) return { status: "denied" };
       if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
       if (address.next === undefined) scene.drafts.delete(key);
       else scene.drafts.set(key, address.next);
