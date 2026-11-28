@@ -781,33 +781,40 @@ pure def lawTalkRespectsSelectedChatAndExclusivePostSlot(
 ### A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s
 
 What the owner finished saying is never dropped because another send
-still holds the posting place: a typed message still reaching the agent,
-the turn the owner spoke over or stopped still letting go of the agent, or
-a conversation Chats is still making. The turn waits for that send to
-settle, and is then sent once, in the conversation Talk keeps what it sends
-in. Every turn of one Talk is sent in the conversation its first sent turn
-was bound to while that conversation stays selected, as the Sunday demo
-build posted every final turn through the conversation it bound when Talk
-started (v119, apps/app/src/prototype/voice-adapter.ts:768-776). Only a
-send still in hand 30 s after the owner's turn ended gives the turn up, and
-then quietly, as a turn that ends unsent: nothing is said or shown, the
-turn is never sent later, and Alpha listens again.
+still holds the posting place: a typed message on its way to the agent,
+its attachments still being stored included, a typed message waiting for
+the conversation Chats is making for it, a request about a subject, or the
+turn the owner spoke over or stopped still letting go of the agent. The
+heard turn takes the posting place only once none of these is in hand, so
+the send it waited for is never refused because of it, and it is then sent
+once, after that send, in the selected conversation. Only a send still in
+hand 30 s after the owner's turn ended gives the turn up, and then quietly,
+as a turn that ends unsent: nothing is said or shown, the turn is never
+sent later, and Alpha listens again. A turn that has taken the posting
+place is no longer given up for the wait: making its conversation and
+asking for its reply go on as any turn's do.
 
 ```quint
 pure val spokenTurnWaitMs = 30000
 
-pure val waitedMsValues = Set(-1, 0, 29999, 30000, 60000)
+pure val waitedMsValues = Set(0, 29999, 30000, 60000)
 
-pure def spokenTurnWaits(sendInHand: bool, waitedMs: int): bool = sendInHand and waitedMs < spokenTurnWaitMs
+pure def heardTurnPosts(sendInHand: bool, decided: bool): bool = talkTurnCanPost(sendInHand) and not(decided)
 
-pure def spokenTurnGivenUp(sendInHand: bool, waitedMs: int): bool = sendInHand and waitedMs >= spokenTurnWaitMs
+pure def heardTurnWaits(sendInHand: bool, waitedMs: int, decided: bool): bool =
+  sendInHand and waitedMs < spokenTurnWaitMs and not(decided)
 
-pure def lawAHeardTurnIsSentWaitsOrIsGivenUpOnlyAfterTheWait(sendInHand: bool, waitedMs: int): bool =
-  val sent = talkTurnCanPost(sendInHand)
-  val waits = spokenTurnWaits(sendInHand, waitedMs)
-  val givenUp = spokenTurnGivenUp(sendInHand, waitedMs)
-  (sent or waits or givenUp)
-    and not(sent and waits) and not(sent and givenUp) and not(waits and givenUp)
+pure def heardTurnGivenUp(sendInHand: bool, waitedMs: int, decided: bool): bool =
+  sendInHand and waitedMs >= spokenTurnWaitMs and not(decided)
+
+pure def lawAHeardTurnIsPostedOnceAfterTheSendInHandOrGivenUpOnlyAfterTheWait(sendInHand: bool, waitedMs: int, decided: bool): bool =
+  val posts = heardTurnPosts(sendInHand, decided)
+  val waits = heardTurnWaits(sendInHand, waitedMs, decided)
+  val givenUp = heardTurnGivenUp(sendInHand, waitedMs, decided)
+  (decided implies not(posts or waits or givenUp))
+    and (not(decided) implies (posts or waits or givenUp))
+    and not(posts and waits) and not(posts and givenUp) and not(waits and givenUp)
+    and (posts implies not(sendInHand))
     and (givenUp implies waitedMs >= spokenTurnWaitMs)
 ```
 

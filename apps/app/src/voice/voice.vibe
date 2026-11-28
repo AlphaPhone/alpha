@@ -60,6 +60,10 @@ export type SpokenChatContext = Agent | VoiceWords | Voice.Machine | Shell.Machi
 interface SpokenChat {
   readonly context: Context.Context<SpokenChatContext>
   readonly writer: Semaphore.Semaphore
+  /** Whether no typed message, request or conversation being made holds the posting place now. */
+  readonly free: boolean!!
+  /** Each change after which the posting place may be free, from the moment it is run. */
+  readonly changes: Stream.Stream<void>
   readonly begin: (session: number, turn: number, current: boolean!!) => (SpokenChatLease | undefined)!!
 }
 
@@ -477,12 +481,13 @@ module pure {
   }
 
   /** What kind of failure ended a Talk turn, by its tag or class alone, never its message. @throws {never} */
-  export function failureName(failure: unknown): string {
+  export function failureName(failure: unknown, depth = 0): string {
     if (typeof failure !== "object" || failure === null) return typeof failure
     const tag: unknown = Reflect.get(failure, "_tag")
     const cause: unknown = Reflect.get(failure, "cause")
-    if (typeof tag === "string") return cause === undefined ? tag : `${tag} from ${failureName(cause)}`
-    return failure.constructor.name
+    if (typeof tag === "string") return cause === undefined || depth >= 3 ? tag : `${tag} from ${failureName(cause, depth + 1)}`
+    const made: unknown = Reflect.get(failure, "constructor")
+    return typeof made === "function" ? made.name : "object"
   }
 
   /** Returns complete written sentences and how much of the unchanged input they consumed. @throws {never} */
@@ -920,14 +925,21 @@ function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event
     const unlessDecided = (guard: TalkTurnGuard) => effect {
       return (try Deferred.succeed(decided, undefined)) ? guard : try Effect.never
     }
-    const abandoned = Effect.andThen(Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn))), unlessDecided("TurnRetired"))
+    const retired = Stream.runHead(Stream.filter(voice.changes, (state) => !Voice.canSentence(state, session, turn)))
+    const abandoned = Effect.andThen(retired, unlessDecided("TurnRetired"))
     const expired = Effect.andThen(Effect.sleep(Voice.spokenTurnWaitMs), unlessDecided("WaitExpired"))
-    const posted = shared.writer.withPermits(1)(effect {
-      const lease = try shared.begin(session, turn, current)
-      if (lease === undefined) return "NoChat" as const
-      if (!(try Deferred.succeed(decided, undefined))) return try Effect.never
-      return { completion: try postVoiceTurn({ session, turn, queue, lease, spoken }) }
-    })
+    const taken = effect {
+      if (!(try shared.free)) return undefined
+      return try shared.writer.withPermits(1)(effect {
+        if (!(try shared.free)) return undefined
+        if (!(try Deferred.succeed(decided, undefined))) return try Effect.never
+        const lease = try Effect.raceFirst(shared.begin(session, turn, current), Effect.as(retired, "TurnRetired" as const))
+        if (lease === "TurnRetired" || lease === undefined) return lease ?? "NoChat" as const
+        return { completion: try postVoiceTurn({ session, turn, queue, lease, spoken }) }
+      })
+    }
+    const posted = Effect.map(Stream.runHead(Stream.filter(Stream.mapEffect(shared.changes, () => taken), (outcome) => outcome !== undefined)),
+      (outcome) => Option.isSome(outcome) && outcome.value !== undefined ? outcome.value : "NoChat" as const)
     const carried = try Effect.raceFirst(posted, Effect.raceFirst(abandoned, expired))
     if (typeof carried === "string") return try finishLocally(carried === "NoChat" ? undefined : carried)
     if (carried.completion !== undefined) Queue.offerUnsafe(queue, carried.completion)
