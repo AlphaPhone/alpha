@@ -3669,6 +3669,12 @@ lemma AnswerCoverageAlwaysC(m: Maps, ticket: int, ok: bool, covered: bool, googl
   ensures alwaysOnlyAPlaceOrRouteIsReadable(res.state)
   ensures alwaysAReadAnswersAQuestion(res.state)
   ensures alwaysAQuestionIsAboutWhatIsShown(res.state)
+{
+}
+
+lemma AnswerCoverageSubmodelRules(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
   ensures alwaysTheTripKeepsItsRules(res.state)
   ensures alwaysTheConnectionKeepsItsRules(res.state)
 {
@@ -3833,6 +3839,7 @@ lemma answerCoverage_ensures(m: Maps, ticket: int, ok: bool, covered: bool, goog
     AnswerCoverageAlwaysB1(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageAlwaysB2(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageAlwaysC(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageSubmodelRules(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageStepsA(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageStepsB(m, ticket, ok, covered, google, offer, res);
   }
