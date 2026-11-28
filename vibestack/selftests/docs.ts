@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
+import { isSeq, parseDocument } from "yaml";
 import { LIB_FILE } from "../prove.ts";
 import { bin, exec } from "../run.ts";
 import { scanSpec } from "../scan.ts";
@@ -151,6 +152,19 @@ describe("the documents name what exists", () => {
     const [first, ...others] = shards.map((task) => JSON.parse(read("turbo.json")).tasks[`//#${task}`].dependsOn);
     assert.deepEqual(others, others.map(() => first), "the shards wait for the same integration prerequisites");
     assert.deepEqual(fs.readdirSync(path.join(project, ".github/workflows")).filter((flow) => /\bdevelop\b/.test(read(`.github/workflows/${flow}`).replace(/^ +branches: \[[\w, -]+\]$/gm, ""))), [], "develop is named only where a workflow lists the branches that trigger it");
+  });
+
+  test("merged PR verification retires on every CI target branch", () => {
+    const ci = parseDocument(read(".github/workflows/ci.yml"));
+    const retirement = parseDocument(read(".github/workflows/retire-merged-pr.yml"));
+    const ciBranches = ci.getIn(["on", "pull_request", "branches"]);
+    const retirementBranches = retirement.getIn(["on", "pull_request_target", "branches"]);
+    const retirementEvents = retirement.getIn(["on", "pull_request_target", "types"]);
+    assert.ok(isSeq(ciBranches) && ciBranches.items.length > 0, "CI declares its pull request branches");
+    assert.ok(isSeq(retirementBranches), "retirement declares its pull request branches");
+    assert.ok(isSeq(retirementEvents), "retirement declares its pull request events");
+    assert.deepEqual(retirementEvents.toJSON(), ["closed"]);
+    assert.deepEqual(new Set(retirementBranches.toJSON()), new Set(ciBranches.toJSON()), "retirement and CI cover the same PR branches");
   });
 
   test("CI simulation seed polling stops when an in-progress baseline run completes without an artifact", () => verifyCiSeedPolling());
