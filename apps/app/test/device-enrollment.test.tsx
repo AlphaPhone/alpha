@@ -171,7 +171,7 @@ async function expectSteadyRestartSkipsRevoke(
   expect(deviceAgent.offerCalendarAvailability()).toEqual({ ok: true });
 }
 
-describe("Device capability re-enrollment on upgrade", () => {
+describe('Device capability re-enrollment on upgrade (spec/app/assistant/context.md, "Story: Be offered only what this phone can do")', () => {
   it("revokes and re-registers a persisted enrollment missing synced capabilities, then skips revoke on steady-state restart", async () => {
     const world = phoneScene();
     const deviceAgent = createStatefulDeviceAgent(world, {
