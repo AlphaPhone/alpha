@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 import org.junit.Test;
@@ -115,6 +117,24 @@ public final class AlphaControlPolicyTest {
         check(AlphaControlPolicy.resolveAllowlistedKeyCode("POWER") < 0, "POWER refused");
         check(!AlphaControlPolicy.requiresSnapshot("app_open_url"), "app_open_url needs no prior snapshot");
         check(AlphaControlPolicy.requiresSnapshot("ui_click"), "ui_click requires live snapshot");
+
+        check(AlphaAccessibilityService.didDirectSetTextApply(true, "hello", "hello"), "matching refreshed text accepts direct ACTION_SET_TEXT");
+        check(!AlphaAccessibilityService.didDirectSetTextApply(true, "hello", "stale"), "mismatched refreshed text triggers clipboard fallback on all packages");
+        check(!AlphaAccessibilityService.didDirectSetTextApply(true, "hello", null), "null refreshed text triggers clipboard fallback");
+        check(!AlphaAccessibilityService.didDirectSetTextApply(false, "hello", "hello"), "failed direct ACTION_SET_TEXT triggers clipboard fallback");
+
+        check(AlphaUiControlExecutor.shouldUseTier1ImeEnter(true, false, 35), "Tier-1 submit uses ACTION_IME_ENTER on API 30+");
+        check(!AlphaUiControlExecutor.shouldUseTier1ImeEnter(true, true, 35), "Tier-2 privileged inject bypasses Tier-1 IME enter");
+        check(!AlphaUiControlExecutor.shouldUseTier1ImeEnter(false, false, 35), "non-submit does not invoke IME enter");
+        check(!AlphaUiControlExecutor.shouldUseTier1ImeEnter(true, false, 29), "pre-API-30 skips ACTION_IME_ENTER");
+
+        check(AlphaUiControlExecutor.shouldRefreshPostActuation("ui_click"), "ui_click triggers post-actuation observation");
+        check(AlphaUiControlExecutor.shouldRefreshPostActuation("ui_set_text"), "ui_set_text triggers post-actuation observation");
+        check(AlphaUiControlExecutor.shouldRefreshPostActuation("app_open_url"), "app_open_url triggers post-actuation observation");
+        check(AlphaUiControlExecutor.shouldRefreshPostActuation("app_launch_package"), "app_launch_package triggers post-actuation observation");
+        check(!AlphaUiControlExecutor.shouldRefreshPostActuation("ui_read_tree"), "ui_read_tree already observes and skips duplicate refresh");
+        check(!AlphaUiControlExecutor.shouldRefreshPostActuation("ui_capture_screen"), "ui_capture_screen already observes and skips duplicate refresh");
+        check(!AlphaUiControlExecutor.shouldRefreshPostActuation("app_functions_discover"), "app_functions_discover skips UI refresh");
     }
 
     /** Verify executor refuses blocked packages, stale snapshots, and non-privileged key injection cleanly. */
@@ -262,11 +282,137 @@ public final class AlphaControlPolicyTest {
         dedupExecutor.shutdown();
     }
 
+    /** Verify startup observation push, post-actuation snapshot receipts, and non-blocking interrupt dispatch. */
+    @Test
+    public void testStartupPushPostActuationSnapshotAndDedicatedInterruptWorker() throws Exception {
+        CountDownLatch startupObserved = new CountDownLatch(1);
+        AlphaUiControlExecutor startupExecutor = new AlphaUiControlExecutor(
+            null,
+            (method, path, body) -> CompletableFuture.completedFuture(
+                new AlphaUiControlExecutor.TransportResponse(200, "{\"op\":null}".getBytes(StandardCharsets.UTF_8))
+            ),
+            (op, snapId, expectedPkg) -> new AlphaUiControlExecutor.StepOutcome("done", null, null),
+            (includeNonInteractive, maxNodes, shot) -> {
+                startupObserved.countDown();
+                return 1;
+            },
+            () -> true,
+            0L
+        );
+        try {
+            startupExecutor.start();
+            check(startupObserved.await(2, TimeUnit.SECONDS), "start() must immediately push an observation when accessibility is already live");
+        } finally {
+            startupExecutor.stop();
+        }
+
+        List<JSONObject> postSnapReceipts = new ArrayList<>();
+        AtomicInteger pushCount = new AtomicInteger(0);
+        AtomicInteger nextSnap = new AtomicInteger(10);
+        AlphaUiControlExecutor.NativeAgentTransport clickTransport = (method, path, body) -> {
+            if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                String json = "{\"op\":{\"opId\":201,\"boundSnapId\":10,\"expectedPackage\":\"org.mozilla.firefox\",\"op\":{\"type\":\"ui_click\",\"snapshotId\":10,\"expectedPackage\":\"org.mozilla.firefox\",\"nodeId\":\"w1_n0\"}}}";
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, json.getBytes(StandardCharsets.UTF_8)));
+            }
+            if ("POST".equals(method) && "/api/alpha-control/receipt".equals(path)) {
+                try {
+                    postSnapReceipts.add(new JSONObject(new String(body, StandardCharsets.UTF_8)));
+                } catch (Exception failed) {
+                    throw new RuntimeException(failed);
+                }
+            }
+            return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+        };
+        AlphaUiControlExecutor postSnapExecutor = new AlphaUiControlExecutor(
+            null,
+            clickTransport,
+            (op, snapId, expectedPkg) -> new AlphaUiControlExecutor.StepOutcome("done", null, null),
+            (includeNonInteractive, maxNodes, shot) -> {
+                pushCount.incrementAndGet();
+                return nextSnap.incrementAndGet();
+            },
+            () -> true,
+            0L
+        );
+        postSnapExecutor.pollOnce();
+        check(pushCount.get() == 1, "completed ui_click must trigger one post-actuation observation");
+        check(postSnapReceipts.size() == 1, "completed ui_click must post receipt");
+        check(postSnapReceipts.get(0).getInt("postSnapshotId") == 11, "receipt must include refreshed postSnapshotId");
+
+        List<JSONObject> refusedReceipts = new ArrayList<>();
+        AtomicInteger refusedPushCount = new AtomicInteger(0);
+        AlphaUiControlExecutor refusedExecutor = new AlphaUiControlExecutor(
+            null,
+            (method, path, body) -> {
+                if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                    String json = "{\"op\":{\"opId\":202,\"boundSnapId\":10,\"expectedPackage\":\"org.mozilla.firefox\",\"op\":{\"type\":\"ui_click\",\"snapshotId\":10,\"expectedPackage\":\"org.mozilla.firefox\",\"nodeId\":\"w1_n0\"}}}";
+                    return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, json.getBytes(StandardCharsets.UTF_8)));
+                }
+                if ("POST".equals(method) && "/api/alpha-control/receipt".equals(path)) {
+                    try {
+                        refusedReceipts.add(new JSONObject(new String(body, StandardCharsets.UTF_8)));
+                    } catch (Exception failed) {
+                        throw new RuntimeException(failed);
+                    }
+                }
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+            },
+            (op, snapId, expectedPkg) -> new AlphaUiControlExecutor.StepOutcome("refused", "NODE_CLICK_FAILED", null),
+            (includeNonInteractive, maxNodes, shot) -> {
+                refusedPushCount.incrementAndGet();
+                return 99;
+            },
+            () -> true,
+            0L
+        );
+        refusedExecutor.pollOnce();
+        check(refusedPushCount.get() == 0, "refused ui_click must not run post-actuation observation");
+        check(refusedReceipts.size() == 1 && !refusedReceipts.get(0).has("postSnapshotId"), "refused receipt omits postSnapshotId");
+
+        CountDownLatch workerBlocked = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        CountDownLatch interruptPosted = new CountDownLatch(1);
+        AlphaUiControlExecutor interruptExecutor = new AlphaUiControlExecutor(
+            null,
+            (method, path, body) -> {
+                if ("GET".equals(method) && "/api/alpha-control/next".equals(path)) {
+                    workerBlocked.countDown();
+                    return CompletableFuture.supplyAsync(() -> {
+                        try {
+                            releaseWorker.await(3, TimeUnit.SECONDS);
+                        } catch (InterruptedException ignored) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return new AlphaUiControlExecutor.TransportResponse(200, "{\"op\":null}".getBytes(StandardCharsets.UTF_8));
+                    });
+                }
+                if ("POST".equals(method) && "/api/alpha-control/interrupt".equals(path)) {
+                    interruptPosted.countDown();
+                }
+                return CompletableFuture.completedFuture(new AlphaUiControlExecutor.TransportResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+            },
+            null,
+            null,
+            () -> false,
+            0L
+        );
+        try {
+            interruptExecutor.start();
+            check(workerBlocked.await(2, TimeUnit.SECONDS), "poll worker entered blocked transport request");
+            interruptExecutor.onPhysicalPreemption("org.mozilla.firefox");
+            check(interruptPosted.await(500, TimeUnit.MILLISECONDS), "interrupt must fire immediately on dedicated thread while poll worker is blocked");
+        } finally {
+            releaseWorker.countDown();
+            interruptExecutor.stop();
+        }
+    }
+
     /** Standalone JVM entry point for fast verification without Gradle overhead. */
     public static void main(String[] args) throws Exception {
         AlphaControlPolicyTest suite = new AlphaControlPolicyTest();
         suite.testPolicyRules();
         suite.testExecutorRefusals();
         suite.testExecutorExceptionReceiptDeduplicationAndLifecycle();
+        suite.testStartupPushPostActuationSnapshotAndDedicatedInterruptWorker();
     }
 }

@@ -258,7 +258,7 @@ describe("Alpha product plugin: Clock actions, provider, and routes", () => {
     expect(setRes?.success).toBe(true);
     const alarmId = ((setRes?.data as { alarm: { id: string } }).alarm).id;
     expect(store.getClock().alarms[0]?.daysMask).toBe(62);
-    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length, as v121's Clock did"
+    // spec/app/clock/alarms.md, "A new alarm snoozes for ten minutes until the owner picks another length"
     expect(store.getClock().alarms[0]?.snoozeMinutes).toBe(10);
 
     const toggleRes = await alarmAction.handler(runtime, emptyMessage("Turn off alarm"), emptyState, { parameters: { action: "toggle", id: alarmId, enabled: false } });
@@ -886,7 +886,16 @@ describe("Bounded external app control in the Alpha product plugin", () => {
       parameters: { op: { type: "app_open_url", url: "https://example.org", packageName: "com.android.chrome" } },
     });
     expect(openUnleasedBrowser?.success).toBe(false);
-    expect((openUnleasedBrowser?.data as { code: string }).code).toBe("LEASE_REQUIRED");
+    expect((openUnleasedBrowser?.data as { code: string; leaseRequest?: { packageName: string; requestedOp: string } }).code).toBe("LEASE_REQUIRED");
+    expect((openUnleasedBrowser?.data as { leaseRequest?: { packageName: string; requestedOp: string } }).leaseRequest).toMatchObject({
+      packageName: "com.android.chrome",
+      requestedOp: "app_open_url",
+    });
+    const pendingPromptState = await callRoute(routes, "GET", "/api/alpha/control/state");
+    expect(pendingPromptState.body.leaseRequest).toMatchObject({
+      packageName: "com.android.chrome",
+      requestedOp: "app_open_url",
+    });
 
     const firefoxObs = await callRoute(routes, "POST", "/api/alpha-control/observe", {
       body: {
@@ -929,7 +938,11 @@ describe("Bounded external app control in the Alpha product plugin", () => {
     expect(liveClick?.success).toBe(true);
     const next2 = await callRoute(routes, "GET", "/api/alpha-control/next");
     const op2 = next2.body.op as { opId: number };
-    await callRoute(routes, "POST", "/api/alpha-control/receipt", { body: { opId: op2.opId, outcome: "done" } });
+    const receipt2 = await callRoute(routes, "POST", "/api/alpha-control/receipt", {
+      body: { opId: op2.opId, outcome: "done", postSnapshotId: snapId + 1 },
+    });
+    expect(receipt2.status).toBe(200);
+    expect((receipt2.body.receipt as { postSnapshotId?: number }).postSnapshotId).toBe(snapId + 1);
 
     const privateObs = await callRoute(routes, "POST", "/api/alpha-control/observe", {
       body: {
@@ -944,6 +957,8 @@ describe("Bounded external app control in the Alpha product plugin", () => {
       },
     });
     const privSnap = privateObs.body.snapshotId as number;
+    const afterPrivateState = await callRoute(routes, "GET", "/api/alpha/control/state");
+    expect(afterPrivateState.body.leaseRequest).toBeNull();
     const privateClick = await action.handler(runtime, emptyMessage("Private click"), emptyState, {
       parameters: { op: { type: "ui_click", snapshotId: privSnap, expectedPackage: "org.mozilla.firefox", nodeId: "priv" } },
     });

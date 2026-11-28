@@ -95,11 +95,7 @@ export const alphaAppsModule: ModuleFactory<never> = alphaAppsModuleWith();
 
 export { AlphaAppsStore } from "./store.ts";
 export {
-  ALLOWLISTED_KEY_CODES, AlphaControlCoordinator, BLOCKED_ACTIVITY_SUBSTRINGS, BLOCKED_PACKAGES, CONTROL_ACTION_NAME,
-  MAX_LEASE_DURATION_MS, MAX_LEASE_OPS, isBlockedTarget, isValidPackageName, opRequiresSnapshot, parseControlOp,
-  type ActiveControlLease, type ControlCoordinatorState, type ControlKeyCode, type ControlOpPayload,
-  type ControlReceiptRecord, type ControlTier, type ExecutionOutcome, type ForegroundObservation,
-  type LeaseStatus, type ObservedUiNode, type PendingControlOp, type ScreenProtection, type TargetKind,
+  AlphaControlCoordinator, CONTROL_ACTION_NAME, MAX_LEASE_OPS, isBlockedTarget, parseControlOp,
 } from "./control.ts";
 /** @public main.vibe imports it by name in the generated host entry. */
 export { makeNativeNotesCleanup } from "./notes-cleanup.vibe";

@@ -426,8 +426,9 @@ public final class AlphaAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * Set text on an editable non-sensitive node, using a GeckoView-compatible focus and clipboard
-     * paste fallback when ACTION_SET_TEXT does not update the field value.
+     * Set text on an editable non-sensitive node, verifying the refreshed node text across all
+     * packages (including Chrome, Firefox/GeckoView, and React WebViews) before falling back to
+     * clipboard paste.
      */
     public boolean setNodeText(String nodeId, String text, boolean isFirefox) {
         AccessibilityNodeInfo node = lookupNode(nodeId);
@@ -436,16 +437,27 @@ public final class AlphaAccessibilityService extends AccessibilityService {
         Bundle args = new Bundle();
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
         boolean direct = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-        if (direct && !isFirefox) return true;
-        if (direct && node.refresh()) {
-            CharSequence current = node.getText();
-            if (current != null && text.contentEquals(current)) return true;
+        if (direct && node.refresh() && didDirectSetTextApply(true, text, node.getText())) {
+            return true;
         }
         ClipboardManager clipboard = getSystemService(ClipboardManager.class);
-        if (clipboard == null) return direct;
+        if (clipboard == null) return direct && !isFirefox;
         node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
         clipboard.setPrimaryClip(ClipData.newPlainText("alpha_input", text));
         return node.performAction(AccessibilityNodeInfo.ACTION_PASTE) || direct;
+    }
+
+    /** Trigger the IME submit/enter action on a cached non-sensitive node on Android 11+. */
+    public boolean performImeEnter(String nodeId) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false;
+        AccessibilityNodeInfo node = lookupNode(nodeId);
+        if (node == null || isNodeSensitive(node)) return false;
+        return node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
+    }
+
+    static boolean didDirectSetTextApply(boolean directOk, String requestedText, CharSequence observedAfterRefresh) {
+        if (!directOk || requestedText == null || observedAfterRefresh == null) return false;
+        return requestedText.contentEquals(observedAfterRefresh);
     }
 
     /** Scroll a cached container node or the active viewport along the requested direction. */

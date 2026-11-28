@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,6 +28,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -58,11 +60,17 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         public final String outcome;
         public final String refusalCode;
         public final JSONObject result;
+        public final int postSnapshotId;
 
         public StepOutcome(String outcome, String refusalCode, JSONObject result) {
+            this(outcome, refusalCode, result, 0);
+        }
+
+        public StepOutcome(String outcome, String refusalCode, JSONObject result, int postSnapshotId) {
             this.outcome = outcome;
             this.refusalCode = refusalCode;
             this.result = result;
+            this.postSnapshotId = postSnapshotId;
         }
     }
 
@@ -70,16 +78,24 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         StepOutcome dispatch(JSONObject op, int boundSnapId, String expectedPackage);
     }
 
+    interface ObservationPusher {
+        int push(boolean includeNonInteractive, int maxNodes, AlphaAccessibilityService.ScreenshotCapture shot);
+    }
+
     private static final String ROUTE_OBSERVE = "/api/alpha-control/observe";
     private static final String ROUTE_NEXT = "/api/alpha-control/next";
     private static final String ROUTE_RECEIPT = "/api/alpha-control/receipt";
     private static final String ROUTE_INTERRUPT = "/api/alpha-control/interrupt";
     private static final int MAX_TRACKED_OPS = 64;
+    private static final long DEFAULT_POST_ACTUATION_SETTLE_MS = 180L;
 
     private final Context appContext;
     private final NativeAgentTransport transport;
     private final AlphaControlBridgeClient bridgeClient;
     private final OperationDispatcher dispatcher;
+    private final ObservationPusher observationPusher;
+    private final BooleanSupplier accessibilityLiveSupplier;
+    private final long postActuationSettleMs;
     private final Object workerLock = new Object();
     private final Object opStateLock = new Object();
     private final Set<Integer> inFlightOpIds = new HashSet<>();
@@ -92,6 +108,7 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger lastAgentSnapshotId = new AtomicInteger(0);
     private ScheduledExecutorService worker;
+    private ExecutorService interruptWorker;
     private volatile String lastObservedPackage = "";
     private volatile ScheduledFuture<?> pollTask;
 
@@ -101,10 +118,26 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
     }
 
     AlphaUiControlExecutor(Context context, NativeAgentTransport transport, OperationDispatcher customDispatcher) {
+        this(context, transport, customDispatcher, null, () -> AlphaAccessibilityService.live() != null, DEFAULT_POST_ACTUATION_SETTLE_MS);
+    }
+
+    AlphaUiControlExecutor(
+        Context context,
+        NativeAgentTransport transport,
+        OperationDispatcher customDispatcher,
+        ObservationPusher customObservationPusher,
+        BooleanSupplier accessibilityLiveSupplier,
+        long postActuationSettleMs
+    ) {
         this.appContext = context == null ? null : context.getApplicationContext();
         this.transport = transport;
         this.bridgeClient = this.appContext == null ? null : new AlphaControlBridgeClient(this.appContext);
         this.dispatcher = customDispatcher != null ? customDispatcher : this::executeOperation;
+        this.observationPusher = customObservationPusher != null ? customObservationPusher : this::pushObservation;
+        this.accessibilityLiveSupplier = accessibilityLiveSupplier != null
+            ? accessibilityLiveSupplier
+            : () -> AlphaAccessibilityService.live() != null;
+        this.postActuationSettleMs = Math.max(0L, postActuationSettleMs);
     }
 
     /** Start polling the resident agent and listening to AlphaAccessibilityService. */
@@ -115,11 +148,21 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             if (worker == null || worker.isShutdown()) {
                 worker = newDaemonWorker();
             }
+            if (interruptWorker == null || interruptWorker.isShutdown()) {
+                interruptWorker = newInterruptWorker();
+            }
             activeWorker = worker;
         }
         AlphaAccessibilityService.setControlListener(this);
+        if (accessibilityLiveSupplier.getAsBoolean()) {
+            submitOn(activeWorker, () -> observationPusher.push(false, 80, null));
+        }
         if (bridgeClient != null) {
-            submitOn(activeWorker, () -> bridgeClient.connect(500L));
+            submitOn(activeWorker, () -> {
+                if (bridgeClient.connect(500L) && accessibilityLiveSupplier.getAsBoolean()) {
+                    observationPusher.push(false, 80, null);
+                }
+            });
         }
         try {
             pollTask = activeWorker.scheduleWithFixedDelay(this::pollOnceSafe, 250L, 400L, TimeUnit.MILLISECONDS);
@@ -128,7 +171,7 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         }
     }
 
-    /** Stop polling, disconnect any bound Tier-2 platform bridge, and shut down the daemon worker cleanly. */
+    /** Stop polling, disconnect any bound Tier-2 platform bridge, and shut down daemon workers cleanly. */
     public void stop() {
         if (!running.compareAndSet(true, false)) return;
         ScheduledFuture<?> task = pollTask;
@@ -139,12 +182,18 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             bridgeClient.disconnect();
         }
         ScheduledExecutorService toShutdown;
+        ExecutorService interruptToShutdown;
         synchronized (workerLock) {
             toShutdown = worker;
             worker = null;
+            interruptToShutdown = interruptWorker;
+            interruptWorker = null;
         }
         if (toShutdown != null) {
             toShutdown.shutdownNow();
+        }
+        if (interruptToShutdown != null) {
+            interruptToShutdown.shutdownNow();
         }
         synchronized (opStateLock) {
             inFlightOpIds.clear();
@@ -190,25 +239,25 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
     public void onServiceStateChanged(boolean connected) {
         if (!connected) {
             String pkg = lastObservedPackage;
-            submitWorker(() -> postInterrupt("service_disabled", pkg));
+            submitInterrupt(() -> postInterrupt("service_disabled", pkg));
             return;
         }
-        submitWorker(() -> pushObservation(false, 80, null));
+        submitWorker(() -> observationPusher.push(false, 80, null));
     }
 
     @Override
     public void onForegroundChanged(String packageName, String activityName) {
         lastObservedPackage = packageName == null ? "" : packageName;
         if (AlphaControlPolicy.isBlockedTarget(packageName, activityName)) {
-            submitWorker(() -> postInterrupt("blocked_package", packageName));
+            submitInterrupt(() -> postInterrupt("blocked_package", packageName));
             return;
         }
-        submitWorker(() -> pushObservation(false, 80, null));
+        submitWorker(() -> observationPusher.push(false, 80, null));
     }
 
     @Override
     public void onPhysicalPreemption(String packageName) {
-        submitWorker(() -> postInterrupt("user_touch", packageName));
+        submitInterrupt(() -> postInterrupt("user_touch", packageName));
     }
 
     /** Push a fresh observation to the resident agent and return the assigned monotonic snapshotId. */
@@ -293,14 +342,35 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
                 return;
             }
 
-            AlphaAccessibilityService.setActuationInProgress(true);
+            String opType = op.optString("type", "");
             StepOutcome outcome = null;
             try {
-                outcome = dispatcher.dispatch(op, boundSnapId, expectedPackage);
-            } catch (RuntimeException failed) {
-                outcome = new StepOutcome("refused", refusalCodeForException(failed), null);
+                AlphaAccessibilityService.setActuationInProgress(true);
+                try {
+                    outcome = dispatcher.dispatch(op, boundSnapId, expectedPackage);
+                } catch (RuntimeException failed) {
+                    outcome = new StepOutcome("refused", refusalCodeForException(failed), null);
+                } finally {
+                    AlphaAccessibilityService.setActuationInProgress(false);
+                }
+                if (outcome != null
+                    && "done".equals(outcome.outcome)
+                    && outcome.postSnapshotId <= 0
+                    && shouldRefreshPostActuation(opType)
+                    && accessibilityLiveSupplier.getAsBoolean()) {
+                    if (postActuationSettleMs > 0L) {
+                        try {
+                            Thread.sleep(postActuationSettleMs);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    int postSnap = observationPusher.push(false, 120, null);
+                    if (postSnap > 0) {
+                        outcome = new StepOutcome(outcome.outcome, outcome.refusalCode, outcome.result, postSnap);
+                    }
+                }
             } finally {
-                AlphaAccessibilityService.setActuationInProgress(false);
                 synchronized (opStateLock) {
                     inFlightOpIds.remove(opId);
                     if (outcome != null) {
@@ -418,12 +488,12 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
     }
 
     private StepOutcome executeReadTree(boolean includeNonInteractive, int maxNodes) {
-        int snapId = pushObservation(includeNonInteractive, maxNodes, null);
+        int snapId = observationPusher.push(includeNonInteractive, maxNodes, null);
         if (snapId <= 0) return new StepOutcome("refused", "OBSERVE_FAILED", null);
         try {
-            return new StepOutcome("done", null, new JSONObject().put("snapshotId", snapId));
+            return new StepOutcome("done", null, new JSONObject().put("snapshotId", snapId), snapId);
         } catch (JSONException failed) {
-            return new StepOutcome("done", null, null);
+            return new StepOutcome("done", null, null, snapId);
         }
     }
 
@@ -433,9 +503,9 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             if (jpeg != null && jpeg.length > 0) {
                 int[] dims = decodeJpegDimensions(jpeg, maxWidth);
                 String b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP);
-                int snapId = pushObservation(false, 120, new AlphaAccessibilityService.ScreenshotCapture(b64, dims[0], dims[1], null));
+                int snapId = observationPusher.push(false, 120, new AlphaAccessibilityService.ScreenshotCapture(b64, dims[0], dims[1], null));
                 return snapId > 0
-                    ? new StepOutcome("done", null, null)
+                    ? new StepOutcome("done", null, null, snapId)
                     : new StepOutcome("refused", "OBSERVE_FAILED", null);
             }
         }
@@ -443,8 +513,8 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         if (service == null) return new StepOutcome("refused", "SERVICE_DISCONNECTED", null);
         AlphaAccessibilityService.ScreenshotCapture shot = service.captureTier1Screenshot(maxWidth, quality);
         if (shot.errorCode != null) return new StepOutcome("refused", shot.errorCode, null);
-        int snapId = pushObservation(false, 120, shot);
-        return snapId > 0 ? new StepOutcome("done", null, null) : new StepOutcome("refused", "OBSERVE_FAILED", null);
+        int snapId = observationPusher.push(false, 120, shot);
+        return snapId > 0 ? new StepOutcome("done", null, null, snapId) : new StepOutcome("refused", "OBSERVE_FAILED", null);
     }
 
     private StepOutcome executeClick(JSONObject op) {
@@ -479,9 +549,12 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         boolean submit = op.optBoolean("submit", false);
         boolean ok = service.setNodeText(nodeId, text, AlphaControlPolicy.isFirefoxPackage(expectedPackage));
         if (!ok) return new StepOutcome("refused", "SET_TEXT_FAILED", null);
-        if (submit && bridgeClient != null && bridgeClient.supportsInjectEvents()) {
+        boolean hasPrivilegedInject = bridgeClient != null && bridgeClient.supportsInjectEvents();
+        if (submit && hasPrivilegedInject) {
             bridgeClient.injectKeyEvent(KeyEvent.KEYCODE_ENTER, 0, KeyEvent.ACTION_DOWN);
             bridgeClient.injectKeyEvent(KeyEvent.KEYCODE_ENTER, 0, KeyEvent.ACTION_UP);
+        } else if (shouldUseTier1ImeEnter(submit, hasPrivilegedInject, Build.VERSION.SDK_INT)) {
+            service.performImeEnter(nodeId);
         }
         return new StepOutcome("done", null, null);
     }
@@ -574,11 +647,33 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
             receipt.put("opId", opId);
             receipt.put("outcome", outcome.outcome);
             if (outcome.refusalCode != null) receipt.put("refusalCode", outcome.refusalCode);
+            if (outcome.postSnapshotId > 0) receipt.put("postSnapshotId", outcome.postSnapshotId);
             if (outcome.result != null) receipt.put("result", outcome.result);
             sendJson("POST", ROUTE_RECEIPT, receipt);
         } catch (JSONException ignored) {
             return;
         }
+    }
+
+    static boolean shouldRefreshPostActuation(String opType) {
+        if (opType == null) return false;
+        switch (opType) {
+            case "ui_click":
+            case "ui_set_text":
+            case "ui_scroll":
+            case "ui_key_event":
+            case "ui_gesture":
+            case "ui_global_action":
+            case "app_open_url":
+            case "app_launch_package":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static boolean shouldUseTier1ImeEnter(boolean submit, boolean hasPrivilegedInject, int sdkInt) {
+        return submit && !hasPrivilegedInject && sdkInt >= Build.VERSION_CODES.R;
     }
 
     private static String refusalCodeForException(RuntimeException failed) {
@@ -604,6 +699,14 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         });
     }
 
+    private static ExecutorService newInterruptWorker() {
+        return Executors.newSingleThreadExecutor((runnable) -> {
+            Thread thread = new Thread(runnable, "alpha-control-interrupt");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
     private void submitWorker(Runnable task) {
         ScheduledExecutorService activeWorker;
         synchronized (workerLock) {
@@ -614,7 +717,17 @@ public final class AlphaUiControlExecutor implements AlphaAccessibilityService.C
         }
     }
 
-    private static void submitOn(ScheduledExecutorService target, Runnable task) {
+    private void submitInterrupt(Runnable task) {
+        ExecutorService activeInterrupt;
+        synchronized (workerLock) {
+            activeInterrupt = interruptWorker;
+        }
+        if (activeInterrupt != null && !activeInterrupt.isShutdown()) {
+            submitOn(activeInterrupt, task);
+        }
+    }
+
+    private static void submitOn(ExecutorService target, Runnable task) {
         try {
             target.execute(task);
         } catch (RejectedExecutionException ignored) {

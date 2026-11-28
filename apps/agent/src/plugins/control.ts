@@ -1,4 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"; spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"; spec/app/control/index.md, "Story: Enforce formal safety guarantees over external app control"
+import { turnNotes } from "@elizaos/agent-host";
 import { Effect, Option } from "effect";
 import {
   type AgentAction, type AgentProvider, type AgentRoute,
@@ -222,12 +223,20 @@ export interface ControlReceiptRecord {
   readonly receivedAtMs: number;
 }
 
+/** Pending owner-approval lease prompt surfaced after a LEASE_REQUIRED dispatch refusal. */
+export interface ControlLeaseRequest {
+  readonly packageName: string;
+  readonly requestedOp: ControlOpPayload["type"];
+  readonly requestedAt: number;
+}
+
 /** Public control snapshot returned to the overlay and agent provider. */
 export interface ControlCoordinatorState {
   readonly tier: ControlTier;
   readonly capabilities: readonly string[];
   readonly foreground: ForegroundObservation;
   readonly lease: ActiveControlLease;
+  readonly leaseRequest: ControlLeaseRequest | null;
   readonly pending: PendingControlOp | null;
   readonly lastResult: ExecutionOutcome;
   readonly killed: boolean;
@@ -537,6 +546,11 @@ function opSnapshotId(op: ControlOpPayload, currentSnapId: number): number {
   }
 }
 
+/** Control effect emitted by coordinator transitions, matching spec/app/control/index.md. */
+export type CoordinatorEffect =
+  | { readonly tag: "HaltBridge"; readonly reason: string }
+  | { readonly tag: "ClearOverlay" };
+
 /**
  * In-memory coordinator enforcing `spec/app/control/index.md` invariants across the
  * resident agent's overlay routes, native control bridge routes, and `DEVICE_CONTROL` action.
@@ -566,6 +580,7 @@ export class AlphaControlCoordinator {
     expiresAtMs: 0,
     status: "LeaseInactive",
   };
+  private leaseRequest: ControlLeaseRequest | null = null;
   private pending: PendingControlOp | null = null;
   private lastResult: ExecutionOutcome = "done";
   private lastOpId = 0;
@@ -573,14 +588,14 @@ export class AlphaControlCoordinator {
   private readonly recentReceipts: ControlReceiptRecord[] = [];
   private readonly waiters = new Map<number, (receipt: ControlReceiptRecord) => void>();
 
-  /** Read the current control state, revoking any expired lease first. */
-  snapshot(nowMs: number): ControlCoordinatorState {
-    this.expireIfDue(nowMs);
+  /** Read the current control state without advancing clock expiry. */
+  readState(): ControlCoordinatorState {
     return {
       tier: this.tier,
       capabilities: [...this.capabilities],
       foreground: this.foreground,
       lease: this.lease,
+      leaseRequest: this.leaseRequest,
       pending: this.pending,
       lastResult: this.lastResult,
       killed: this.killed,
@@ -588,12 +603,72 @@ export class AlphaControlCoordinator {
     };
   }
 
+  /** Return the highest monotonically assigned operation id. */
+  currentLastOpId(): number {
+    return this.lastOpId;
+  }
+
+  /** Whether engaging the kill-switch would change control state. */
+  canKillSwitch(): boolean {
+    return this.lease.status === "LeaseActive" || this.pending !== null || !this.killed;
+  }
+
+  /** Read the current control state, revoking any expired lease first. */
+  snapshot(nowMs: number): ControlCoordinatorState {
+    this.expireIfDue(nowMs);
+    return this.readState();
+  }
+
+  /** Update the native control tier reported by the phone, revoking active work when dropping to TierNone. */
+  setTier(tier: ControlTier, nowMs = 0):
+    | { readonly ok: true; readonly effects: readonly CoordinatorEffect[] }
+    | { readonly ok: false; readonly code: string; readonly status: number } {
+    if (!TIER_SET.has(tier) || tier === this.tier) {
+      return { ok: false, code: "TIER_UNCHANGED", status: 409 };
+    }
+    this.tier = tier;
+    if (tier === "TierNone") {
+      const hadPending = this.pending !== null;
+      if (this.lease.status === "LeaseActive") {
+        this.lease = { ...this.lease, status: "LeaseRevoked" };
+      }
+      if (hadPending) {
+        this.settlePreempted("tier_disabled", nowMs, false);
+      }
+      this.leaseRequest = null;
+      return {
+        ok: true,
+        effects: hadPending
+          ? [{ tag: "HaltBridge", reason: "tier_disabled" }, { tag: "ClearOverlay" }]
+          : [{ tag: "ClearOverlay" }],
+      };
+    }
+    return { ok: true, effects: [] };
+  }
+
+  /** Revoke an expired active lease and halt any in-flight operation. */
+  expireLease(nowMs: number):
+    | { readonly ok: true; readonly effects: readonly CoordinatorEffect[] }
+    | { readonly ok: false; readonly code: string; readonly status: number } {
+    if (this.lease.status !== "LeaseActive" || nowMs < this.lease.expiresAtMs) {
+      return { ok: false, code: "LEASE_NOT_EXPIRED", status: 409 };
+    }
+    const hadPending = this.pending !== null;
+    this.lease = { ...this.lease, status: "LeaseRevoked" };
+    if (hadPending) {
+      this.settlePreempted("lease_expired", nowMs, false);
+    }
+    return {
+      ok: true,
+      effects: hadPending ? [{ tag: "HaltBridge", reason: "lease_expired" }] : [],
+    };
+  }
+
   /** Apply an owner-approved bounded lease for one non-blocked target package. */
   grantLease(
-    input: { readonly packageName: string; readonly maxOps: number; readonly durationMs: number },
+    input: { readonly leaseId?: number; readonly packageName: string; readonly maxOps: number; readonly durationMs: number },
     nowMs: number,
   ): { readonly ok: true; readonly lease: ActiveControlLease } | { readonly ok: false; readonly code: string; readonly status: number } {
-    this.expireIfDue(nowMs);
     if (this.tier === "TierNone") return { ok: false, code: "CONTROL_TIER_UNAVAILABLE", status: 409 };
     if (this.pending !== null) return { ok: false, code: "OPERATION_IN_FLIGHT", status: 409 };
     if (this.foreground.protection !== "ScreenClear") return { ok: false, code: "PROTECTED_SCREEN", status: 409 };
@@ -607,14 +682,18 @@ export class AlphaControlCoordinator {
     if (!Number.isSafeInteger(input.durationMs) || input.durationMs < MIN_LEASE_DURATION_MS || input.durationMs > MAX_LEASE_DURATION_MS) {
       return { ok: false, code: "INVALID_DURATION", status: 400 };
     }
+    if (input.leaseId !== undefined && (!Number.isSafeInteger(input.leaseId) || input.leaseId <= this.lease.leaseId)) {
+      return { ok: false, code: "INVALID_LEASE_ID", status: 409 };
+    }
     this.lease = {
-      leaseId: this.lease.leaseId + 1,
+      leaseId: input.leaseId ?? this.lease.leaseId + 1,
       packageName: input.packageName,
       maxOps: input.maxOps,
       usedOps: 0,
       expiresAtMs: nowMs + input.durationMs,
       status: "LeaseActive",
     };
+    this.leaseRequest = null;
     this.killed = false;
     return { ok: true, lease: this.lease };
   }
@@ -625,23 +704,33 @@ export class AlphaControlCoordinator {
       this.lease = { ...this.lease, status: "LeaseRevoked" };
     }
     if (this.pending !== null) {
-      this.settlePreempted(reason || "kill_switch", nowMs);
+      this.settlePreempted(reason || "kill_switch", nowMs, false);
     }
+    this.leaseRequest = null;
     this.killed = true;
-    return this.snapshot(nowMs);
+    return this.readState();
   }
 
   /** Record a fresh native observation from AlphaAccessibilityService. */
   observe(input: Record<string, unknown>, nowMs: number):
-    | { readonly ok: true; readonly snapshotId: number; readonly lease: ActiveControlLease; readonly pendingOp: PendingControlOp | null }
+    | {
+      readonly ok: true;
+      readonly snapshotId: number;
+      readonly lease: ActiveControlLease;
+      readonly pendingOp: PendingControlOp | null;
+      readonly effects: readonly CoordinatorEffect[];
+    }
     | { readonly ok: false; readonly code: string; readonly status: number } {
-    this.expireIfDue(nowMs);
     const tierRaw = readString(input, "tier");
     if (tierRaw === undefined || !TIER_SET.has(tierRaw)) return { ok: false, code: "INVALID_TIER", status: 400 };
     const tier = tierRaw as ControlTier;
     const protectionRaw = readString(input, "protection") ?? "ScreenClear";
     if (!PROTECTION_SET.has(protectionRaw)) return { ok: false, code: "INVALID_PROTECTION", status: 400 };
     const protection = protectionRaw as ScreenProtection;
+    const explicitSnapId = input.snapshotId === undefined ? undefined : parsePositiveInt(input.snapshotId);
+    if (input.snapshotId !== undefined && (explicitSnapId === undefined || explicitSnapId <= this.foreground.snapId)) {
+      return { ok: false, code: "STALE_SNAPSHOT_ID", status: 409 };
+    }
     const packageName = readRawString(input, "packageName")?.trim() ?? "";
     const activityName = readRawString(input, "activityName")?.trim() ?? "";
     const rawCaps = Array.isArray(input.capabilities) ? input.capabilities : [];
@@ -669,9 +758,13 @@ export class AlphaControlCoordinator {
     this.capabilities = capabilities;
     if (tier === "TierNone") {
       if (this.lease.status === "LeaseActive") this.lease = { ...this.lease, status: "LeaseRevoked" };
-      if (this.pending !== null) this.settlePreempted("tier_disabled", nowMs);
+      if (this.pending !== null) this.settlePreempted("tier_disabled", nowMs, false);
+      this.leaseRequest = null;
     }
-    const nextSnapId = this.foreground.snapId + 1;
+    if (protection !== "ScreenClear" || targetKind === "BlockedApp") {
+      this.leaseRequest = null;
+    }
+    const nextSnapId = explicitSnapId ?? (this.foreground.snapId + 1);
     this.foreground = {
       snapId: nextSnapId,
       packageName,
@@ -692,40 +785,49 @@ export class AlphaControlCoordinator {
       || (opRequiresSnapshot(this.pending.op) && (packageName !== this.pending.expectedPackage || targetKind !== "AllowedApp"))
     );
     if (mustPreempt) {
-      this.settlePreempted("screen_changed", nowMs);
+      this.settlePreempted("screen_changed", nowMs, true);
     }
     if (protection === "ScreenLocked" && this.lease.status === "LeaseActive") {
       this.lease = { ...this.lease, status: "LeaseRevoked" };
     }
-    return { ok: true, snapshotId: nextSnapId, lease: this.lease, pendingOp: this.pending };
+    return {
+      ok: true,
+      snapshotId: nextSnapId,
+      lease: this.lease,
+      pendingOp: this.pending,
+      effects: mustPreempt ? [{ tag: "HaltBridge", reason: "screen_changed" }] : [],
+    };
   }
 
   /** Validate and enqueue one typed operation if every safety invariant permits it. */
-  dispatch(op: ControlOpPayload, nowMs: number):
+  dispatch(
+    op: ControlOpPayload,
+    nowMs: number,
+    overrides?: { readonly opId?: number; readonly snapshotId?: number; readonly expectedPackage?: string },
+  ):
     | { readonly ok: true; readonly pending: PendingControlOp }
     | { readonly ok: false; readonly code: string; readonly status: number } {
-    this.expireIfDue(nowMs);
     if (this.tier === "TierNone") return { ok: false, code: "CONTROL_TIER_UNAVAILABLE", status: 409 };
     if (this.killed) return { ok: false, code: "KILL_SWITCH_ACTIVE", status: 409 };
     if (this.pending !== null) return { ok: false, code: "OPERATION_IN_FLIGHT", status: 409 };
     if (this.foreground.protection !== "ScreenClear") return { ok: false, code: "PROTECTED_SCREEN", status: 409 };
     if (this.foreground.targetKind === "BlockedApp") return { ok: false, code: "BLOCKED_PACKAGE", status: 403 };
+    if (overrides?.opId !== undefined && (!Number.isSafeInteger(overrides.opId) || overrides.opId <= this.lastOpId)) {
+      return { ok: false, code: "INVALID_OP_ID", status: 409 };
+    }
     const activeLeasePackage = this.lease.status === "LeaseActive" ? this.lease.packageName : "";
-    const targetPackage = opTargetPackage(op, this.foreground.packageName, activeLeasePackage);
+    const targetPackage = overrides?.expectedPackage ?? opTargetPackage(op, this.foreground.packageName, activeLeasePackage);
     if (!isValidPackageName(targetPackage) || isBlockedTarget(targetPackage)) {
       return { ok: false, code: "BLOCKED_PACKAGE", status: 403 };
     }
     if (this.lease.status !== "LeaseActive" || this.lease.packageName !== targetPackage) {
+      this.leaseRequest = { packageName: targetPackage, requestedOp: op.type, requestedAt: nowMs };
       return { ok: false, code: "LEASE_REQUIRED", status: 403 };
     }
     if (this.lease.usedOps >= this.lease.maxOps || nowMs >= this.lease.expiresAtMs) {
-      if (nowMs >= this.lease.expiresAtMs) this.lease = { ...this.lease, status: "LeaseRevoked" };
       return { ok: false, code: "LEASE_EXHAUSTED", status: 403 };
     }
-    if (op.type === "ui_key_event" && this.tier !== "TierPrivileged") {
-      return { ok: false, code: "TIER_PRIVILEGED_REQUIRED", status: 409 };
-    }
-    const boundSnapId = opSnapshotId(op, this.foreground.snapId);
+    const boundSnapId = overrides?.snapshotId ?? opSnapshotId(op, this.foreground.snapId);
     if (opRequiresSnapshot(op)) {
       if (
         this.foreground.targetKind !== "AllowedApp"
@@ -745,7 +847,7 @@ export class AlphaControlCoordinator {
     const resolvedOp: ControlOpPayload = op.type === "app_open_url" && op.packageName === undefined
       ? { ...op, packageName: targetPackage }
       : op;
-    this.lastOpId += 1;
+    this.lastOpId = overrides?.opId ?? (this.lastOpId + 1);
     this.lease = { ...this.lease, usedOps: this.lease.usedOps + 1 };
     const pending: PendingControlOp = {
       opId: this.lastOpId,
@@ -767,9 +869,8 @@ export class AlphaControlCoordinator {
 
   /** Record a native execution receipt for the currently in-flight operation. */
   recordReceipt(input: Record<string, unknown>, nowMs: number):
-    | { readonly ok: true; readonly receipt: ControlReceiptRecord }
+    | { readonly ok: true; readonly receipt: ControlReceiptRecord; readonly effects: readonly CoordinatorEffect[] }
     | { readonly ok: false; readonly code: string; readonly status: number } {
-    this.expireIfDue(nowMs);
     const opId = parsePositiveInt(input.opId);
     const outcomeRaw = readString(input, "outcome");
     if (opId === undefined || (outcomeRaw !== "done" && outcomeRaw !== "refused" && outcomeRaw !== "preempted")) {
@@ -800,7 +901,11 @@ export class AlphaControlCoordinator {
       this.killed = true;
     }
     this.pushReceipt(record);
-    return { ok: true, receipt: record };
+    return {
+      ok: true,
+      receipt: record,
+      effects: outcomeRaw === "preempted" ? [{ tag: "HaltBridge", reason: "preempted" }] : [],
+    };
   }
 
   /** Handle an immediate native interrupt such as physical touch preemption or screen lock. */
@@ -809,8 +914,9 @@ export class AlphaControlCoordinator {
       this.lease = { ...this.lease, status: "LeaseRevoked" };
     }
     if (this.pending !== null) {
-      this.settlePreempted(reason, nowMs);
+      this.settlePreempted(reason, nowMs, true);
     }
+    this.leaseRequest = null;
     this.killed = true;
     if (packageName !== undefined && isValidPackageName(packageName) && isBlockedTarget(packageName)) {
       this.foreground = {
@@ -847,18 +953,17 @@ export class AlphaControlCoordinator {
 
   private expireIfDue(nowMs: number): void {
     if (this.lease.status === "LeaseActive" && nowMs >= this.lease.expiresAtMs) {
-      this.lease = { ...this.lease, status: "LeaseRevoked" };
-      if (this.pending !== null) {
-        this.settlePreempted("lease_expired", nowMs);
-      }
+      this.expireLease(nowMs);
     }
   }
 
-  private settlePreempted(reason: string, nowMs: number): void {
+  private settlePreempted(reason: string, nowMs: number, updateLastResult: boolean): void {
     const active = this.pending;
     if (active === null) return;
     this.pending = null;
-    this.lastResult = "preempted";
+    if (updateLastResult) {
+      this.lastResult = "preempted";
+    }
     this.pushReceipt({
       opId: active.opId,
       leaseId: active.leaseId,
@@ -880,6 +985,35 @@ export class AlphaControlCoordinator {
   }
 }
 
+function formatControlContext(state: ControlCoordinatorState): string {
+  if (state.tier === "TierNone") {
+    return "External app control: unavailable (accessibility control service disconnected).";
+  }
+  if (state.foreground.protection !== "ScreenClear") {
+    return `External app control: screen protected (${state.foreground.protection}); observation withheld.`;
+  }
+  if (state.foreground.targetKind === "BlockedApp") {
+    return `External app control: foreground package ${state.foreground.packageName} is blocked from automation.`;
+  }
+  const remaining = state.lease.status === "LeaseActive" ? state.lease.maxOps - state.lease.usedOps : 0;
+  const lines: string[] = [
+    `External app control: tier=${state.tier}, package=${state.foreground.packageName || "none"}, snapshotId=${state.foreground.snapId}`,
+    `Lease: status=${state.lease.status}, target=${state.lease.packageName || "none"}, remainingOps=${remaining}, killed=${state.killed}`,
+  ];
+  if (state.foreground.webUri !== null) {
+    lines.push(`Active web URL: ${state.foreground.webUri}`);
+  }
+  const interactive = state.foreground.nodes.filter((node) => node.clickable || node.editable || node.scrollable).slice(0, 20);
+  if (interactive.length > 0) {
+    lines.push("Visible interactive elements:");
+    for (const node of interactive) {
+      const label = node.text ?? node.contentDescription ?? node.hintText ?? node.resourceId ?? node.role;
+      lines.push(`- ${node.nodeId} [${node.role}] "${label}" (${node.bounds.left},${node.bounds.top},${node.bounds.right},${node.bounds.bottom})`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /** Provider exposing live foreground context and active lease state to the resident agent. */
 export function controlProvider(
   coordinator: AlphaControlCoordinator,
@@ -888,36 +1022,37 @@ export function controlProvider(
   return {
     name: "alpha_device_control",
     description: "Foreground Android app summary, active browser URL, snapshot id, and external control lease state.",
-    get: () => {
-      const state = coordinator.snapshot(now());
-      if (state.tier === "TierNone") {
-        return Promise.resolve({ text: "External app control: unavailable (accessibility control service disconnected)." });
-      }
-      if (state.foreground.protection !== "ScreenClear") {
-        return Promise.resolve({ text: `External app control: screen protected (${state.foreground.protection}); observation withheld.` });
-      }
-      if (state.foreground.targetKind === "BlockedApp") {
-        return Promise.resolve({ text: `External app control: foreground package ${state.foreground.packageName} is blocked from automation.` });
-      }
-      const remaining = state.lease.status === "LeaseActive" ? state.lease.maxOps - state.lease.usedOps : 0;
-      const lines: string[] = [
-        `External app control: tier=${state.tier}, package=${state.foreground.packageName || "none"}, snapshotId=${state.foreground.snapId}`,
-        `Lease: status=${state.lease.status}, target=${state.lease.packageName || "none"}, remainingOps=${remaining}, killed=${state.killed}`,
-      ];
-      if (state.foreground.webUri !== null) {
-        lines.push(`Active web URL: ${state.foreground.webUri}`);
-      }
-      const interactive = state.foreground.nodes.filter((node) => node.clickable || node.editable || node.scrollable).slice(0, 20);
-      if (interactive.length > 0) {
-        lines.push("Visible interactive elements:");
-        for (const node of interactive) {
-          const label = node.text ?? node.contentDescription ?? node.hintText ?? node.resourceId ?? node.role;
-          lines.push(`- ${node.nodeId} [${node.role}] "${label}" (${node.bounds.left},${node.bounds.top},${node.bounds.right},${node.bounds.bottom})`);
-        }
-      }
-      return Promise.resolve({ text: lines.join("\n") });
-    },
+    get: () => Promise.resolve({ text: formatControlContext(coordinator.snapshot(now())) }),
   };
+}
+
+function controlRefusalMessage(code: string, packageName?: string): string {
+  switch (code) {
+    case "INVALID_OPERATION":
+      return "Invalid external app control operation payload.";
+    case "CONTROL_TIER_UNAVAILABLE":
+      return "External app control is unavailable while the accessibility service is disconnected.";
+    case "KILL_SWITCH_ACTIVE":
+      return "External app control is halted by the kill-switch.";
+    case "OPERATION_IN_FLIGHT":
+      return "Another external app control operation is already running.";
+    case "PROTECTED_SCREEN":
+      return "External app control is refused on a locked, private, or protected screen.";
+    case "BLOCKED_PACKAGE":
+      return "External app control is blocked for that application.";
+    case "LEASE_REQUIRED":
+      return packageName
+        ? `Owner lease approval is required before operating ${packageName}.`
+        : "Owner lease approval is required before operating that application.";
+    case "LEASE_EXHAUSTED":
+      return "The active external app control lease has reached its limit or expired.";
+    case "STALE_SNAPSHOT":
+      return "The target UI snapshot is no longer current; observe the foreground screen again.";
+    case "SENSITIVE_VIEW":
+      return "External app control is refused on a password or sensitive field.";
+    default:
+      return `External app control refused (${code}).`;
+  }
 }
 
 /** Action allowing the resident agent to execute bounded external-app operations through the control coordinator. */
@@ -943,18 +1078,41 @@ export function controlActions(
       const params = asRecord(asRecord(options).parameters);
       const parsed = parseControlOp(params.op ?? params);
       if (parsed === undefined) {
-        return { success: false, data: { code: "INVALID_OPERATION" } };
+        const message = controlRefusalMessage("INVALID_OPERATION");
+        return { success: false, text: message, error: message, data: { code: "INVALID_OPERATION" } };
       }
       const dispatched = coordinator.dispatch(parsed, now());
       if (!dispatched.ok) {
-        return { success: false, data: { code: dispatched.code } };
+        const current = dispatched.code === "LEASE_REQUIRED" ? coordinator.snapshot(now()) : undefined;
+        const message = controlRefusalMessage(dispatched.code, current?.leaseRequest?.packageName);
+        return {
+          success: false,
+          text: message,
+          error: message,
+          data: {
+            code: dispatched.code,
+            ...(current?.leaseRequest !== null && current?.leaseRequest !== undefined
+              ? { leaseRequest: current.leaseRequest }
+              : {}),
+          },
+        };
       }
       const receipt = waitTimeoutMs > 0 ? await coordinator.waitForReceipt(dispatched.pending.opId, waitTimeoutMs) : undefined;
       if (receipt === undefined) {
-        return { success: true, data: { status: "queued", opId: dispatched.pending.opId, leaseId: dispatched.pending.leaseId } };
+        return {
+          success: true,
+          text: `Queued ${parsed.type} for ${dispatched.pending.expectedPackage}.`,
+          data: { status: "queued", opId: dispatched.pending.opId, leaseId: dispatched.pending.leaseId },
+        };
       }
+      const succeeded = receipt.outcome === "done";
+      const message = succeeded
+        ? `Completed ${parsed.type} in ${dispatched.pending.expectedPackage}${receipt.postSnapshotId === undefined ? "." : ` (snapshot ${receipt.postSnapshotId}).`}`
+        : controlRefusalMessage(receipt.refusalCode ?? receipt.outcome, dispatched.pending.expectedPackage);
       return {
-        success: receipt.outcome === "done",
+        success: succeeded,
+        text: message,
+        ...(succeeded ? {} : { error: message }),
         data: {
           status: receipt.outcome,
           opId: receipt.opId,
@@ -966,6 +1124,10 @@ export function controlActions(
       };
     },
   };
+  turnNotes.set(action, () => {
+    const state = coordinator.snapshot(now());
+    return state.tier === "TierNone" ? undefined : formatControlContext(state);
+  });
   return [action];
 }
 
