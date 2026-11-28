@@ -171,7 +171,7 @@ describe("Workflows", () => {
     expect(visible("Monthly statement", "Desk check", "Retired brief")).toEqual([]);
     await press("Add to Workflows");
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingAdd");
-    const choices = [...document.querySelectorAll<HTMLButtonElement>("main button")];
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="Add to Workflows"] button')];
     expect(["Automation", "Reminder", "Scheduled digest"].map((name) => choices.find((item) => item.textContent?.startsWith(name))?.disabled)).toEqual([true, true, true]);
     await drawn(() => alpha.back());
     await until(alpha, area, Listing, (state) => state.place.tag === "ListingRows");

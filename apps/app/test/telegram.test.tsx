@@ -606,6 +606,7 @@ describe("Telegram on a phone", () => {
   it('keeps a pending sign-in bound to the Cloud account that requested it (spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account")', async () => {
     const phone = { ...scene(), phone: true };
     phone.telegram.enabled = true;
+    localStorage.setItem("alpha/app/telegram/auth@1", JSON.stringify({ ...Auth.initial, step: "Authenticated", account: 57, credentialRev: 1 }));
     const mounts = only("home", "view:Telegram");
     const { alpha, close } = await open(phone, mounts);
     await untilArea(alpha, home.runtime(alpha), Home.Machine, (s) => s.tiles.load.status === "Loaded");
