@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type ChatHeight, type LocationObservation, type ReviewedEmail, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { type ClientMessageId, ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type ChatHeight, type LocationObservation, type ReviewedEmail, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import { systemNoticeText } from "@elizaos/core"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
@@ -22,7 +22,7 @@ import * as Reminders from "../../gen/app__reminders.effect.vibe"
 import * as Comms from "../../gen/app__phone__comms.effect.vibe"
 import * as Voice from "../../gen/app__voice.effect.vibe"
 import { Machine as Speaker } from "../../gen/app__voice__output.effect.vibe"
-import { Machine as Shell, type View, askAlphaDrawn, canAgentGoHome, canAgentShowInside, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
+import { Machine as Shell, type View, askAlphaDrawn, barApp, canAgentGoHome, canAgentShowInside, canAgentShowView, canReturnCommsView, showing } from "../../gen/app__shell.effect.vibe"
 import { Machine as Canvas } from "../../gen/app__shell__keyboard.effect.vibe"
 import { Machine as Layers } from "../../gen/app__shell__layers.effect.vibe"
 import { asked as calendarAsks, type Ran } from "../calendar/asked.ts"
@@ -66,6 +66,11 @@ import { offerRecordingSummary } from "./recording-summary.vibe"
 service Turns {
   readonly controller: TurnController
   readonly streamed: (clientMessageId: string) => boolean
+  /**
+   * Hand `keep` the send key of the next message posted with `text`, and wait for it before the message leaves; once,
+   * and never for another message. The answer stops waiting.
+   */
+  readonly beforePost: (text: string, keep: (clientMessageId: string) => Promise<void>) => () => void
 }
 
 function clientMessageOf(body: unknown): string | undefined {
@@ -73,20 +78,38 @@ function clientMessageOf(body: unknown): string | undefined {
     ? body.clientMessageId : undefined
 }
 
+function textOf(body: unknown): string | undefined {
+  return typeof body === "object" && body !== null && "text" in body && typeof body.text === "string" ? body.text : undefined
+}
+
 const turns = Layer.effect(Turns, effect {
   const { runtime } = try Agent
   let streamed: string | undefined
+  let waiting: { readonly text: string; readonly keep: (clientMessageId: string) => Promise<void> } | undefined
   const transport: TurnTransport = {
     request: (path, body, headers) => {
       if (clientMessageOf(body) === streamed) streamed = undefined
       return runtime.request(path, body, headers)
     },
     stream: (path, body, signal, headers) => {
-      streamed = clientMessageOf(body)
-      return runtime.stream(path, body, signal, headers)
+      const id = clientMessageOf(body)
+      streamed = id
+      const go = () => runtime.stream(path, body, signal, headers)
+      const keeping = waiting
+      if (keeping === undefined || id === undefined || textOf(body) !== keeping.text) return go()
+      waiting = undefined
+      return keeping.keep(id).then(go, go)
     },
   }
-  return { controller: new TurnController(transport), streamed: (id) => id === streamed }
+  return {
+    controller: new TurnController(transport),
+    streamed: (id) => id === streamed,
+    beforePost: (text, keep) => {
+      const armed = { text, keep }
+      waiting = armed
+      return () => { if (waiting === armed) waiting = undefined }
+    },
+  }
 })
 
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
@@ -813,10 +836,16 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     }) ? [openFile] : []
     const asksDirect = (requestedFiles !== undefined || outsideOrigin !== undefined) && openDocument.length === 0 && selected?.kind !== "document"
     const images = [...files, ...openDocument].map(({ data, mimeType, name }) => ({ data, mimeType, name }))
+    const marked = request === undefined && currentComposer.away === "Asked" ? draftSlot(board, currentComposer.binding) : undefined
+    const store = try KeyValueStore.KeyValueStore
+    const mark = { revision: currentComposer.draft.base, length: board.outgoing.length }
     const sent = effect (direct: boolean) => {
       const metadata = { ...screen, ...(effectiveTold ? delivery(views.clientId, try views.shown(), direct ? "direct-files-v1" : undefined) : {}), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
       const headers = enrolled === undefined ? undefined : try review.turnHeaders(enrolled, false)
-      return tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined
+      const stopWaiting = marked === undefined ? undefined : (try Turns).beforePost(text, (id) => Effect.runPromise(keepSendKey(store, marked, { ...mark, id })))
+      const result = tryPromise(() => controller.send({ text, ...(images.length === 0 ? {} : { images }), ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks, ...(headers === undefined ? {} : { headers }) })) catch () => undefined
+      stopWaiting?.()
+      return result
     }
     if (contact !== undefined && (!(try contactFileSendCurrent(contact)) || board.snapshot().contactDraft !== contactDraft)) {
       board.drop(pageTicket, mine)
@@ -1053,9 +1082,22 @@ effect function arrived(recorded: boolean): void!!(Composer.Machine | Talk) {
   if (recorded) board.change({ saved: "" })
 }
 
-/** The saved copy and what the owner typed, kept together: the copy first, then the typed text on a new line, unless one already holds the other. */
+/** The saved copy and what the owner typed, kept together: the copy first, then the typed text on a new line, unless one is empty, the same or the start of the other, when the longer is kept alone. */
 function bothTexts(saved: string, typed: string): string {
-  return typed.includes(saved) ? typed : saved.includes(typed) ? saved : `${saved}\n${typed}`
+  if (typed.startsWith(saved)) return typed
+  if (saved.startsWith(typed)) return saved
+  return `${saved}\n${typed}`
+}
+
+// spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+/** The owner says the message under review was sent: only what they typed since stays, and the mark is written away. */
+export effect function itWasSent(): boolean!!(Composer.Machine | Talk) {
+  const composer = try Composer.Machine
+  const { board } = try Talk
+  if (!(try composer.get()).unsettled) return false
+  if (!(try contained(composer.send({ type: "replaceSaved" }), "keeping only the current text"))) return false
+  board.change({ saved: "" })
+  return true
 }
 
 // spec/app/assistant/composer.md, "A conflict keeps the saved copy and the current text together, and saves them"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
@@ -1421,6 +1463,7 @@ effect function slotOf(board: Board, slot: DraftSlot | undefined): SlotReading!!
 effect function putSlot(board: Board, slot: DraftSlot, expected: string | undefined, next: string | undefined): boolean!!(Agent | KeyValueStore.KeyValueStore) {
   if (slot.phone === undefined) return effect {
     const store = try KeyValueStore.KeyValueStore
+    if ((try store.get(slot.key)) !== expected) return false
     if (next === undefined) try store.remove(slot.key)
     else try store.set(slot.key, next)
     return true
@@ -1435,6 +1478,72 @@ effect function putSlot(board: Board, slot: DraftSlot, expected: string | undefi
   }
   const landed = try exchangePhoneDraft(slot.phone, expected, next)
   return landed && slot.seat === board.draftSeat
+}
+
+const sentUnder = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, length: Schema.Int, id: Schema.NonEmptyString }))
+
+/** Where the send key of the message a slot marks as sending is kept, beside the slot in the app's store; it names no text. */
+function sendKeyOf(slot: DraftSlot): string {
+  return `${slot.key}.sent`
+}
+
+/** Keep beside the slot the send key a marked message leaves under, with the revision and length of its mark; a store that refuses it keeps nothing. */
+effect function keepSendKey(store: KeyValueStore.KeyValueStore, slot: DraftSlot, sent: { revision: number; length: number; id: string }): void!! {
+  return effect { try store.set(sendKeyOf(slot), JSON.stringify(sent)) } catch () => undefined
+}
+
+/** Forget the send key kept beside a slot whose mark was written away. */
+effect function forgetSendKey(slot: DraftSlot): void!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  return effect { try store.remove(sendKeyOf(slot)) } catch () => undefined
+}
+
+// spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+/**
+ * Settle the message under review by the send key kept beside its slot: arrived where the conversation holds the exact
+ * message, or where the slot no longer holds the mark because the Alpha that marked it wrote over it; never recorded
+ * where the whole conversation is read without it. Nothing settles where the key, the slot or the read cannot tell.
+ */
+effect function keptCheck(): boolean!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
+  const { board } = try Talk
+  const machine = try Composer.Machine
+  return effect {
+    const before = try machine.get()
+    if (!Composer.canArrived(before, true)) return false
+    const slot = draftSlot(board, before.binding)
+    if (slot === undefined) return false
+    const held = try slotOf(board, slot)
+    const writtenOver = (held.found === "Saved" || held.found === "Sending") && held.revision > before.draft.base
+    const kept = held.found === "Sending" && held.revision === before.draft.base
+      ? Option.getOrUndefined(Schema.decodeUnknownOption(sentUnder)(try (try KeyValueStore.KeyValueStore).get(sendKeyOf(slot))))
+      : undefined
+    if (!writtenOver && (kept === undefined || kept.revision !== held.revision || kept.length !== held.text.length)) return false
+    let recorded = true
+    if (!writtenOver && kept !== undefined) {
+      const record = board.known(before.binding.conversation)?.record
+      if (record === undefined) return false
+      const { messages, hasMore } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(record.id)}/messages`), page())
+      if (findStoppedUserTurn(messages, kept.id as ClientMessageId) === undefined) {
+        if (hasMore !== false) return false
+        recorded = false
+      }
+    }
+    const now = try machine.get()
+    if (!sameBinding(now.binding, before.binding) || now.draft.base !== before.draft.base || !Composer.canArrived(now, recorded)) return false
+    try Effect.uninterruptible(arrived(recorded))
+    return !(try machine.get()).unsettled
+  } catch () => false
+}
+
+const checkForReply = { type: "checkForReply" } as const
+
+// spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+/** Check the message under review again: by the send key kept beside its slot, or else by the conversation's one read. */
+export effect function checkAgain(): boolean!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine | Conversation.Machine) {
+  if (try keptCheck()) return true
+  const conversation = try Conversation.Machine
+  if (!Conversation.enabled(try conversation.get(), checkForReply)) return false
+  return try contained(conversation.send(checkForReply), "checking whether the message arrived")
 }
 
 /** Whether bytes of a damaged slot can be set aside beside it: in the store a slot of a browser build is kept in, never on the phone. */
@@ -1503,7 +1612,7 @@ effect function slotRead(ticket: number, binding: Composer.Binding, recover: boo
   return { type: "slotRead", ticket, found, revision }
 }
 
-// spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept"
+// spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept or the message it marks is checked"
 effect function wrote(ticket: number, binding: Composer.Binding, sending: boolean): Composer.Event!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
   const machine = try Composer.Machine
@@ -1528,13 +1637,14 @@ effect function wrote(ticket: number, binding: Composer.Binding, sending: boolea
   if (held.revision > base) {
     board.change({ saved: held.text })
     if (sending) giveBack(board)
-    return { type: "wrote", ticket, result: "Collided", revision: held.revision }
+    return { type: "wrote", ticket, result: held.found === "Sending" ? "Marked" : "Collided", revision: held.revision }
   }
   const text = sending ? board.outgoing : board.snapshot().typed
   const payload = sending
     ? { revision: base + 1, text, sending, ...(board.lastSentId === "" ? {} : { lastSentId: board.lastSentId }), lastSentWire: board.lastSentWire || text }
     : { revision: base + 1, text, sending }
   const landed = try putSlot(board, slot, held.raw, JSON.stringify(payload))
+  if (landed && !sending && held.found === "Sending") try forgetSendKey(slot)
   const then = try machine.get()
   if (!sameBinding(then.binding, binding) || then.writing !== ticket || slot.key !== draftSlot(board, binding)?.key) {
     return { type: "wrote", ticket, result: "Lost", revision: 0 }
@@ -1552,6 +1662,7 @@ effect function cleared(attempt: number, binding: Composer.Binding, revision: nu
   if (held.found === "Nothing" || held.revision !== revision) return { type: "cleared", attempt, ok: false, known: true }
   if (slot.key !== draftSlot(board, binding)?.key) return { type: "cleared", attempt, ok: false, known: false }
   const removed = try putSlot(board, slot, held.raw, undefined)
+  if (removed && held.found === "Sending") try forgetSendKey(slot)
   return { type: "cleared", attempt, ok: removed, known: removed }
 }
 
@@ -1760,7 +1871,6 @@ const merging = started(effect {
 /** How long Alpha waits before each try it makes by itself; once they are spent, the conversation tells the owner. */
 const mendingMs: Readonly<Record<Mending, readonly number[]>> = { Unkept: [1000, 5000, 30000], Unread: [1000, 5000, 30000], Unchecked: [0, 1000, 5000, 30000] }
 const mendings = ["Unkept", "Unread", "Unchecked"] as const
-const checkForReply = { type: "checkForReply" } as const
 
 /** What Alpha is still settling about the draft by itself: a save that failed, a slot that could not be read, a message that may already have been sent. */
 function mendingOf(writing: Composer.Composer): Mending | undefined {
@@ -1774,6 +1884,25 @@ function mended(kind: Mending, writing: Composer.Composer): boolean {
   if (kind === "Unkept") return !writing.failing && writing.draft.sync !== "Saving"
   if (kind === "Unread") return writing.slot !== "Unreadable" && !Composer.opening(writing)
   return !writing.unsettled
+}
+
+/** The one card the conversation shows about the draft: a damaged slot at once, and what Alpha `gaveUp` settling by itself while it still holds. */
+export function draftCardOf(writing: Composer.Composer, gaveUp: Mending | undefined): "Damaged" | Mending | undefined {
+  if (writing.slot === "Damaged") return "Damaged"
+  if (gaveUp === "Unchecked" && writing.unsettled) return "Unchecked"
+  if (gaveUp === "Unkept" && writing.failing) return "Unkept"
+  if (gaveUp === "Unread" && writing.slot === "Unreadable") return "Unread"
+  return undefined
+}
+
+// spec/app/assistant/composer.md, "Story: Keep what I am writing"
+/** Raise Ask Alpha to a sheet where it rests at the bar or is typed in, so the card the conversation shows is seen; never over an app whose own bar stands in for it. */
+effect function raisedToTell(): void!!Shell {
+  const shell = try Shell
+  const at = try shell.get()
+  const view = at.trail.at(-1)
+  if ((at.assistant !== "Bar" && at.assistant !== "Typing") || (view !== undefined && barApp(view))) return
+  try contained(shell.send({ type: "raise", detent: "Sheet" }), "showing the draft's card")
 }
 
 /** The try that settles `kind`, where the rules allow it now. */
@@ -1800,6 +1929,8 @@ const mending = started(effect {
     if (next.to === "composer") return try contained(composer.send(next.event), "trying the draft again")
     return try contained(conversation.send(next.event), "checking whether the message arrived")
   }
+  const settledByKey = effect (kind: Mending | undefined) => kind === "Unchecked" && (try keptCheck())
+  let told: ReturnType<typeof draftCardOf>
   const due = Stream.zipLatest(composer.changes, conversation.changes) |> Stream.mapEffect(%, effect ([writing, talking]) => {
     const sameBinding = binding !== undefined && binding.owner === writing.binding.owner && binding.conversation === writing.binding.conversation
     if (!sameBinding) {
@@ -1814,6 +1945,9 @@ const mending = started(effect {
     else if (mended("Unkept", writing)) typedAt = undefined
     const stuck = kind !== undefined && tries[kind] >= mendingMs[kind].length ? kind : undefined
     if (board.snapshot().mending !== stuck) board.change({ mending: stuck })
+    const card = draftCardOf(writing, stuck)
+    if (card !== told && card !== undefined) try raisedToTell()
+    told = card
     return kind === undefined || stuck !== undefined || mendingTry(kind, writing, talking) === undefined
       ? undefined : `${kind} ${writing.binding.owner} ${writing.binding.conversation} ${writing.writing} ${writing.read.ticket} ${talking.recheck.ticket}`
   }) |> Stream.changes(%)
@@ -1821,12 +1955,14 @@ const mending = started(effect {
     const kind = mendingOf(try composer.get())
     if (kind === undefined) return
     try time.until((try time.now()) + (mendingMs[kind][tries[kind]] ?? 0))
+    if (try settledByKey(kind)) return
     try Effect.uninterruptible(effect {
       if (try mend(kind)) tries[kind] += 1
     })
   }))
   const shown = Stream.filter(device.visible, (visible) => visible) |> Stream.mapEffect(%, () => effect {
-    try mend(mendingOf(try composer.get()))
+    const kind = mendingOf(try composer.get())
+    if (!(try settledByKey(kind))) try mend(kind)
   })
   try Stream.runDrain(Stream.merge(timed, shown))
 }, "settling the draft by itself")

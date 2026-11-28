@@ -139,9 +139,17 @@ function composerText() {
   return document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']")?.value;
 }
 
-/** What Ask Alpha says outside its conversation: every note or alert drawn by the field rather than in the log. */
-const byTheField = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=note], section[aria-label='Ask Alpha'] [role=alert]")]
-  .filter((one) => !one.closest("[role=log]")).map((one) => one.textContent);
+/** What Ask Alpha shows outside its conversation: every note or alert drawn by the field rather than in the log, and any words or worded button around the field, but for screen-reader-only text. */
+const byTheField = () => {
+  const notes = [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=note], section[aria-label='Ask Alpha'] [role=alert]")]
+    .filter((one) => !one.closest("[role=log]")).map((one) => one.textContent);
+  const around = document.querySelector("textarea[aria-label='Message Alpha']")?.parentElement?.parentElement;
+  const words = around === null || around === undefined ? [] : [...around.querySelectorAll("*")]
+    .filter((one) => one.closest(".sr-only") === null && one.tagName !== "TEXTAREA" && one.tagName !== "svg" && one.closest("svg") === null)
+    .flatMap((one) => [...one.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent?.trim() ?? ""))
+    .filter((text) => text !== "" && text !== "Talk");
+  return [...notes, ...words];
+};
 
 /** The button named `name` that the conversation shows, if any. */
 const inConversation = (name: string) => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] button")].find((one) => one.textContent === name);
@@ -1309,8 +1317,10 @@ it("Keep what I was writing in the earlier Alpha: an unused slot takes its draft
 
 describe('Keep what I am writing, settled without a word by the field (spec/app/assistant/composer.md, "Story: Keep what I am writing")', () => {
   const newChat = (world: ReturnType<typeof scene>) => draftKey(world.notes.ownerIdentity, world.notes.owner);
+  const dinner = (world: ReturnType<typeof scene>) => draftKey(world.notes.ownerIdentity, world.notes.owner, "c1", "r1");
   const kept = (world: ReturnType<typeof scene>, key = newChat(world)) => JSON.parse(world.ask.drafts.get(key) ?? "{}") as { revision?: number; text?: string; sending?: boolean };
   const sheet = (alpha: Alpha) => alpha.runtime.runPromise(Effect.flatMap(Shell, (machine) => machine.send({ type: "raise", detent: "Sheet" })));
+  const detent = (alpha: Alpha) => alpha.runtime.runSync(Effect.flatMap(Shell, (machine) => machine.get())).assistant;
   const storageDown = (world: ReturnType<typeof scene>) => { world.ask.beforeDraftExchange = () => Promise.reject(new Error("storage is full")); };
   const storageUp = (world: ReturnType<typeof scene>) => { delete world.ask.beforeDraftExchange; };
   /** Let time pass half a second at a time, up to `most` milliseconds, until `check` holds of what the owner sees. */
@@ -1319,12 +1329,46 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     expect(check()).toBe(true);
   };
   const machine = (runtime: ReturnType<typeof assistant.runtime>) => runtime.runSync(Effect.flatMap(Composer, (composer) => composer.get()));
+  const card = () => ["Your saved draft is damaged", "This may already have been sent", "Alpha cannot keep your draft", "Alpha cannot open your draft"]
+    .filter((title) => document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent?.includes(title));
+  /** Open the kept conversation "Dinner" and send `text` in it while the agent never answers, then stop Alpha mid-send. */
+  const diesMidSend = async (world: ReturnType<typeof scene>, text: string) => {
+    world.ask.kept.set("c1", { roomId: "r1", title: "Dinner", messages: [] });
+    const first = await openAssistant(world);
+    await chatsList(first.alpha);
+    await until(first.alpha, first.runtime, Chats, (s) => s.list.status === "Loaded");
+    await restore("Dinner");
+    await until(first.alpha, first.runtime, Composer, (s) => s.binding.conversation > 0 && s.slot === "Open");
+    write(text);
+    await until(first.alpha, first.runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
+    await press("Send");
+    await until(first.alpha, first.runtime, Composer, (s) => s.away === "Asked");
+    await drawn(() => vi.waitFor(() => expect([...world.ask.said, ...world.ask.unheard]).toEqual([text])));
+    expect(kept(world, dinner(world))).toMatchObject({ text, sending: true });
+    await first.close();
+  };
+  /** Write "Mine" until it is kept, then let another Alpha save `saved` over it as revision 5 before "Mine too" is written. */
+  const savedMeanwhile = async (world: ReturnType<typeof scene>, saved: { text: string; sending: boolean }) => {
+    const opened = await openAssistant(world);
+    write("Mine");
+    await until(opened.alpha, opened.runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
+    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 5, ...saved }));
+    write("Mine too");
+    return opened;
+  };
+  /** Open Alpha again after `diesMidSend`, on the conversation it was sending in, once its slot is open. */
+  const reopened = async (world: ReturnType<typeof scene>) => {
+    const again = await open(world, mounts);
+    const runtime = assistant.runtime(again.alpha);
+    await until(again.alpha, runtime, Conversation, (s) => s.ready);
+    await until(again.alpha, runtime, Composer, (s) => s.binding.conversation > 0 && s.slot === "Open");
+    return { alpha: again.alpha, runtime, close: again.close };
+  };
 
-  // spec/app/assistant/composer.md, "Retry writes the draft again after storage failed"
-  it("A save that failed is tried again by itself, at the next edit and after a wait, and only storage that stays broken is told in the conversation", async () => {
+  // spec/app/assistant/composer.md, "Retry writes the draft again after storage failed"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
+  it("A save that failed is tried again by itself, at the next edit and after a wait, and only storage that stays broken is told in the conversation, raised to be seen", async () => {
     const world = { ...scene(), phone: true };
     const { alpha, runtime } = await openAssistant(world);
-    await sheet(alpha);
     storageDown(world);
     write("Lunch at noon");
     await until(alpha, runtime, Composer, (s) => s.failing);
@@ -1345,7 +1389,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     write("Lunch at two");
     await until(alpha, runtime, Composer, (s) => s.failing);
     await waitOut(alpha, 40000, () => inConversation("Try again") !== undefined);
-    expect([byTheField(), composerText(), kept(world).text]).toEqual([[], "Lunch at two", "Lunch at one"]);
+    expect([byTheField(), composerText(), kept(world).text, detent(alpha)]).toEqual([[], "Lunch at two", "Lunch at one", "Sheet"]);
 
     storageUp(world);
     await drawn(() => (inConversation("Try again") as HTMLButtonElement).click());
@@ -1355,7 +1399,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   });
 
   // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
-  it("A slot that could not be read is opened again by itself, and one that stays unreadable is told in the conversation", async () => {
+  it("A slot that could not be read is opened again by itself, when Alpha comes back to the front and after a wait, and one that stays unreadable is told in the conversation", async () => {
     const world = { ...scene(), phone: true };
     world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 1, text: "Kept for later", sending: false }));
     world.ask.draftReadsFail = true;
@@ -1364,31 +1408,46 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     await until(first.alpha, runtime, Composer, (s) => s.slot === "Unreadable");
     expect([byTheField(), button("Try again")]).toEqual([[], undefined]);
     world.ask.draftReadsFail = false;
-    await waitOut(first.alpha, 1500, () => composerText() === "Kept for later");
-    expect(machine(runtime).slot).toBe("Open");
+    await seen(false);
+    await seen(true);
+    await until(first.alpha, runtime, Composer, (s) => s.slot === "Open" && s.editor.text);
+    expect(composerText()).toBe("Kept for later");
     await first.close();
 
     world.ask.draftReadsFail = true;
     const second = await open(world, mounts);
     runtime = assistant.runtime(second.alpha);
-    await sheet(second.alpha);
     await until(second.alpha, runtime, Composer, (s) => s.slot === "Unreadable");
-    await waitOut(second.alpha, 40000, () => inConversation("Try again") !== undefined);
-    expect(byTheField()).toEqual([]);
+    world.ask.draftReadsFail = false;
+    await waitOut(second.alpha, 1500, () => composerText() === "Kept for later");
+    await second.close();
+
+    world.ask.draftReadsFail = true;
+    const third = await open(world, mounts);
+    runtime = assistant.runtime(third.alpha);
+    await until(third.alpha, runtime, Composer, (s) => s.slot === "Unreadable");
+    await waitOut(third.alpha, 40000, () => inConversation("Try again") !== undefined);
+    expect([byTheField(), detent(third.alpha)]).toEqual([[], "Sheet"]);
     world.ask.draftReadsFail = false;
     await drawn(() => (inConversation("Try again") as HTMLButtonElement).click());
-    await until(second.alpha, runtime, Composer, (s) => s.slot === "Open" && s.editor.text);
+    await until(third.alpha, runtime, Composer, (s) => s.slot === "Open" && s.editor.text);
     expect([composerText(), inConversation("Try again")]).toEqual(["Kept for later", undefined]);
   });
 
-  // spec/app/assistant/composer.md, "The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable"; spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"
-  it("A damaged slot gives back the text it still holds, and one with none waits in the conversation for the owner to keep a copy or discard it", async () => {
+  // spec/app/assistant/composer.md, "The slot's answer fills the empty editor with the saved draft, or reports it damaged or unreadable"; spec/app/assistant/composer.md, "A damaged slot is recovered on the owner's word"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
+  it("A damaged slot gives back the text it still holds, and one with none waits in the conversation, raised to be seen, for the owner to keep a copy or discard it", async () => {
     const world = { ...scene(), phone: true };
     world.ask.drafts.set(newChat(world), '{"revision":"one","text":"Half a thought","sending":false}');
     const first = await openAssistant(world);
     await until(first.alpha, first.runtime, Composer, (s) => s.slot === "Open" && s.editor.text && !s.unsettled);
     expect([composerText(), kept(world), byTheField()]).toEqual(["Half a thought", { revision: 1, text: "Half a thought", sending: false }, []]);
     await first.close();
+
+    world.ask.drafts.set(newChat(world), '{"revision":1,"sending":false,"text":"Call the va');
+    const cut = await openAssistant(world);
+    await until(cut.alpha, cut.runtime, Composer, (s) => s.slot === "Open" && s.editor.text && !s.unsettled);
+    expect([composerText(), kept(world)]).toEqual(["Call the va", { revision: 1, text: "Call the va", sending: false }]);
+    await cut.close();
 
     world.ask.drafts.set(newChat(world), '{"revision":1,"text":"Book the ta');
     const second = await openAssistant(world);
@@ -1399,10 +1458,9 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     world.ask.drafts.set(newChat(world), "not a draft");
     const third = await open(world, mounts);
     const runtime = assistant.runtime(third.alpha);
-    await sheet(third.alpha);
     await until(third.alpha, runtime, Composer, (s) => s.slot === "Damaged");
     await drawn(() => vi.waitFor(() => expect(inConversation("Discard")).toBeDefined()));
-    expect([byTheField(), button("Recover"), inConversation("Keep a copy"), world.ask.drafts.get(newChat(world))]).toEqual([[], undefined, undefined, "not a draft"]);
+    expect([byTheField(), button("Recover"), inConversation("Keep a copy"), world.ask.drafts.get(newChat(world)), detent(third.alpha)]).toEqual([[], undefined, undefined, "not a draft", "Sheet"]);
     await drawn(() => (inConversation("Discard") as HTMLButtonElement).click());
     await until(third.alpha, runtime, Composer, (s) => s.slot === "Open");
     expect([world.ask.drafts.has(newChat(world)), inConversation("Discard")]).toEqual([false, undefined]);
@@ -1422,7 +1480,6 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
     localStorage.setItem(`${slot}.unreadable`, "an older copy");
     const { alpha } = await open(world, mounts);
     const runtime = assistant.runtime(alpha);
-    await sheet(alpha);
     await until(alpha, runtime, Composer, (s) => s.slot === "Damaged");
     await drawn(() => vi.waitFor(() => expect(inConversation("Keep a copy")).toBeDefined()));
     await drawn(() => (inConversation("Keep a copy") as HTMLButtonElement).click());
@@ -1431,51 +1488,100 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   });
 
   // spec/app/assistant/composer.md, "A conflict keeps the saved copy and the current text together, and saves them"
-  it("A copy saved elsewhere meanwhile is kept with my text in the field, and both are saved", async () => {
+  it("A copy saved elsewhere meanwhile is kept with my text in the field, and both are saved, even where one holds the other's words", async () => {
     const world = { ...scene(), phone: true };
-    const { alpha, runtime } = await openAssistant(world);
-    write("Mine");
-    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
-    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 5, text: "From the other window", sending: false }));
-    write("Mine too");
+    const { alpha, runtime } = await savedMeanwhile(world, { text: "From the other window", sending: false });
     await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.draft.base === 6);
     expect([composerText(), kept(world), byTheField(), button("Restore saved")]).toEqual(["From the other window\nMine too", { revision: 6, text: "From the other window\nMine too", sending: false }, [], undefined]);
+
+    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 9, text: "ok", sending: false }));
+    write("book it");
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.draft.base === 10);
+    expect([composerText(), kept(world).text]).toEqual(["ok\nbook it", "ok\nbook it"]);
+
+    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 12, text: "a".repeat(40000), sending: false }));
+    write("b".repeat(30000));
+    await until(alpha, runtime, Composer, (s) => s.draft.sync === "Kept" && s.draft.base >= 13);
+    expect([composerText()?.length, kept(world).text?.length, machine(runtime).long, button("Send")?.hasAttribute("disabled") ?? true]).toEqual([70001, 70001, true, true]);
+  });
+
+  // spec/app/assistant/composer.md, "A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept or the message it marks is checked"; spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
+  it("A message another Alpha marked as sending in the same slot is held for review, never put in my field, and settled once that Alpha writes over its mark", async () => {
+    const world = { ...scene(), phone: true };
+    const { alpha, runtime } = await savedMeanwhile(world, { text: "Book the table", sending: true });
+    await until(alpha, runtime, Composer, (s) => s.unsettled);
+    expect([composerText(), kept(world), byTheField()]).toEqual(["Mine too", { revision: 5, text: "Book the table", sending: true }, []]);
+
+    world.ask.drafts.set(newChat(world), JSON.stringify({ revision: 6, text: "", sending: false }));
+    await waitOut(alpha, 2000, () => !machine(runtime).unsettled && machine(runtime).draft.sync === "Kept");
+    expect([composerText(), kept(world), world.ask.said]).toEqual(["Mine too", { revision: 7, text: "Mine too", sending: false }, []]);
   });
 
   // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
-  it("A restart mid-send never sends the message again: it waits, checked, and only the owner puts it back in the field", async () => {
+  it("A restart after the message reached the agent settles by itself with nothing shown: it is never sent again, and the next message goes once", async () => {
     const world = { ...scene(), phone: true };
-    world.ask.kept.set("c1", { roomId: "r1", title: "Dinner", messages: [] });
-    const key = draftKey(world.notes.ownerIdentity, world.notes.owner, "c1", "r1");
-    const first = await openAssistant(world);
-    await chatsList(first.alpha);
-    await until(first.alpha, first.runtime, Chats, (s) => s.list.status === "Loaded");
-    await restore("Dinner");
-    await until(first.alpha, first.runtime, Composer, (s) => s.binding.conversation > 0 && s.slot === "Open");
-    world.ask.stalled = true;
-    write("Book the table");
-    await until(first.alpha, first.runtime, Composer, (s) => s.draft.sync === "Kept" && s.editor.text);
+    world.ask.holdPosts = "unanswered";
+    await diesMidSend(world, "Book the table");
+    expect(world.ask.said).toEqual(["Book the table"]);
+
+    delete world.ask.holdPosts;
+    const { alpha, runtime } = await reopened(world);
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept");
+    expect([composerText(), kept(world, dinner(world)).sending, byTheField(), card(), detent(alpha), world.ask.said]).toEqual(["", false, [], [], "Bar", ["Book the table"]]);
+
+    await sheet(alpha);
+    write("for four");
+    await press("Send");
+    await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Book the table", "for four"])));
+  });
+
+  // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
+  it("A restart before the message reached the agent puts it back in the field by itself, ahead of what was typed, for the owner to send once", async () => {
+    const world = { ...scene(), phone: true };
+    world.ask.holdPosts = "unheard";
+    await diesMidSend(world, "Book the table");
+    expect(world.ask.said).toEqual([]);
+
+    delete world.ask.holdPosts;
+    const { alpha, runtime } = await reopened(world);
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.editor.text && s.draft.sync === "Kept");
+    expect([composerText(), kept(world, dinner(world)), byTheField(), card(), world.ask.said]).toEqual(["Book the table", { revision: 3, text: "Book the table", sending: false }, [], [], []]);
+
+    await sheet(alpha);
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Book the table"])));
-    expect(kept(world, key)).toMatchObject({ text: "Book the table", sending: true });
-    await first.close();
+  });
 
-    world.ask.stalled = false;
-    const second = await open(world, mounts);
-    const runtime = assistant.runtime(second.alpha);
-    await until(second.alpha, runtime, Conversation, (s) => s.ready);
-    await until(second.alpha, runtime, Composer, (s) => s.binding.conversation > 0 && s.slot === "Open" && s.unsettled);
-    await sheet(second.alpha);
-    await until(second.alpha, runtime, Conversation, (s) => s.recheck.ticket > 0 && s.recheck.status !== "Loading" && s.check === "LookLater");
-    expect([inConversation("Put back in the field"), composerText(), world.ask.said]).toEqual([undefined, "", ["Book the table"]]);
-    await waitOut(second.alpha, 40000, () => inConversation("Put back in the field") !== undefined);
-    expect([composerText(), byTheField(), button("Send"), world.ask.said]).toEqual(["", [], undefined, ["Book the table"]]);
+  // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
+  it("A message whose arrival cannot be told waits in the conversation, raised to be seen, for the owner to say it was sent or to put it back, never sent again by itself", async () => {
+    const world = { ...scene(), phone: true };
+    world.ask.holdPosts = "unanswered";
+    await diesMidSend(world, "Book the table");
+
+    delete world.ask.holdPosts;
+    world.ask.pagesDown = true;
+    const first = await reopened(world);
+    await until(first.alpha, first.runtime, Composer, (s) => s.unsettled);
+    await until(first.alpha, first.runtime, Conversation, (s) => s.recheck.ticket > 0 && s.recheck.status !== "Loading");
+    expect([inConversation("It was sent"), composerText(), byTheField(), button("Check for reply"), world.ask.said]).toEqual([undefined, "", [], undefined, ["Book the table"]]);
+    await waitOut(first.alpha, 40000, () => inConversation("It was sent") !== undefined);
+    expect([card(), composerText(), byTheField(), button("Send"), button("Check for reply"), detent(first.alpha), world.ask.said])
+      .toEqual([["This may already have been sent"], "", [], undefined, undefined, "Sheet", ["Book the table"]]);
 
     write("for four");
+    await drawn(() => (inConversation("It was sent") as HTMLButtonElement).click());
+    await until(first.alpha, first.runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
+    expect([composerText(), kept(world, dinner(world)).text, kept(world, dinner(world)).sending, card(), world.ask.said]).toEqual(["for four", "for four", false, [], ["Book the table"]]);
+    await first.close();
+
+    world.ask.drafts.set(dinner(world), JSON.stringify({ revision: 9, text: "Book the table", sending: true }));
+    const second = await reopened(world);
+    await until(second.alpha, second.runtime, Composer, (s) => s.unsettled);
+    await waitOut(second.alpha, 40000, () => inConversation("Put back in the field") !== undefined);
+    write("for four");
     await drawn(() => (inConversation("Put back in the field") as HTMLButtonElement).click());
-    await until(second.alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
-    const { text, sending } = kept(world, key);
-    expect([composerText(), { text, sending }, inConversation("Put back in the field"), world.ask.said])
-      .toEqual(["Book the table\nfor four", { text: "Book the table\nfor four", sending: false }, undefined, ["Book the table"]]);
+    await until(second.alpha, second.runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept" && s.editor.text);
+    const { text, sending } = kept(world, dinner(world));
+    expect([composerText(), { text, sending }, card(), world.ask.said]).toEqual(["Book the table\nfor four", { text: "Book the table\nfor four", sending: false }, [], ["Book the table"]]);
   });
 });

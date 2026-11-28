@@ -66,6 +66,10 @@ export interface AskScene {
   beforeDraftExchange?: () => Promise<void>;
   /** The native store answers every read of a draft slot as unreadable, as its SecureSlots does for a slot it cannot decrypt. */
   draftReadsFail?: boolean;
+  /** Every message posted waits: "unheard" before the agent keeps it, as when Alpha stops before its request arrives; "unanswered" once the agent kept it, with no frame back. */
+  holdPosts?: "unheard" | "unanswered";
+  /** The text of each post held "unheard", which reached the agent's address but was never kept. */
+  readonly unheard: string[];
   refusedDraftExchanges: number;
   /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
   noOptionalFields?: boolean;
@@ -87,7 +91,7 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, unheard: [], canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
@@ -304,6 +308,7 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       const found = /^\/api\/conversations\/([^/]+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
+      if (scene.holdPosts === "unheard") return request.json().then((body: { text: string }) => { scene.unheard.push(body.text); return new Promise<Response>(() => undefined); });
       const conversationId = decodeURIComponent(found[1] ?? "");
       const kept = scene.kept.get(conversationId);
       if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
@@ -323,6 +328,7 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (scene.holdPosts === "unanswered") return new Promise<Response>(() => undefined);
         if (found[2] !== undefined && scene.nextDropsWith !== undefined) {
           const dropped = scene.nextDropsWith;
           scene.nextDropsWith = undefined;
