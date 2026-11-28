@@ -2,8 +2,19 @@
 import { registered } from "./device.vibe"
 import { plugin } from "./capacitor.ts"
 
+module identifiers {
+  /** Allocate a cross-installation Clock identifier when this host supplies secure entropy. @throws {never} */
+  export function clockRecordId(): string | undefined {
+    try { return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("") }
+    catch { return undefined }
+  }
+}
+import { clockRecordId } from identifiers
+export { clockRecordId }
+
 interface AlarmFields {
   readonly id: number
+  readonly remoteId: string
   readonly at: number
   readonly ringing: boolean
   readonly title: string
@@ -14,13 +25,19 @@ export type NativeClockAlert = AlarmFields & ({ readonly kind: "timer" } | {
   readonly kind: "alarm"; readonly snoozed: boolean; readonly hour: number; readonly minute: number; readonly daysMask: number
 })
 
+export interface ClockProjection {
+  readonly alerts: readonly NativeClockAlert[]
+  readonly known: readonly { readonly kind: NativeClockAlert["kind"]; readonly remoteId: string }[]
+  readonly ready: boolean
+}
+
 const permissions = Schema.Struct({ notificationsEnabled: Schema.Boolean, exact: Schema.Boolean })
 const permissionState = Schema.Struct({ notifications: Schema.Literals(["granted", "denied", "prompt", "prompt-with-rationale"]) })
 const tap = Schema.Struct({ token: Schema.NonEmptyString, kind: Schema.Literals(["alarm", "timer"]), id: Schema.Int })
 export type ClockTap = typeof tap.Type
 
 interface ClockPlugin {
-  reconcile(input: { alerts: readonly NativeClockAlert[] }): Promise<unknown>
+  reconcile(input: ClockProjection): Promise<unknown>
   pendingTap(): Promise<unknown>
   consumeTap(input: { token: string }): Promise<void>
   checkPermissions(): Promise<unknown>
@@ -34,7 +51,7 @@ export service PhoneClockAlerts {
   readonly present: boolean
   readonly changed: Stream.Stream<void>
   configure(access: "notifications" | "exact"): void!!
-  reconcile(alerts: readonly NativeClockAlert[]): (typeof permissions.Type | undefined)!!
+  reconcile(input: ClockProjection): (typeof permissions.Type | undefined)!!
   pendingTap(): (ClockTap | undefined)!!
   consumeTap(token: string): void!!
 }
@@ -60,8 +77,8 @@ export const phoneClockAlerts = Layer.effect(PhoneClockAlerts, effect {
       }
       try PubSub.publish(permission, undefined)
     },
-    effect reconcile(alerts: readonly NativeClockAlert[]) {
-      const result = tryPromise(() => host().reconcile({ alerts })) catch () => undefined
+    effect reconcile(input: ClockProjection) {
+      const result = tryPromise(() => host().reconcile(input)) catch () => undefined
       return Option.getOrUndefined(Schema.decodeUnknownOption(permissions)(result))
     },
     effect pendingTap() {

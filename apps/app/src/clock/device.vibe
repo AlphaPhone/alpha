@@ -6,7 +6,7 @@ import * as ClockView from "../../gen/app__clock.effect.vibe"
 import { Device, PhoneClockAlerts, type NativeClockAlert } from "../platform/index.vibe"
 import { contained, started } from "../runtime/index.vibe"
 import { currentSurface } from "../surface.ts"
-import { activeClockRecords, activeClockTicks } from "./shelf.vibe"
+import { ClockRecords, ClockSyncState, activeClockTicks } from "./shelf.vibe"
 
 export const deviceClock = started(effect {
   const host = try PhoneClockAlerts
@@ -16,32 +16,57 @@ export const deviceClock = started(effect {
   const timers = try Timers.Machine
   const view = try ClockView.Machine
   const shell = Context.getOption(try Effect.context<never>(), Shell.Machine)
-  const records = try activeClockRecords()
+  const { store: records, nativeReady, notificationRoute } = try ClockRecords
   const { delivery } = try activeClockTicks()
+  const { coordinator } = try ClockSyncState
   const device = try Device
-  const wake = Stream.prepend(Stream.merge(host.changed, Stream.map(device.visible, () => undefined)), [undefined])
-  const changes = Stream.zipLatest(Stream.zipLatest(alarms.changes, timers.changes), wake)
-  try Stream.runForEach(changes, effect ([[a, t]]) => {
-    const desired: NativeClockAlert[] = []
-    for (const alarm of a.items) {
-      if (!alarm.enabled) continue
-      const ringing = alarm.phase === "Ringing"
-      const at = ringing ? alarm.fireAt : Alarms.dueAtOf(alarm)
-      if (at > 0) desired.push({ kind: "alarm", id: alarm.id, at, ringing, title: records.alarm(alarm.id).label || "Alarm",
-        vibrate: alarm.vibrate, snoozed: alarm.phase === "Snoozed", hour: alarm.hour, minute: alarm.minute, daysMask: alarm.daysMask })
-    }
-    for (const timer of t.items) {
-      const ringing = timer.status === "Ringing"
-      if (ringing || timer.status === "Running") desired.push({ kind: "timer", id: timer.id, at: ringing ? timer.ringStartedAt : timer.endAt,
-        ringing, title: records.timer(timer.id).label || "Timer", vibrate: true })
-    }
-    const result = try host.reconcile(desired)
+  const changes = Stream.mergeAll([
+    host.changed, Stream.as(device.visible, undefined), Stream.as(alarms.changes, undefined),
+    Stream.as(timers.changes, undefined), Stream.as(SubscriptionRef.changes(nativeReady), undefined),
+  ], { concurrency: "unbounded" })
+  try Stream.runForEach(changes, effect () => {
+    const snapshot = try Semaphore.withPermit(coordinator.lock, effect {
+      const ready = try SubscriptionRef.get(nativeReady)
+      const a = try alarms.get()
+      const t = try timers.get()
+      const meta = records.snapshot()
+      const known = [
+        ...meta.deletedAlarmIds.map((remoteId) => ({ kind: "alarm" as const, remoteId })),
+        ...meta.deletedTimerIds.map((remoteId) => ({ kind: "timer" as const, remoteId })),
+      ]
+      const desired: NativeClockAlert[] = []
+      for (const alarm of a.items) {
+        const record = records.alarm(alarm.id)
+        known.push({ kind: "alarm", remoteId: record.remoteId })
+        if (!alarm.enabled) continue
+        const ringing = alarm.phase === "Ringing"
+        const at = ringing ? alarm.fireAt : Alarms.dueAtOf(alarm)
+        if (at > 0) desired.push({ kind: "alarm", id: alarm.id, remoteId: record.remoteId, at, ringing, title: record.label || "Alarm",
+          vibrate: alarm.vibrate, snoozed: alarm.phase === "Snoozed", hour: alarm.hour, minute: alarm.minute, daysMask: alarm.daysMask })
+      }
+      for (const timer of t.items) {
+        const record = records.timer(timer.id)
+        known.push({ kind: "timer", remoteId: record.remoteId })
+        const ringing = timer.status === "Ringing"
+        if (ringing || timer.status === "Running") desired.push({ kind: "timer", id: timer.id, remoteId: record.remoteId, at: ringing ? timer.ringStartedAt : timer.endAt,
+          ringing, title: record.label || "Timer", vibrate: true })
+      }
+      return { alerts: desired, known, ready }
+    })
+    const desired = snapshot.alerts
+    const result = try host.reconcile(snapshot)
     delivery.set(desired.length === 0 ? "" : result === undefined ? "unavailable" : !result.notificationsEnabled ? "notifications" : !result.exact ? "exact" : "")
     if (!(try device.showing())) return
     const tap = try host.pendingTap()
     if (tap === undefined) return
-    if (surface.mode === "monolith" && Option.isSome(shell) && (try shell.value.get()).trail.at(-1) !== "Clock") {
-      if (!(try contained(shell.value.send({ type: "openView", view: "Clock" }), "opening Clock from its notification"))) return
+    if (surface.mode === "monolith" && Option.isSome(shell)) {
+      const current = try shell.value.get()
+      const opening = current.trail.at(-1) !== "Clock"
+      try Ref.set(notificationRoute, opening ? current.route + 1 : current.route)
+      if (opening && !(try contained(shell.value.send({ type: "openView", view: "Clock" }, (where) => where.route === current.route), "opening Clock from its notification"))) {
+        try Ref.set(notificationRoute, -1)
+        return
+      }
     }
     const tab = tap.kind === "alarm" ? "Alarms" : "Timers"
     const selected = try view.get()
