@@ -1,5 +1,6 @@
 package ai.alphacompute.thinapp;
 
+import ai.eliza.plugins.browsersurface.BrowserAutofillExtras;
 import ai.eliza.plugins.browsersurface.BrowserBookmarkStore;
 import ai.eliza.plugins.browsersurface.BrowserSessionStore;
 import ai.eliza.plugins.browsersurface.BrowserTabHostConfig;
@@ -26,6 +27,7 @@ public final class ThinBrowserPlugin extends BrowserTabHostPlugin {
         .names("Alpha Phone", "Alpha", "Alpha Browser")
         .hostScheme("alphaphone")
         .appLinks(true)
+        .autofillExtras(BrowserAutofillExtras.ELIZA_PASSWORDS)
         .debugLogging(BuildConfig.DEBUG)
         .logTag("AlphaBrowser")
         .build();
