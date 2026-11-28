@@ -2,7 +2,7 @@
 import * as Control from "../../gen/app__control.effect.vibe"
 import type { Actor, ControlEffect, ControlOp, ControlTier, Event, ExecutionOutcome, ScreenProtection, TargetKind } from "../../gen/app__control.effect.vibe"
 import { Agent, ask, type Failure } from "../platform/index.vibe"
-import { contained, reacting, run, started, Time, together, type Job } from "../runtime/index.vibe"
+import { contained, createShelf, reacting, run, started, Time, together, type Job } from "../runtime/index.vibe"
 
 schema LeaseWire {
   leaseId: Schema.Int
@@ -37,6 +37,15 @@ schema PendingWire {
   createdAtMs: Schema.Int
 }
 
+schema LeaseRequestWire {
+  packageName: string
+  requestedOp: string
+  requestedAt: Schema.Int
+}
+
+/** Pending third-party app control lease request awaiting explicit owner approval. */
+export type LeaseRequest = typeof LeaseRequestWire.Type
+
 schema ControlStateWire {
   tier: "TierNone" | "TierAccessibility" | "TierPrivileged"
   capabilities: string[]
@@ -45,6 +54,7 @@ schema ControlStateWire {
   pending: PendingWire | null
   lastResult: "done" | "refused" | "preempted"
   killed: boolean
+  leaseRequest?: LeaseRequestWire | null
 }
 
 schema LeaseGrantedWire {
@@ -81,8 +91,52 @@ export service ExternalControl {
   stop(reason?: string): ControlStateWire!Failure
 }
 
+/** Reactive shelf holding the latest pending third-party control lease request for the overlay UI. */
+export service ControlLeaseRequests {
+  readonly snapshot: () => LeaseRequest | undefined
+  readonly subscribe: (listener: () => void) => () => void
+  readonly appIdOf: (packageName: string) => number
+  now(): number!!
+  set(next: LeaseRequest | undefined): void!!
+  dismiss(): void!!
+}
+
+const controlLeaseRequests = Layer.effect(ControlLeaseRequests, effect {
+  const time = try Time
+  const shelf = createShelf<LeaseRequest | undefined>(undefined)
+  const appIds = new Map<string, number>()
+  let nextAppId = 1
+  let dismissedAt = 0
+  return {
+    snapshot: shelf.snapshot,
+    subscribe: shelf.subscribe,
+    appIdOf: (packageName: string) => {
+      if (packageName === "") return 0
+      const existing = appIds.get(packageName)
+      if (existing !== undefined) return existing
+      const assigned = nextAppId++
+      appIds.set(packageName, assigned)
+      return assigned
+    },
+    now: () => time.now(),
+    set: (next: LeaseRequest | undefined) => sync(() => {
+      const visible = next !== undefined && next.requestedAt > dismissedAt ? next : undefined
+      const current = shelf.snapshot()
+      if (current?.packageName === visible?.packageName
+        && current?.requestedOp === visible?.requestedOp
+        && current?.requestedAt === visible?.requestedAt) return
+      shelf.set(visible)
+    }),
+    dismiss: () => sync(() => {
+      const current = shelf.snapshot()
+      if (current !== undefined) dismissedAt = Math.max(dismissedAt, current.requestedAt)
+      if (current !== undefined) shelf.set(undefined)
+    }),
+  }
+})
+
 /** Live ExternalControl layer backed by the resident agent's page-admitted control routes. */
-export const agentControl = Layer.effect(ExternalControl, effect {
+const agentControl = Layer.effect(ExternalControl, effect {
   const agent = try Agent
   const withAgent = Layer.succeed(Agent, agent)
   return {
@@ -256,6 +310,31 @@ export effect function approveControlLease(input: {
   return granted
 }
 
+/** Approve the currently pending third-party control lease request from the overlay banner. */
+export effect function approvePendingLeaseRequest(
+  maxOps = 6,
+  durationMs = 60_000,
+): (LeaseWire | undefined)!!(Control.Machine | ExternalControl | ControlLeaseRequests) {
+  const requests = try ControlLeaseRequests
+  const pending = requests.snapshot()
+  if (pending === undefined) return undefined
+  const nowMs = try requests.now()
+  const granted = try approveControlLease({
+    packageName: pending.packageName,
+    appId: Math.max(1, requests.appIdOf(pending.packageName)),
+    maxOps,
+    durationMs,
+    nowMs,
+  })
+  if (granted !== undefined) try requests.set(undefined)
+  return granted
+}
+
+/** Dismiss the currently displayed pending control lease request prompt without granting a lease. */
+export effect function dismissPendingLeaseRequest(): void!!ControlLeaseRequests {
+  try (try ControlLeaseRequests).dismiss()
+}
+
 /** Engage the owner kill-switch immediately in both the verified machine and the resident agent. */
 export effect function triggerControlKillSwitch(reason = "kill_switch"): boolean!!(Control.Machine | ExternalControl) {
   const machine = try Control.Machine
@@ -288,22 +367,17 @@ function carry(fx: ControlEffect): Job<Event, ExternalControl, [Actor]> {
 
 const controlSync = started(effect {
   const remote = try ExternalControl
+  const requests = try ControlLeaseRequests
   const time = try Time
-  const appIds = new Map<string, number>()
-  let nextAppId = 1
-  const appIdOf = (packageName: string): number => {
-    if (packageName === "") return 0
-    const existing = appIds.get(packageName)
-    if (existing !== undefined) return existing
-    const assigned = nextAppId++
-    appIds.set(packageName, assigned)
-    return assigned
-  }
   const pollOnce = effect {
     const wire = remote.readState() catch () => undefined
     if (wire === undefined) return
     const now = try time.now()
-    try syncControlSnapshot(wire, appIdOf, now)
+    try syncControlSnapshot(wire, requests.appIdOf, now)
+    const nextRequest = wire.lease.status === "LeaseActive" || wire.killed
+      ? undefined
+      : (wire.leaseRequest ?? undefined)
+    try requests.set(nextRequest)
   }
   try Effect.repeat(pollOnce, Schedule.spaced("1500 millis"))
 }, "syncing external control state")
@@ -311,6 +385,7 @@ const controlSync = started(effect {
 /** Reactive external-app control layer combining the verified Quint machine, resident agent client, and live state sync. */
 export const externalControl = together(
   agentControl,
+  controlLeaseRequests,
   reacting(Control, { carry }),
   controlSync,
 )

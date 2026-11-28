@@ -1,5 +1,5 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type ChatHeight, type LocationObservation, type ReviewedEmail, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
+import { BrowserPage, ConversationRecord, TurnController, encodeTurnContext, findStoppedUserTurn, learnPeer, notLearned, sendsOptionalFields, statusRead, type ChatHeight, type LocationObservation, type ReviewedEmail, type TurnContext, type TurnReply, type TurnResult, type TurnTransport } from "@elizaos/agent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Attachments from "../../gen/app__assistant__attachments.effect.vibe"
@@ -33,13 +33,14 @@ import { captureSmsSelection, type MessageSmsRequest, type SmsSelection, type Sm
 import { Conversations } from "../messages/messages.vibe"
 import type { Telephony } from "../platform/index.vibe"
 import { syncRemindersNow } from "../reminders/reminders.vibe"
-import { Agent, isCloudFundsRefusal } from "../platform/index.vibe"
+import { Agent, type ActiveForegroundContext, attachOverlayEvents, dismissOverlayHost, getActiveForegroundContext, isCloudFundsRefusal, openAppViaOverlay, parseActiveForegroundContext } from "../platform/index.vibe"
 import { Device, native } from "../platform/index.vibe"
 import { Location } from "../platform/index.vibe"
 import { type PageInFront, type TabHost, pageInFront } from "../platform/index.vibe"
 import type { VoiceBridge } from "../platform/index.vibe"
 import { Refused, ask, outcomeOf } from "../platform/index.vibe"
-import { Attempts, fresh } from "../runtime/index.vibe"
+import { Attempts, createShelf, fresh } from "../runtime/index.vibe"
+import { currentSurface, parseView } from "../surface.ts"
 import { CommsPrompts, commsViewOf } from "../comms/index.vibe"
 import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-context.vibe"
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
@@ -320,7 +321,44 @@ effect function whereabouts(sensitive: boolean, told: boolean): (LocationObserva
 }
 
 // spec/app/assistant/context.md, "A spoken turn carries what a typed turn sent at that moment would, the view claim included"; spec/app/assistant/context.md, "A turn reports the assistant overlay height from the shell detent and dock state, only when the screen is not sensitive and the peer takes optional fields"
-type ScreenContext = Locator.Machine | Prefs.Machine | MessagingBridge | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost | Shell | Dock.Machine
+service OverlayScreen {
+  readonly snapshot: () => ActiveForegroundContext | undefined
+  readonly publish: (next: ActiveForegroundContext | undefined) => void
+}
+
+const overlayScreenLayer = Layer.sync(OverlayScreen, () => {
+  const shelf = createShelf<ActiveForegroundContext | undefined>(undefined)
+  return { snapshot: shelf.snapshot, publish: shelf.set }
+})
+
+const remoteBrowserPage = Schema.decodeUnknownOption(BrowserPage)
+
+function remoteNoteOf(remote: ActiveForegroundContext | undefined): RendererNote | undefined {
+  const candidate = remote?.snapshot?.selectedObject
+  if (typeof candidate !== "object" || candidate === null) return undefined
+  const record = candidate as Record<string, unknown>
+  if ((record.kind !== "canonical-note" && record.kind !== "canonical-note-source")
+    || typeof record.id !== "string" || typeof record.revision !== "string") return undefined
+  return { kind: record.kind, id: record.id, revision: record.revision }
+}
+
+function remoteFrontOf(remote: ActiveForegroundContext | undefined, revision: number, allowed: boolean, now: number): PageInFront | undefined {
+  if (!allowed || remote?.webUri === undefined || !remote.webUri.startsWith("https://")) return undefined
+  const tabId = remote.packageName ?? "external"
+  const rev = String(revision)
+  const decoded = remoteBrowserPage({
+    tabId,
+    revision: rev,
+    url: remote.webUri,
+    title: remote.title ?? remote.webUri,
+    text: (remote.text ?? "").slice(0, 6000),
+    capturedAt: Math.trunc(now),
+  })
+  if (Option.isNone(decoded)) return undefined
+  return { selection: { kind: "browser-tab", id: tabId, revision: rev }, page: decoded.value }
+}
+
+type ScreenContext = Locator.Machine | Prefs.Machine | MessagingBridge | Location | Time | Talk | NotesSelection | NoteStore | SmsSelectionContext | Telephony | TabHost | Shell | Dock.Machine | OverlayScreen
 
 interface ScreenTold {
   readonly metadata: TurnContext | undefined
@@ -336,6 +374,7 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
   const prefState = try (try Prefs.Machine).get()
   const shellState = try (try Shell).get()
   const dockState = try (try Dock.Machine).get()
+  const overlayContext = currentSurface().mode === "overlay" ? (try OverlayScreen).snapshot() : undefined
   const chatHeight = wireChatHeight[Locator.chatHeightOf(
     shellState.assistant,
     askAlphaDrawn(shellState),
@@ -345,11 +384,14 @@ effect function screenTold(told: boolean, context: Conversation.Context, transcr
   const seeSelection = told && !context.sensitive
   const seen = seeSelection && view === "notes" ?
     (transcript === undefined ? try notesSelection() : (try transcriptCurrent(transcript)) ? transcript.record : undefined) : undefined
-  const note = seen?.kind === "canonical-note" && !context.selected ? undefined : seen
+  const remoteNote = seeSelection && view === "notes" ? remoteNoteOf(overlayContext) : undefined
+  const note = (seen?.kind === "canonical-note" && !context.selected ? undefined : seen) ?? remoteNote
   const selection = seeSelection && view === "messages" ? try captureSmsSelection() : undefined
   const file = seeSelection && view === "files" ? try (try FileContext).selected() : undefined
   const attachment = file === undefined ? undefined : try (try FileContext).read(file)
-  const front = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(prefState, "BrowserPage"), try (try Time).now()) : undefined
+  const now = try (try Time).now()
+  const localFront = seeSelection && view === "browser" ? try pageInFront(true, Prefs.allows(prefState, "BrowserPage"), now) : undefined
+  const front = localFront ?? (seeSelection ? remoteFrontOf(overlayContext, context.revision, Prefs.allows(prefState, "BrowserPage"), now) : undefined)
   const metadata = observed(told, context, location, bridge, prefState, note ?? selection?.observation ?? (file === undefined ? undefined : documentObservation(file)), front, email, transcript !== undefined, chatHeight)
   const sms = view === "messages" ? { selection: metadata?.observation?.selectedObject?.kind === "sms-subscription" ? selection : undefined } : undefined
   return { metadata, sms, attachment }
@@ -1040,6 +1082,10 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
     when { tag: "Arrived", let recorded }: run("arrived", arrived(recorded));
     // spec/app/shell/index.md, "Agent navigation shows an admitted app or Home, lowering Ask Alpha only where it would hide it"
     when { tag: "Navigate", let turn, let view, let inside }: answer("navigate", effect {
+      if (currentSurface().mode === "overlay") {
+        const opened = try openAppViaOverlay(`alpha://${view.toLowerCase()}/`, `nav-${turn}`, JSON.stringify({ view, inside }))
+        return { type: "navigated", ticket: turn, opened } as Conversation.Event
+      }
       const shell = try Shell
       const before = try shell.get()
       const shown = inside
@@ -1048,11 +1094,19 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Views | Age
       return { type: "navigated", ticket: turn, opened: shown } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "NavigateHome", let turn }: answer("navigate", effect {
+      if (currentSurface().mode === "overlay") {
+        try dismissOverlayHost()
+        return { type: "navigated", ticket: turn, opened: true } as Conversation.Event
+      }
       const shell = try Shell
       const home = !canAgentGoHome(try shell.get()) || (try contained(shell.send({ type: "agentGoHome" }), "going Home as the agent named"))
       return { type: "navigated", ticket: turn, opened: home } as Conversation.Event
     }, { type: "navigated", ticket: turn, opened: false });
     when { tag: "NavigateFiles", let turn, let source, let panel, let route }: answer("navigate", effect {
+      if (currentSurface().mode === "overlay") {
+        const opened = try openAppViaOverlay("alpha://files/", `files-${turn}`, JSON.stringify({ view: "Files", route }))
+        return { type: "navigated", ticket: turn, opened } as Conversation.Event
+      }
       const conversation = try Conversation.Machine
       const shell = try Shell
       const opened = try contained(shell.send({ type: "agentOpenFilesFrom", source, panel, route, spoken: false }, () => {
@@ -1546,16 +1600,26 @@ const looked = started(effect {
   const prefs = try Prefs.Machine
   const conversation = try Conversation.Machine
   const composer = try Composer.Machine
+  const contacts = try Contacts.Machine
   const mail = try MailQuestions
+  const overlayScreen = try OverlayScreen
   const { board } = try Talk
+  const inOverlay = currentSurface().mode === "overlay"
   let taken: string | undefined
   let previousView: string | undefined
-  const page = Stream.zipLatest(shell.changes, settings.changes)
-  const messaging = Stream.zipLatest(bridge.changes, prefs.changes)
-  const contacts = try Contacts.Machine
-  const selection = Stream.zipLatest(Stream.zipLatest(noteSubjects, conversation.changes), contacts.changes)
-  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(page, messaging), selection), effect ([[[shown, pages], [msgSnap, prefState]], [[subject], contact]]) => {
-    const view = shown.trail.at(-1)
+  let subject = { note: 0, owner: 0, revision: 0, opened: 0 }
+  if (inOverlay) {
+    const initial = try getActiveForegroundContext()
+    if (Option.isSome(initial)) overlayScreen.publish(parseActiveForegroundContext(initial.value))
+  }
+  const tell = effect {
+    const shown = try shell.get()
+    const pages = try settings.get()
+    const msgSnap = bridge.snapshot()
+    const prefState = try prefs.get()
+    const contact = try contacts.get()
+    const remote = inOverlay ? overlayScreen.snapshot() : undefined
+    const view = (inOverlay ? parseView(remote?.view) : undefined) ?? shown.trail.at(-1)
     const viewKey = view ?? ""
     const offer = board.snapshot().transcript
     const transcript = offer?.offered
@@ -1566,13 +1630,16 @@ const looked = started(effect {
     const msgCtx = platform === undefined ? undefined : msgSnap.contexts[platform]
     const shareAllowed = platform !== undefined && Prefs.allows(prefState, shareOf(platform))
     const msgSensitive = platform !== undefined && (msgCtx?.sensitive === true || msgCtx?.pane === "auth")
-    const sensitive = (view === "Settings" && Pages.sensitive(pages)) || msgSensitive
+    const sensitive = (inOverlay && remote?.sensitive === true) || (view === "Settings" && Pages.sensitive(pages)) || msgSensitive
     const { note } = subject
     const currentZone = zone()
     const msgSelected = !sensitive && platform !== undefined && shareAllowed && msgCtx !== undefined && msgCtx.authenticated && msgCtx.conversation !== undefined
     const contactSelected = view === "Contacts" && contact.front && Contacts.shown(contact) && contact.form === "Shut" && !contact.confirming
-    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected || contactSelected
-    const selectionKey = contactSelected ? `${contact.contact} ${contact.card.ticket}` : view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg"
+    const remoteSelected = inOverlay && !sensitive && (remote?.snapshot?.selectedObject !== undefined || remote?.webUri !== undefined)
+    const selected = (view === "Notes" && !sensitive && note > 0) || msgSelected || contactSelected || remoteSelected
+    const selectionKey = remoteSelected
+      ? `${remote?.packageName ?? ""} ${remote?.webUri ?? ""} ${JSON.stringify(remote?.snapshot?.selectedObject ?? "")}`
+      : contactSelected ? `${contact.contact} ${contact.card.ticket}` : view === "Notes" ? note : msgCtx?.conversation?.id ?? "msg"
     const seen = `${viewKey} ${section} ${sensitive} ${currentZone} ${selected ? selectionKey : ""}`
     if (seen !== taken) {
       const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: currentZone, day: 0, selected, sensitive, section }
@@ -1591,7 +1658,39 @@ const looked = started(effect {
       }
     }
     previousView = viewKey
-  })
+  }
+  try tell
+  const overlayContextStream = inOverlay
+    ? Stream.callback<void>((queue) => effect {
+      const stop = attachOverlayEvents({
+        onShow: (detail) => {
+          if (detail.activeContext !== undefined) {
+            overlayScreen.publish(parseActiveForegroundContext(detail.activeContext))
+            Queue.offerUnsafe(queue, undefined)
+          }
+        },
+        onAssistContext: (detail) => {
+          const parsed = parseActiveForegroundContext(detail)
+          if (parsed !== undefined) {
+            overlayScreen.publish(parsed)
+            Queue.offerUnsafe(queue, undefined)
+          }
+        },
+      })
+      try addFinalizer(() => sync(stop))
+    })
+    : Stream.empty
+  const sources = [
+    Stream.as(shell.changes, undefined),
+    Stream.as(settings.changes, undefined),
+    Stream.as(bridge.changes, undefined),
+    Stream.as(prefs.changes, undefined),
+    Stream.as(contacts.changes, undefined),
+    Stream.tap(noteSubjects, (next) => sync(() => { subject = next })) |> Stream.as(%, undefined),
+    Stream.as(conversation.changes, undefined),
+    overlayContextStream,
+  ]
+  try Stream.runForEach(Stream.mergeAll(sources, { concurrency: "unbounded" }), () => tell)
 }, "telling the screen")
 
 // spec/app/assistant/composer.md, "The slot is opened when the composer is shown, and opened again after it could not be read"
@@ -1996,5 +2095,5 @@ export const assisting = Layer.provideMerge(
     reacting(Locator, { carry: carryLocator }),
     reached, looked, opening, saving, bound, reviewedInFiles, submitted, allowing, forgetting, rested, keyboardRest, steppingBack, retireContactSearch, retireContactAttachments, carried, carriedAloud, agentWarmUp,
   ),
-  Layer.mergeAll(Layer.fresh(turns), talk, handoffs),
+  Layer.mergeAll(Layer.fresh(turns), talk, handoffs, overlayScreenLayer),
 )

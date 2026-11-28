@@ -241,6 +241,7 @@ public final class AlphaAgentBrokerService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         policy = AlphaSuitePolicyLoader.load(this);
+        ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionService.ensureResidentAgentStarted(this);
     }
 
     @Override public IBinder onBind(Intent intent) {

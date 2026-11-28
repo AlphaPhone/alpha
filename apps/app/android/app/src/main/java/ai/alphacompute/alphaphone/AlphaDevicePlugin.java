@@ -188,7 +188,7 @@ public final class AlphaDevicePlugin extends Plugin {
   accessPermissionStatus(call);
  }
 
- private static void putSettingsGrants(Context context,JSObject out) {
+ static void putSettingsGrants(Context context,JSObject out) {
   JSObject grants=new JSObject();
   boolean fine=context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
   boolean coarse=context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
@@ -1254,5 +1254,29 @@ public final class AlphaDevicePlugin extends Plugin {
    if(view==null||activity.isFinishing()||activity.isDestroyed()){call.reject("Alpha view is unavailable");return;}
    JSObject result=new JSObject();result.put("performed",view.performHapticFeedback(feedback));call.resolve(result);
   });
+ }
+
+ @PluginMethod public void openAlphaOverlay(PluginCall call){
+  String entrySource=call.getString("entrySource","app");
+  String initialQuery=call.getString("initialQuery");
+  boolean startVoice=Boolean.TRUE.equals(call.getBoolean("startVoice",false));
+  boolean opened=ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionService.showOverlay(getContext(),entrySource,initialQuery,startVoice);
+  call.resolve(new JSObject().put("opened",opened));
+ }
+
+ @PluginMethod public void launchSiblingApp(PluginCall call){
+  String target=call.getString("targetPackage",call.getString("view",""));
+  String uri=call.getString("uri");
+  String extrasJson=call.getString("extrasJson");
+  boolean launched=AlphaCorePluginDispatch.launchSiblingApp(getContext(),ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader.load(getContext()),target,uri,extrasJson);
+  call.resolve(new JSObject().put("launched",launched));
+ }
+
+ @PluginMethod public void finishTask(PluginCall call){
+  android.app.Activity activity=getActivity();
+  if(activity!=null&&!activity.isFinishing()&&!activity.isDestroyed()){
+   activity.runOnUiThread(()->activity.moveTaskToBack(true));
+  }
+  call.resolve();
  }
 }

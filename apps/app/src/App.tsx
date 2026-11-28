@@ -1,7 +1,10 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"; spec/app/shell/index.md, "On Phone, Messages and Contacts the app's own bar stands in for Ask Alpha at rest, until Ask Alpha rises"; spec/app/shell/gestures.md, "A swipe travels at least 46 points; a sideways one from within 30 points of a side edge, towards the middle, is Back"; spec/app/shell/gestures.md, "On the launcher a pull down that Home allows opens Android's shade, and a swipe up from the bottom bar goes Home; nothing else is a swipe"; spec/app/shell/layers.md, "The page under a layer or a hold takes no touch, and a covering layer or a hold takes none for Ask Alpha either"; spec/app/update/page.md, "A page that was not mounted mounts its editors only once no update is pending"
 import { Alert, AppHeader, SHEET_EASE, StartupFailureScreen, StartupMark, cn } from "@repo/ui";
+import { Effect, Stream } from "effect";
 import { type MouseEvent, type PointerEvent, type SyntheticEvent, type TouchEvent, useCallback, useRef, useState, useSyncExternalStore } from "react";
 import { useMachine as useComms } from "../gen/app__phone__comms.react.ts";
+import * as Pages from "../gen/app__settings.effect.vibe";
+import { Machine as ShellMachine } from "../gen/app__shell.effect.vibe";
 import { useMachine } from "../gen/app__shell.react.ts";
 import { type Shell, type View, adjacentAskSheet, askAlphaDrawn } from "../gen/app__shell.ts";
 import { useMachine as useCanvas } from "../gen/app__shell__keyboard.react.ts";
@@ -15,8 +18,19 @@ import { dialogShown, editorsMounted } from "../gen/app__update__page.ts";
 import { BrowserFrames } from "./browser/BrowserFrames.tsx";
 import { OverlayControlBanner } from "./control/ControlBanner.tsx";
 import { addLayerAt } from "./home/addHome.vibe";
+import { MessagingBridge } from "./messaging/bridge.vibe";
+import { noteSubjects, notesSelection } from "./notes/selection.vibe";
 import { coarsePointer, desktopPreview, landscapeHomeInput, watchPrimaryPointer } from "./shell/canvas.vibe";
-import { finishThinAppTask, watchAppSurface, watchOverlaySurface } from "./platform/contextBridge.vibe";
+import {
+  type AlphaIntentDetail,
+  type AlphaIntentResult,
+  DEFAULT_CONTEXT_LEASE_MS,
+  finishThinAppTask,
+  launchSiblingApp,
+  publishForegroundContext,
+  watchAppSurface,
+  watchOverlaySurface,
+} from "./platform/contextBridge.vibe";
 import { native } from "./platform/device.vibe";
 import type { Alpha } from "./runtime/area.tsx";
 import { versions } from "./settings/build.ts";
@@ -256,6 +270,64 @@ function OverlaySurface({ alpha }: { readonly alpha: Alpha }) {
   );
 }
 
+function parseIntentPayload(raw: string): Record<string, unknown> {
+  if (raw.trim().length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function handleAppViewIntent(
+  alpha: Alpha,
+  view: View,
+  detail: AlphaIntentDetail,
+): Promise<AlphaIntentResult> {
+  const payload = parseIntentPayload(detail.payloadJson);
+  if (view === "Notes") {
+    const target = typeof payload.target === "object" && payload.target !== null
+      ? (payload.target as Record<string, unknown>)
+      : undefined;
+    const noteId = typeof target?.noteId === "string"
+      ? target.noteId
+      : typeof payload.noteId === "string" ? payload.noteId : undefined;
+    if (noteId !== undefined && noteId.length > 0) {
+      const { agentOpen } = await import("./notes/agent.vibe");
+      const turn = detail.ticket > 0 ? detail.ticket : 1;
+      const opened = await alpha.runtime.runPromise(agentOpen(noteId, { turn, current: turn, sensitive: false }));
+      return {
+        switched: true,
+        result: { view, uri: detail.uri, opened, ...(opened && target !== undefined ? { shown: target } : {}) },
+      };
+    }
+  }
+  if (view === "Browser") {
+    const url = typeof payload.url === "string" ? payload.url : undefined;
+    if (url !== undefined && url.length > 0) {
+      const [{ default: browser }, { openMessageLink }] = await Promise.all([
+        import("./browser/index.tsx"),
+        import("./browser/browser.vibe"),
+      ]);
+      const opened = await browser.runtime(alpha).runPromise(openMessageLink(url, "Ask Alpha"));
+      return { switched: true, result: { view, uri: detail.uri, opened } };
+    }
+  }
+  if (view === "Settings") {
+    const section = typeof payload.section === "string" ? payload.section : undefined;
+    if (section !== undefined && section.length > 0) {
+      const parsed = Pages.parseEvent({ type: "openSection", page: section });
+      if (parsed?.type === "openSection") {
+        await alpha.runtime.runPromiseExit(Effect.flatMap(Pages.Machine, (pages) => pages.send(parsed)));
+      }
+    }
+  }
+  return { switched: true, result: { view, uri: detail.uri } };
+}
+
 /** Standalone single-view surface packaged inside a thin Alpha app APK. */
 function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: View }) {
   const { cause, send } = useMachine(alpha.runtime);
@@ -271,9 +343,54 @@ function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: Vie
     if (!node) return;
     void send({ type: "openView", view });
     const stopChrome = watchChrome(node, (event) => { void alpha.runtime.runPromise(measureChrome(event)); });
-    const stopApp = watchAppSurface(view, (detail) => {
+    const stopApp = watchAppSurface(view, async (detail) => {
       node.ownerDocument.defaultView?.dispatchEvent(new CustomEvent("alpha-view-intent", { detail }));
+      return handleAppViewIntent(alpha, view, detail);
     });
+    const appFiber = alpha.runtime.runFork(Effect.gen(function* () {
+      const shell = yield* ShellMachine;
+      const pages = yield* Pages.Machine;
+      const bridge = yield* MessagingBridge;
+      const syncSibling = Stream.runForEach(shell.changes, (state) => Effect.gen(function* () {
+        const active = state.trail.at(-1);
+        if (active === undefined || active === view) return;
+        yield* launchSiblingApp(active);
+        yield* Effect.exit(shell.send({ type: "openView", view }));
+      }));
+      const publishContext = Effect.gen(function* () {
+        const pageState = yield* pages.get();
+        const msgSnap = bridge.snapshot();
+        const platform = view === "Telegram" ? "Telegram" : view === "Slack" ? "Slack" : undefined;
+        const msgCtx = platform === undefined ? undefined : msgSnap.contexts[platform];
+        const sensitive = (view === "Settings" && Pages.sensitive(pageState))
+          || (platform !== undefined && (msgCtx?.sensitive === true || msgCtx?.pane === "auth"));
+        const note = !sensitive && view === "Notes" ? yield* notesSelection() : undefined;
+        const selectedObject = note ?? (view === "Settings" ? { kind: "settings", id: pageState.page } : undefined);
+        const snapshotJson = JSON.stringify({
+          view,
+          title: node.ownerDocument.title || view,
+          ...(view === "Settings" ? { section: pageState.page } : {}),
+          ...(selectedObject === undefined ? {} : { selectedObject }),
+        });
+        yield* publishForegroundContext({
+          view,
+          route: view === "Settings" ? `/${pageState.page.toLowerCase()}` : `/${view.toLowerCase()}`,
+          snapshotJson,
+          sensitive,
+          leaseMs: DEFAULT_CONTEXT_LEASE_MS,
+        });
+      });
+      const contextSources = [
+        Stream.as(pages.changes, undefined),
+        Stream.as(bridge.changes, undefined),
+        Stream.as(noteSubjects, undefined),
+      ];
+      const syncContext = Effect.andThen(
+        publishContext,
+        Stream.runForEach(Stream.mergeAll(contextSources, { concurrency: "unbounded" }), () => publishContext),
+      );
+      yield* Effect.all([syncSibling, syncContext], { concurrency: "unbounded" });
+    }));
     const win = node.ownerDocument.defaultView;
     const onRootBack = () => {
       if (node.ownerDocument.documentElement.dataset.alphaCanGoBack !== "true") finishThinAppTask();
@@ -281,6 +398,7 @@ function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: Vie
     win?.addEventListener("alpha-back", onRootBack);
     return () => {
       win?.removeEventListener("alpha-back", onRootBack);
+      appFiber.interruptUnsafe();
       stopApp();
       stopChrome();
     };
@@ -294,7 +412,7 @@ function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: Vie
         data-alpha-native={phone ? "" : undefined}
         style={canvas?.covered ? { height: canvas.visible } : undefined}
         className={cn(
-          "relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground has-[[data-alpha-camera-native]]:bg-transparent in-data-[alpha-browser-under]:bg-transparent",
+          "relative mx-auto flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-base text-foreground [--alpha-call-inset-top:max(var(--alpha-native-inset-top,0px),env(safe-area-inset-top))] has-[[data-alpha-camera-native]]:bg-transparent in-data-[alpha-browser-under]:bg-transparent in-data-[alpha-browser-under]:bg-[linear-gradient(to_bottom,var(--background)_var(--alpha-browser-under-top),transparent_0_var(--alpha-browser-under-bottom),var(--background)_0),linear-gradient(to_right,var(--background)_var(--alpha-browser-under-left),transparent_0_var(--alpha-browser-under-right),var(--background)_0)] has-[[data-alpha-call-strip=over]]:pt-[calc(var(--alpha-call-inset-top)_+_4rem)]",
           view === "Camera" && "bg-camera-panel",
           !phone && "sm:pointer-fine:max-w-103 sm:pointer-fine:border-x sm:pointer-fine:border-border/60",
         )}
@@ -306,7 +424,7 @@ function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: Vie
             const root = node?.ownerDocument.documentElement;
             if (root && root.dataset.alphaCanGoBack !== canGoBack) root.dataset.alphaCanGoBack = canGoBack;
           }}
-          className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto overscroll-contain"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto overscroll-contain in-[main:has([data-alpha-call-strip=over])]:[--alpha-native-inset-top:0px]"
           inert={inert}
         >
           {comms && alpha.slot("phone/stage")}
@@ -316,6 +434,9 @@ function AppSurface({ alpha, view }: { readonly alpha: Alpha; readonly view: Vie
             className="shrink-0"
           />}
           {alpha.slot(`view:${view}`)}
+        </div>
+        <div data-alpha-top-alerts="" className="pointer-events-none fixed inset-x-0 top-[var(--alpha-safe-top)] z-alert mx-auto flex max-w-103 flex-col gap-2 px-3 pt-2 *:pointer-events-auto">
+          {alpha.slot("overlay")}
         </div>
         {alpha.slot("notice")}
         <div ref={setPortalNode} data-alpha-portal-root="" className="contents" />

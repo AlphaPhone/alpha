@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Control from "../gen/app__control.effect.vibe";
 import { mounts } from "../src/areas.ts";
 import { ControlBanner } from "../src/control/ControlBanner.tsx";
-import { approveControlLease, externalControl, syncControlSnapshot } from "../src/control/control.vibe";
+import { ControlLeaseRequests, externalControl, syncControlSnapshot } from "../src/control/control.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import {
   type AlphaIntentDetail,
@@ -66,8 +66,9 @@ describe("Multi-surface parser, mount filtering, OCR gating, and lock scoping", 
     expect(lockNameFor(notes)).toBe("alpha.page:app:Notes");
     expect(needsLocalOcr(notes)).toBe(false);
     const notesPlaces = mountsFor(notes, mounts).map((entry) => entry.at);
-    expect(notesPlaces.every((place) => place === "view:Notes" || place === "notice")).toBe(true);
+    expect(notesPlaces.every((place) => place === "view:Notes" || place === "overlay" || place === "notice")).toBe(true);
     expect(notesPlaces).toContain("view:Notes");
+    expect(notesPlaces).toContain("overlay");
     expect(notesPlaces).toContain("notice");
     expect(notesPlaces).not.toContain("home");
 
@@ -310,9 +311,17 @@ describe("Context bridge and system overlay touch passthrough", () => {
       expect(JSON.parse(regionUpdates[0]?.rectsJson ?? "[]")).toEqual([{ left: 0, top: 700, right: 412, bottom: 788 }]);
       expect(focusUpdates).toEqual([false]);
 
-      bar.dataset.alphaDetent = "typing";
+      bar.dataset.alphaTyping = "";
       window.dispatchEvent(new Event("resize"));
       expect(focusUpdates).toEqual([false, true]);
+
+      delete bar.dataset.alphaTyping;
+      window.dispatchEvent(new Event("resize"));
+      expect(focusUpdates).toEqual([false, true, false]);
+
+      bar.dataset.alphaDetent = "typing";
+      window.dispatchEvent(new Event("resize"));
+      expect(focusUpdates).toEqual([false, true, false, true]);
       stopOverlay();
     } finally {
       root.remove();
@@ -423,18 +432,30 @@ describe("Overlay external control kill-switch banner", () => {
           lastResult: "done",
           killed: false,
         }, () => 1));
-        await runtime.runPromise(approveControlLease({
+        await runtime.runPromise(Effect.flatMap(ControlLeaseRequests, (requests) => requests.set({
           packageName: "org.mozilla.firefox",
-          appId: 1,
-          maxOps: 3,
-          durationMs: 60_000,
-          nowMs: 1_000,
-        }));
+          requestedOp: "ui_click",
+          requestedAt: 1_000,
+        })));
+      });
+
+      const approvalBanner = host.querySelector("[data-alpha-control-lease-request]");
+      expect(approvalBanner?.textContent).toContain("org.mozilla.firefox");
+      const approveBtn = Array.from(approvalBanner?.querySelectorAll("button") ?? []).find((btn) => btn.textContent === "Approve");
+      expect(approveBtn).toBeDefined();
+
+      await drawn(async () => {
+        approveBtn?.click();
+        await runtime.runPromise(
+          Effect.flatMap(Control.Machine, (machine) =>
+            Stream.runHead(Stream.filter(machine.changes, (state) => state.lease.status === "LeaseActive")),
+          ),
+        );
       });
 
       const activeBanner = host.querySelector("[data-alpha-control-banner]");
       expect(activeBanner?.textContent).toContain("Alpha control active");
-      expect(activeBanner?.textContent).toContain("0/3");
+      expect(activeBanner?.textContent).toContain("0/6");
 
       await drawn(async () => {
         await runtime.runPromise(Effect.flatMap(Control.Machine, (machine) =>
@@ -442,7 +463,7 @@ describe("Overlay external control kill-switch banner", () => {
         ));
       });
       expect(host.querySelector("[data-alpha-control-banner]")?.textContent).toContain("Alpha acting in app");
-      expect(host.querySelector("[data-alpha-control-banner]")?.textContent).toContain("1/3");
+      expect(host.querySelector("[data-alpha-control-banner]")?.textContent).toContain("1/6");
 
       const stopButton = host.querySelector<HTMLButtonElement>("[data-alpha-control-banner] button");
       expect(stopButton?.textContent).toBe("Stop");

@@ -9,6 +9,8 @@ import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
 import type { Machine as CommsMachine } from "../../gen/app__phone__comms.effect.vibe";
 import { useMachine as useComms } from "../../gen/app__phone__comms.react.ts";
+import { openAlphaOverlay } from "../platform/index.vibe";
+import { currentSurface } from "../surface.ts";
 import { Dialer } from "./phone.vibe";
 import { CommsPrompts, commsHeld } from "./comms.vibe";
 
@@ -70,12 +72,17 @@ export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarP
     if (node) return release;
   }, [release]);
   if (!shell.state || shell.state.assistant === "Sheet" || shell.state.assistant === "Full") return null;
+  const standaloneApp = currentSurface().mode === "app";
   const raise = { type: "raise", detent: "Sheet" } as const;
-  const opening = shell.can(raise);
+  const opening = standaloneApp || shell.can(raise);
   const open = async (query = "") => {
     if (!opening) return;
-    const about = comms.state?.key;
     const text = query.trim();
+    if (standaloneApp) {
+      await runtime.runPromise(openAlphaOverlay("comms-bar", text || undefined, false));
+      return;
+    }
+    const about = comms.state?.key;
     const request = about !== undefined ? ({ type: "requestTyped", about, request: text } as const) : undefined;
     if (text !== "" && request !== undefined && comms.can(request, "Owner")) await comms.send(request, "Owner");
     const raised = await shell.send(raise);
@@ -85,6 +92,10 @@ export function CommsBar({ runtime, closed, filter, person, actions }: CommsBarP
   };
   const view = shell.state.trail.at(-1);
   const talk = () => {
+    if (standaloneApp) {
+      void runtime.runPromise(openAlphaOverlay("comms-bar", undefined, true));
+      return;
+    }
     const about = comms.state?.key;
     if (!opening || !about || (view !== "Phone" && view !== "Messages" && view !== "Contacts")) return;
     void runtime.runPromise(Effect.flatMap(CommsPrompts, (prompts) => prompts.talk({ about, view })));

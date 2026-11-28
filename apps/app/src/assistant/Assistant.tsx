@@ -848,6 +848,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       {(!onComms || open || leaving) && <AssistantConversation
         ref={sheetRef}
         data-alpha-dragging={live ? "true" : undefined}
+        data-alpha-typing={assistantDetent === "Typing" ? "" : undefined}
         voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         underlay={underlay && !onComms ? currentView !== undefined && currentView !== "Browser" ? "pill" : "bar" : undefined}

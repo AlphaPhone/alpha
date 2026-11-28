@@ -1,9 +1,12 @@
 package ai.alphacompute.alphaphone.ipc;
 
+import ai.alphacompute.alphaphone.AlphaCorePluginDispatch;
+import ai.alphacompute.alphaphone.AlphaCoreSpeechHost;
 import ai.alphacompute.alphaphone.BuildConfig;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
 import ai.alphacompute.ipc.IAlphaCloudCallback;
+import ai.alphacompute.ipc.IAlphaEventCallback;
 import ai.alphacompute.ipc.IAlphaPlatformBroker;
 import ai.alphacompute.ipc.PfdStreams;
 import ai.eliza.os.agent.AgentService;
@@ -12,8 +15,6 @@ import ai.eliza.plugins.securestore.nativeonly.SecureSlotPolicy.ExchangeOutcome;
 import ai.eliza.plugins.securestore.nativeonly.SecureSlots;
 import ai.eliza.plugins.signin.CloudRequestPolicy;
 import ai.eliza.plugins.signin.CloudRequests;
-import ai.eliza.plugins.signin.CredentialPolicy;
-import ai.eliza.plugins.signin.CredentialReader;
 import ai.eliza.plugins.signin.DeviceCustody;
 import ai.eliza.plugins.signin.LargeBodyGrant;
 import android.app.Service;
@@ -24,6 +25,7 @@ import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
+import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -34,9 +36,12 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -48,6 +53,7 @@ public final class AlphaPlatformBrokerService extends Service {
     private static final String CONSENT_GMAIL = "google-gmail-changes";
     private static final String CONSENT_CALENDAR = "google-calendar-edits";
     private static final int MAX_CLOUD_REPLY_BYTES = 64 * 1024 * 1024;
+    private static final long CORE_SPEECH_TIMEOUT_MS = 15_000L;
     private static final Object CONSENT_LOCK = new Object();
 
     private volatile AlphaSuitePolicy policy = AlphaSuitePolicy.defaults();
@@ -56,9 +62,13 @@ public final class AlphaPlatformBrokerService extends Service {
         thread.setDaemon(true);
         return thread;
     });
+    private final RemoteCallbackList<IAlphaEventCallback> signInObservers = new RemoteCallbackList<>();
+    private final AtomicLong signInEventSeq = new AtomicLong();
 
     private LargeBodyGrant grants;
     private CloudRequests cloudRequests;
+    private AlphaCoreSpeechHost speechHost;
+    private AutoCloseable signInSubscription;
 
     private final IAlphaPlatformBroker.Stub binder = new IAlphaPlatformBroker.Stub() {
         @Override public void cloudRequest(
@@ -154,6 +164,56 @@ public final class AlphaPlatformBrokerService extends Service {
             }
             return facts.toString();
         }
+
+        @Override public String corePluginCall(String pluginName, String method, String argsJson) {
+            String callingPkg = requireAuthorizedPackage();
+            if (pluginName == null || pluginName.isBlank() || method == null || method.isBlank()) {
+                return pluginErrorEnvelope("INVALID", "Plugin name and method are required");
+            }
+            if ("AlphaDevice".equals(pluginName) && "setAgentGoogleConsent".equals(method)
+                && !policy.isGoogleConsentAllowed(callingPkg)) {
+                return pluginErrorEnvelope("UNAUTHORIZED", "Google consent change not permitted for " + callingPkg);
+            }
+            if ("AlphaVoiceCloud".equals(pluginName) || "ElizaCloudSpeech".equals(pluginName)) {
+                return invokeSpeechPluginSync(pluginName, method, argsJson);
+            }
+            return AlphaCorePluginDispatch.invokeSyncJson(AlphaPlatformBrokerService.this, policy, pluginName, method, argsJson);
+        }
+
+        @Override public void registerSignInObserver(IAlphaEventCallback cb) {
+            requireAuthorizedPackage();
+            if (cb != null) {
+                signInObservers.register(cb);
+            }
+        }
+
+        @Override public void unregisterSignInObserver(IAlphaEventCallback cb) {
+            requireAuthorizedPackage();
+            if (cb != null) {
+                signInObservers.unregister(cb);
+            }
+        }
+
+        @Override public boolean launchSiblingApp(String targetPackage, String uri, String extrasJson) {
+            requireAuthorizedPackage();
+            return AlphaCorePluginDispatch.launchSiblingApp(
+                AlphaPlatformBrokerService.this,
+                policy,
+                targetPackage,
+                uri,
+                extrasJson
+            );
+        }
+
+        @Override public boolean openAlphaOverlay(String entrySource, String initialQuery, boolean startVoice) {
+            requireAuthorizedPackage();
+            return AlphaCorePluginDispatch.openAlphaOverlay(
+                AlphaPlatformBrokerService.this,
+                entrySource,
+                initialQuery,
+                startVoice
+            );
+        }
     };
 
     @Override public void onCreate() {
@@ -164,6 +224,7 @@ public final class AlphaPlatformBrokerService extends Service {
         if (cloudPolicy.loaded()) {
             cloudRequests = new CloudRequests(cloudPolicy, grants);
         }
+        signInSubscription = AlphaCorePluginDispatch.observeSignIn(this, this::broadcastSignInSettled);
     }
 
     @Override public IBinder onBind(Intent intent) {
@@ -171,6 +232,18 @@ public final class AlphaPlatformBrokerService extends Service {
     }
 
     @Override public void onDestroy() {
+        if (signInSubscription != null) {
+            try {
+                signInSubscription.close();
+            } catch (Exception ignored) {
+            }
+            signInSubscription = null;
+        }
+        signInObservers.kill();
+        if (speechHost != null) {
+            speechHost.close();
+            speechHost = null;
+        }
         workers.shutdownNow();
         if (grants != null) grants.clear();
         super.onDestroy();
@@ -245,46 +318,77 @@ public final class AlphaPlatformBrokerService extends Service {
     }
 
     private String handleSignInMethod(String method) {
-        CredentialReader reader = DeviceCustody.reader(this, BuildConfig.CLOUD_API_ORIGIN);
         if ("status".equals(method)) {
-            CredentialReader.Credential active = reader.current();
-            CredentialPolicy.Account account = active != null ? active.account() : reader.account();
-            JSONObject out = new JSONObject();
-            try {
-                out.put("ok", true)
-                    .put("environment", "production")
-                    .put("state", active != null ? "ready" : "signed_out")
-                    .put("signedIn", active != null);
-                if (active != null) {
-                    out.put("credentialId", active.credentialId());
-                }
-                if (account != null) {
-                    JSONObject accountObj = new JSONObject()
-                        .put("signedIn", active != null)
-                        .put("userId", account.userId())
-                        .put("organizationId", account.organizationId());
-                    if (active != null) {
-                        accountObj.put("credentialId", active.credentialId());
-                    }
-                    out.put("account", accountObj);
-                } else {
-                    out.put("account", new JSONObject().put("signedIn", false));
-                }
-            } catch (JSONException impossible) {
-                throw new IllegalStateException(impossible);
-            }
-            return out.toString();
+            return AlphaCorePluginDispatch.signInStatus(this).toString();
         }
         if ("serviceInfo".equals(method)) {
-            JSONObject out = new JSONObject();
-            try {
-                out.put("ok", true).put("outcome", "ready").put("origin", BuildConfig.CLOUD_API_ORIGIN);
-            } catch (JSONException impossible) {
-                throw new IllegalStateException(impossible);
-            }
-            return out.toString();
+            return AlphaCorePluginDispatch.signInServiceInfo().toString();
         }
         return signInError("RequiresCoreActivity", "Interactive sign-in runs inside AlphaCore");
+    }
+
+    private synchronized AlphaCoreSpeechHost ensureSpeechHost() {
+        if (speechHost == null) {
+            speechHost = new AlphaCoreSpeechHost(this, (plugin, event, data) -> {});
+        }
+        return speechHost;
+    }
+
+    private String invokeSpeechPluginSync(String pluginName, String method, String argsJson) {
+        JSONObject options;
+        try {
+            options = argsJson == null || argsJson.isBlank() ? new JSONObject() : new JSONObject(argsJson);
+        } catch (JSONException malformed) {
+            options = new JSONObject();
+        }
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        ensureSpeechHost().dispatch(
+            pluginName,
+            method,
+            "broker-" + System.nanoTime(),
+            options,
+            data -> {
+                JSONObject out = new JSONObject();
+                try {
+                    out.put("ok", true).put("result", data == null ? new JSONObject() : data);
+                } catch (JSONException ignored) {
+                }
+                pending.complete(out.toString());
+            },
+            (code, message) -> pending.complete(pluginErrorEnvelope(code, message))
+        );
+        try {
+            return pending.get(CORE_SPEECH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (Exception timedOut) {
+            return pluginErrorEnvelope("TIMEOUT", "Core speech request timed out");
+        }
+    }
+
+    private void broadcastSignInSettled(JSONObject receipt) {
+        long seq = signInEventSeq.incrementAndGet();
+        String payload = receipt == null ? "{}" : receipt.toString();
+        int count = signInObservers.beginBroadcast();
+        try {
+            for (int index = 0; index < count; index++) {
+                try {
+                    signInObservers.getBroadcastItem(index).onEvent("signInSettled", seq, payload);
+                } catch (RemoteException ignored) {
+                }
+            }
+        } finally {
+            signInObservers.finishBroadcast();
+        }
+    }
+
+    private static String pluginErrorEnvelope(String code, String message) {
+        JSONObject out = new JSONObject();
+        try {
+            out.put("ok", false)
+                .put("error", code == null ? "ERROR" : code)
+                .put("message", message == null ? "Plugin call failed" : message);
+        } catch (JSONException ignored) {
+        }
+        return out.toString();
     }
 
     private String handleSecureStoreStatus() {

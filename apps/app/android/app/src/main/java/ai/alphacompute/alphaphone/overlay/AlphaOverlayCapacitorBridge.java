@@ -1,9 +1,13 @@
 package ai.alphacompute.alphaphone.overlay;
 
+import ai.alphacompute.alphaphone.AlphaCorePluginDispatch;
+import ai.alphacompute.alphaphone.AlphaCoreSpeechHost;
 import ai.alphacompute.alphaphone.BuildConfig;
 import ai.alphacompute.alphaphone.ipc.AlphaContextRegistryService;
 import ai.alphacompute.alphaphone.ipc.AlphaPreferencesProvider;
+import ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader;
 import ai.alphacompute.ipc.AlphaIpcContract;
+import ai.alphacompute.ipc.AlphaSuitePolicy;
 import ai.eliza.os.agent.AgentChannel;
 import ai.eliza.os.agent.AgentService;
 import ai.eliza.os.agent.ChannelPolicy.FailCode;
@@ -11,8 +15,6 @@ import ai.eliza.os.agent.ChannelPolicy.Outcome;
 import ai.eliza.os.agent.ChannelPolicy.Topic;
 import ai.eliza.plugins.signin.CloudRequestPolicy;
 import ai.eliza.plugins.signin.CloudRequests;
-import ai.eliza.plugins.signin.CredentialPolicy;
-import ai.eliza.plugins.signin.CredentialReader;
 import ai.eliza.plugins.signin.DeviceCustody;
 import ai.eliza.plugins.signin.LargeBodyGrant;
 import android.content.Context;
@@ -67,12 +69,16 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
     private final Consumer<String> scriptSink;
     private final LargeBodyGrant grants;
     private final CloudRequests cloudRequests;
+    private final AlphaSuitePolicy suitePolicy;
+    private final AlphaCoreSpeechHost speechHost;
     private final ExecutorService workers = Executors.newFixedThreadPool(4, task -> {
         Thread thread = new Thread(task, "AlphaOverlayCapIo");
         thread.setDaemon(true);
         return thread;
     });
     private final AutoCloseable statusObserver;
+    private final AutoCloseable signInObserver;
+    private final AutoCloseable callStateWatch;
     private final ContentObserver preferencesObserver;
     private volatile boolean closed;
 
@@ -86,10 +92,18 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
         this.overlayOrigin = "https://" + assetDomain;
         this.scriptSink = scriptSink;
         this.grants = new LargeBodyGrant(appContext.getCacheDir());
+        this.suitePolicy = AlphaSuitePolicyLoader.load(appContext);
         CloudRequestPolicy cloudPolicy = new CloudRequestPolicy(loadCloudRoutesJson(appContext));
         this.cloudRequests = cloudPolicy.loaded() ? new CloudRequests(cloudPolicy, grants) : null;
+        this.speechHost = new AlphaCoreSpeechHost(appContext, this::emitPluginEvent);
         this.statusObserver = AgentService.observe(() ->
             emitPluginEvent("ElizaAgent", "status", AgentService.status(appContext))
+        );
+        this.signInObserver = AlphaCorePluginDispatch.observeSignIn(appContext, receipt ->
+            emitPluginEvent("ElizaSignIn", "signInSettled", receipt)
+        );
+        this.callStateWatch = AlphaCorePluginDispatch.watchCallState(appContext, state ->
+            emitPluginEvent("AlphaCallState", "callState", state)
         );
         this.preferencesObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
             @Override public void onChange(boolean selfChange, Uri uri) {
@@ -163,11 +177,12 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
             + "  ]},"
             + "  { name: 'ElizaCloud', methods: ["
             + "   { name: 'request', rtype: 'promise' }, { name: 'cancel', rtype: 'promise' },"
-            + "   { name: 'readGrant', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "   { name: 'readGrant', rtype: 'promise' }, { name: 'openExternal', rtype: 'promise' },"
+            + "   { name: 'addListener' }, { name: 'removeListener' }"
             + "  ]},"
             + "  { name: 'ElizaSignIn', methods: ["
             + "   { name: 'status', rtype: 'promise' }, { name: 'serviceInfo', rtype: 'promise' },"
-            + "   { name: 'addListener' }, { name: 'removeListener' }"
+            + "   { name: 'openSignIn', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
             + "  ]},"
             + "  { name: 'AlphaPreferences', methods: ["
             + "   { name: 'get', rtype: 'promise' }, { name: 'set', rtype: 'promise' },"
@@ -183,6 +198,70 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
             + "   { name: 'setTouchableRegions', rtype: 'promise' }, { name: 'setFocusable', rtype: 'promise' },"
             + "   { name: 'dismiss', rtype: 'promise' }, { name: 'openAppIntent', rtype: 'promise' },"
             + "   { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaVoiceCloud', methods: ["
+            + "   { name: 'checkPermissions', rtype: 'promise' }, { name: 'requestPermissions', rtype: 'promise' },"
+            + "   { name: 'warmSpeechOutput', rtype: 'promise' }, { name: 'localSpeechStatus', rtype: 'promise' },"
+            + "   { name: 'releaseLocalSpeech', rtype: 'promise' }, { name: 'holdSpeechEngine', rtype: 'promise' },"
+            + "   { name: 'releaseSpeechEngineHold', rtype: 'promise' }, { name: 'liveCaptureStatus', rtype: 'promise' },"
+            + "   { name: 'startLiveCapture', rtype: 'promise' }, { name: 'stopLiveCapture', rtype: 'promise' },"
+            + "   { name: 'synthesizeLocal', rtype: 'promise' }, { name: 'play', rtype: 'promise' },"
+            + "   { name: 'setSpeechOutputMuted', rtype: 'promise' }, { name: 'stopPlayback', rtype: 'promise' },"
+            + "   { name: 'cancel', rtype: 'promise' }, { name: 'startRecording', rtype: 'promise' },"
+            + "   { name: 'stopRecording', rtype: 'promise' }, { name: 'getRecordingMetrics', rtype: 'promise' },"
+            + "   { name: 'cancelRecording', rtype: 'promise' }, { name: 'dictationForeground', rtype: 'promise' },"
+            + "   { name: 'transcribeLocalRecording', rtype: 'promise' }, { name: 'nativeVoiceTiming', rtype: 'promise' },"
+            + "   { name: 'markVoiceTurn', rtype: 'promise' }, { name: 'clearNativeVoiceTiming', rtype: 'promise' },"
+            + "   { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'ElizaCloudSpeech', methods: ["
+            + "   { name: 'checkPermissions', rtype: 'promise' }, { name: 'requestPermissions', rtype: 'promise' },"
+            + "   { name: 'prewarmCloudSpeech', rtype: 'promise' }, { name: 'cloudStreamTiming', rtype: 'promise' },"
+            + "   { name: 'startCloudSpeech', rtype: 'promise' }, { name: 'stopCloudSpeech', rtype: 'promise' },"
+            + "   { name: 'setCloudSpeechMuted', rtype: 'promise' }, { name: 'setCloudSpeechOutputMuted', rtype: 'promise' },"
+            + "   { name: 'speakCloudSpeech', rtype: 'promise' }, { name: 'cancelCloudSpeech', rtype: 'promise' },"
+            + "   { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'AlphaDevice', methods: ["
+            + "   { name: 'copyText', rtype: 'promise' }, { name: 'shareText', rtype: 'promise' },"
+            + "   { name: 'haptic', rtype: 'promise' }, { name: 'recommendedTimeout', rtype: 'promise' },"
+            + "   { name: 'setSystemBarAppearance', rtype: 'promise' }, { name: 'setAgentGoogleConsent', rtype: 'promise' },"
+            + "   { name: 'diagnosticsFacts', rtype: 'promise' }, { name: 'settingsFacts', rtype: 'promise' },"
+            + "   { name: 'snapshot', rtype: 'promise' }, { name: 'passwordProviderStatus', rtype: 'promise' },"
+            + "   { name: 'takeBillingReturn', rtype: 'promise' }, { name: 'textAsk', rtype: 'promise' },"
+            + "   { name: 'closeTextAsk', rtype: 'promise' }, { name: 'openAlphaOverlay', rtype: 'promise' },"
+            + "   { name: 'launchSiblingApp', rtype: 'promise' }, { name: 'finishTask', rtype: 'promise' },"
+            + "   { name: 'openSettings', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'ElizaSecureStore', methods: ["
+            + "   { name: 'status', rtype: 'promise' }, { name: 'get', rtype: 'promise' },"
+            + "   { name: 'set', rtype: 'promise' }, { name: 'remove', rtype: 'promise' },"
+            + "   { name: 'compareAndExchange', rtype: 'promise' }"
+            + "  ]},"
+            + "  { name: 'AlphaAssistantDraft', methods: ["
+            + "   { name: 'read', rtype: 'promise' }, { name: 'exchange', rtype: 'promise' }"
+            + "  ]},"
+            + "  { name: 'ElizaActionJournal', methods: ["
+            + "   { name: 'reserve', rtype: 'promise' }, { name: 'markApplying', rtype: 'promise' },"
+            + "   { name: 'finish', rtype: 'promise' }, { name: 'get', rtype: 'promise' },"
+            + "   { name: 'list', rtype: 'promise' }, { name: 'edit', rtype: 'promise' }"
+            + "  ]},"
+            + "  { name: 'ElizaNotifications', methods: ["
+            + "   { name: 'workflowPresentationCapabilities', rtype: 'promise' }, { name: 'status', rtype: 'promise' },"
+            + "   { name: 'list', rtype: 'promise' }, { name: 'crossAppStatus', rtype: 'promise' },"
+            + "   { name: 'pendingWorkflowTap', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
+            + "  ]},"
+            + "  { name: 'ElizaPasswords', methods: ["
+            + "   { name: 'status', rtype: 'promise' }"
+            + "  ]},"
+            + "  { name: 'ElizaSystem', methods: ["
+            + "   { name: 'getSystemFacts', rtype: 'promise' }, { name: 'getStatus', rtype: 'promise' },"
+            + "   { name: 'getBuildInfo', rtype: 'promise' }, { name: 'getDeviceSettings', rtype: 'promise' },"
+            + "   { name: 'openSettings', rtype: 'promise' }, { name: 'openSettingsPage', rtype: 'promise' },"
+            + "   { name: 'crashLog', rtype: 'promise' }, { name: 'clearCrashLog', rtype: 'promise' }"
+            + "  ]},"
+            + "  { name: 'AlphaCallState', methods: ["
+            + "   { name: 'callState', rtype: 'promise' }, { name: 'addListener' }, { name: 'removeListener' }"
             + "  ]}"
             + " ];"
             + " const pending = new Map();"
@@ -257,11 +336,28 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
         deliverEnvelope(envelope);
     }
 
+    void onSessionShow() {
+        speechHost.onOverlayShow();
+    }
+
+    void onSessionHide() {
+        speechHost.onOverlayHide();
+    }
+
     @Override public void close() {
         closed = true;
         AgentService.channel().abandon(owner);
+        speechHost.close();
         try {
             statusObserver.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            signInObserver.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            callStateWatch.close();
         } catch (Exception ignored) {
         }
         try {
@@ -292,12 +388,49 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
 
         switch (plugin) {
             case "ElizaAgent" -> handleAgent(callId, method, options);
-            case "ElizaCloud" -> handleCloud(callId, method, options);
-            case "ElizaSignIn" -> handleSignIn(callId, method);
+            case "ElizaCloud" -> {
+                if ("openExternal".equals(method)) {
+                    AlphaCorePluginDispatch.dispatch(
+                        appContext,
+                        suitePolicy,
+                        plugin,
+                        method,
+                        options,
+                        data -> resolveCall(callId, data),
+                        (code, msg) -> rejectCall(callId, code, msg)
+                    );
+                } else {
+                    handleCloud(callId, method, options);
+                }
+            }
             case "AlphaPreferences" -> handlePreferences(callId, method, options);
             case "AlphaContext" -> handleContext(callId, method);
             case "AlphaOverlayHost" -> handleOverlayHost(callId, method, options);
-            default -> rejectCall(callId, "UNIMPLEMENTED", "Plugin not available in overlay: " + plugin);
+            case "AlphaVoiceCloud", "ElizaCloudSpeech" -> speechHost.dispatch(
+                plugin,
+                method,
+                callId,
+                options,
+                data -> resolveCall(callId, data),
+                (code, msg) -> rejectCall(callId, code, msg)
+            );
+            default -> {
+                JSONObject finalOptions = options;
+                runWorker(callId, () -> {
+                    boolean handled = AlphaCorePluginDispatch.dispatch(
+                        appContext,
+                        suitePolicy,
+                        plugin,
+                        method,
+                        finalOptions,
+                        data -> resolveCall(callId, data),
+                        (code, msg) -> rejectCall(callId, code, msg)
+                    );
+                    if (!handled) {
+                        rejectCall(callId, "UNIMPLEMENTED", "Plugin not available in overlay: " + plugin);
+                    }
+                });
+            }
         }
     }
 
@@ -577,47 +710,6 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
             }
             resolveCall(callId, reply);
         });
-    }
-
-    private void handleSignIn(String callId, String method) {
-        CredentialReader reader = DeviceCustody.reader(appContext, BuildConfig.CLOUD_API_ORIGIN);
-        if ("status".equals(method)) {
-            CredentialReader.Credential active = reader.current();
-            CredentialPolicy.Account account = active != null ? active.account() : reader.account();
-            JSONObject out = new JSONObject();
-            try {
-                out.put("ok", true)
-                    .put("environment", "production")
-                    .put("state", active != null ? "ready" : "signed_out")
-                    .put("signedIn", active != null);
-                if (active != null) out.put("credentialId", active.credentialId());
-                if (account != null) {
-                    JSONObject accountObj = new JSONObject()
-                        .put("signedIn", active != null)
-                        .put("userId", account.userId())
-                        .put("organizationId", account.organizationId());
-                    if (active != null) {
-                        accountObj.put("credentialId", active.credentialId());
-                    }
-                    out.put("account", accountObj);
-                } else {
-                    out.put("account", new JSONObject().put("signedIn", false));
-                }
-            } catch (JSONException ignored) {
-            }
-            resolveCall(callId, out);
-            return;
-        }
-        if ("serviceInfo".equals(method)) {
-            JSONObject out = new JSONObject();
-            try {
-                out.put("ok", true).put("outcome", "ready").put("origin", BuildConfig.CLOUD_API_ORIGIN);
-            } catch (JSONException ignored) {
-            }
-            resolveCall(callId, out);
-            return;
-        }
-        rejectCall(callId, "RequiresCoreActivity", "Interactive sign-in runs inside AlphaCore");
     }
 
     private void handlePreferences(String callId, String method, JSONObject options) {

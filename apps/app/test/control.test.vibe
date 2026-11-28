@@ -5,7 +5,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { TestClock } from "effect/testing"
 import * as Control from "../gen/app__control.effect.vibe"
-import { approveControlLease, externalControl, reportControlOutcome, syncControlSnapshot, triggerControlKillSwitch } from "../src/control/control.vibe"
+import { ControlLeaseRequests, approveControlLease, approvePendingLeaseRequest, dismissPendingLeaseRequest, externalControl, reportControlOutcome, syncControlSnapshot, triggerControlKillSwitch } from "../src/control/control.vibe"
 import { agentAt } from "../src/platform/index.vibe"
 import { install, timeOver, whole } from "../src/runtime/index.vibe"
 
@@ -36,38 +36,57 @@ interface RecordedControlAgent {
   readonly layer: Layer.Layer<Control.Machine | Layer.Success<typeof externalControl>>
 }
 
+const INACTIVE_LEASE = {
+  leaseId: 0,
+  packageName: "",
+  maxOps: 0,
+  usedOps: 0,
+  expiresAtMs: 0,
+  status: "LeaseInactive" as "LeaseInactive" | "LeaseActive" | "LeaseRevoked",
+}
+
+function makeSnapshot(input: {
+  readonly tier?: "TierNone" | "TierAccessibility" | "TierPrivileged"
+  readonly capabilities?: string[]
+  readonly snapId?: number
+  readonly packageName?: string
+  readonly activityName?: string
+  readonly webUri?: string | null
+  readonly targetKind?: "AllowedApp" | "BlockedApp" | "NoTarget"
+  readonly protection?: "ScreenClear" | "ScreenLocked" | "SecureFlag" | "PrivateTab" | "SensitiveView"
+  readonly observedAtMs: number
+  readonly lease?: typeof INACTIVE_LEASE
+  readonly lastResult?: "done" | "refused" | "preempted"
+  readonly killed?: boolean
+}) {
+  return {
+    tier: input.tier ?? "TierAccessibility",
+    capabilities: input.capabilities ?? ["ui.observe.v1", "ui.act.v1"],
+    foreground: {
+      snapId: input.snapId ?? 1,
+      packageName: input.packageName ?? "org.mozilla.firefox",
+      activityName: input.activityName ?? "org.mozilla.fenix.HomeActivity",
+      webUri: input.webUri === undefined ? "https://example.com" : input.webUri,
+      targetKind: input.targetKind ?? "AllowedApp",
+      protection: input.protection ?? "ScreenClear",
+      windowCount: 1,
+      observedAtMs: input.observedAtMs,
+    },
+    lease: input.lease ?? INACTIVE_LEASE,
+    pending: null,
+    lastResult: input.lastResult ?? "done",
+    killed: input.killed ?? false,
+  }
+}
+
 function makeControlHarness(startMs = 1_000): RecordedControlAgent {
   const leases: Array<{ readonly packageName: string; readonly maxOps: number; readonly durationMs: number }> = []
   const stops: Array<{ readonly reason: string }> = []
   let nextLeaseId = 1
   let killed = false
-  let lease = {
-    leaseId: 0,
-    packageName: "",
-    maxOps: 0,
-    usedOps: 0,
-    expiresAtMs: 0,
-    status: "LeaseInactive" as "LeaseInactive" | "LeaseActive" | "LeaseRevoked",
-  }
+  let lease = { ...INACTIVE_LEASE }
 
-  const stateWire = () => ({
-    tier: "TierAccessibility" as const,
-    capabilities: ["ui.observe.v1", "ui.act.v1"],
-    foreground: {
-      snapId: 1,
-      packageName: "org.mozilla.firefox",
-      activityName: "org.mozilla.fenix.HomeActivity",
-      webUri: "https://example.com",
-      targetKind: "AllowedApp" as const,
-      protection: "ScreenClear" as const,
-      windowCount: 1,
-      observedAtMs: startMs,
-    },
-    lease,
-    pending: null,
-    lastResult: "done" as const,
-    killed,
-  })
+  const stateWire = () => makeSnapshot({ observedAtMs: startMs, lease, killed })
 
   const http = Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) => sync(() => {
     const pathname = pathOf(request.url)
@@ -123,24 +142,7 @@ describe("External app control shell journey", () => {
     provide harness.layer {
       const machine = try Control.Machine
 
-      try syncControlSnapshot({
-        tier: "TierAccessibility",
-        capabilities: ["ui.observe.v1", "ui.act.v1"],
-        foreground: {
-          snapId: 1,
-          packageName: "org.mozilla.firefox",
-          activityName: "org.mozilla.fenix.HomeActivity",
-          webUri: "https://example.com",
-          targetKind: "AllowedApp",
-          protection: "ScreenClear",
-          windowCount: 1,
-          observedAtMs: 1_000,
-        },
-        lease: { leaseId: 0, packageName: "", maxOps: 0, usedOps: 0, expiresAtMs: 0, status: "LeaseInactive" },
-        pending: null,
-        lastResult: "done",
-        killed: false,
-      }, appIdOf)
+      try syncControlSnapshot(makeSnapshot({ observedAtMs: 1_000 }), appIdOf)
 
       const granted = try approveControlLease({
         packageName: "org.mozilla.firefox",
@@ -167,24 +169,13 @@ describe("External app control shell journey", () => {
       expect(finished).toBe(true)
       expect((try machine.get()).pending.active).toBe(false)
 
-      try syncControlSnapshot({
-        tier: "TierAccessibility",
-        capabilities: ["ui.observe.v1", "ui.act.v1"],
-        foreground: {
-          snapId: 2,
-          packageName: "org.mozilla.firefox",
-          activityName: "org.mozilla.fenix.HomeActivity",
-          webUri: null,
-          targetKind: "AllowedApp",
-          protection: "PrivateTab",
-          windowCount: 1,
-          observedAtMs: 1_500,
-        },
+      try syncControlSnapshot(makeSnapshot({
+        snapId: 2,
+        webUri: null,
+        protection: "PrivateTab",
+        observedAtMs: 1_500,
         lease: { leaseId: 1, packageName: "org.mozilla.firefox", maxOps: 3, usedOps: 1, expiresAtMs: 61_000, status: "LeaseActive" },
-        pending: null,
-        lastResult: "done",
-        killed: false,
-      }, appIdOf)
+      }), appIdOf)
 
       const onPrivateTab = try machine.get()
       expect(onPrivateTab.foreground.protection).toBe("PrivateTab")
@@ -207,24 +198,11 @@ describe("External app control shell journey", () => {
     const harness = makeControlHarness(2_000)
     provide harness.layer {
       const machine = try Control.Machine
-      try syncControlSnapshot({
+      try syncControlSnapshot(makeSnapshot({
         tier: "TierPrivileged",
         capabilities: ["ui.observe.v1", "ui.act.v1", "input.inject.v1"],
-        foreground: {
-          snapId: 1,
-          packageName: "org.mozilla.firefox",
-          activityName: "org.mozilla.fenix.HomeActivity",
-          webUri: "https://example.com",
-          targetKind: "AllowedApp",
-          protection: "ScreenClear",
-          windowCount: 1,
-          observedAtMs: 2_000,
-        },
-        lease: { leaseId: 0, packageName: "", maxOps: 0, usedOps: 0, expiresAtMs: 0, status: "LeaseInactive" },
-        pending: null,
-        lastResult: "done",
-        killed: false,
-      }, appIdOf)
+        observedAtMs: 2_000,
+      }), appIdOf)
       try approveControlLease({
         packageName: "org.mozilla.firefox",
         appId: 1,
@@ -235,29 +213,45 @@ describe("External app control shell journey", () => {
       try machine.send({ type: "dispatch", opId: 1, op: "OpSetText", snapId: 1, appId: 1, now: 2_000 }, "Agent")
       expect((try machine.get()).pending.active).toBe(true)
 
-      try syncControlSnapshot({
+      try syncControlSnapshot(makeSnapshot({
         tier: "TierPrivileged",
         capabilities: ["ui.observe.v1", "ui.act.v1", "input.inject.v1"],
-        foreground: {
-          snapId: 2,
-          packageName: "com.android.systemui",
-          activityName: "Keyguard",
-          webUri: null,
-          targetKind: "BlockedApp",
-          protection: "ScreenLocked",
-          windowCount: 1,
-          observedAtMs: 2_500,
-        },
+        snapId: 2,
+        packageName: "com.android.systemui",
+        activityName: "Keyguard",
+        webUri: null,
+        targetKind: "BlockedApp",
+        protection: "ScreenLocked",
+        observedAtMs: 2_500,
         lease: { leaseId: 1, packageName: "org.mozilla.firefox", maxOps: 2, usedOps: 1, expiresAtMs: 32_000, status: "LeaseActive" },
-        pending: null,
         lastResult: "preempted",
-        killed: false,
-      }, appIdOf)
+      }), appIdOf)
 
       const locked = try machine.get()
       expect(locked.pending.active).toBe(false)
       expect(locked.lease.status).toBe("LeaseRevoked")
       expect(locked.lastResult).toBe("OutcomePreempted")
+    }
+  })
+
+  // spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"
+  it.effect('tracks pending lease requests for owner approval or dismissal (spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease")', () => effect {
+    try TestClock.setTime(3_000)
+    const harness = makeControlHarness(3_000)
+    provide harness.layer {
+      const requests = try ControlLeaseRequests
+      try syncControlSnapshot(makeSnapshot({ observedAtMs: 3_000 }), appIdOf)
+      try requests.set({ packageName: "org.mozilla.firefox", requestedOp: "ui_click", requestedAt: 3_000 })
+      expect(requests.snapshot()?.packageName).toBe("org.mozilla.firefox")
+
+      try dismissPendingLeaseRequest()
+      expect(requests.snapshot()).toBeUndefined()
+
+      try requests.set({ packageName: "org.mozilla.firefox", requestedOp: "ui_click", requestedAt: 3_500 })
+      const granted = try approvePendingLeaseRequest(4, 30_000)
+      expect(granted?.leaseId).toBe(1)
+      expect(granted?.maxOps).toBe(4)
+      expect(requests.snapshot()).toBeUndefined()
     }
   })
 })

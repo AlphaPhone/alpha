@@ -1,24 +1,64 @@
 // spec/app/control/index.md, "Story: Control a third-party app within an owner-approved lease"; spec/app/control/index.md, "The kill-switch immediately revokes any active lease, clears any in-flight operation, and signals the native bridge and overlay"
 import { Banner, Button, StatusDot } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
+import { useMemo, useSyncExternalStore } from "react";
 import type { Machine as ControlMachine } from "../../gen/app__control.effect.vibe";
 import { useMachine } from "../../gen/app__control.react.ts";
 import type { Alpha } from "../runtime/ui.tsx";
-import { type ExternalControl, externalControl, triggerControlKillSwitch } from "./control.vibe";
+import {
+  type ControlLeaseRequests,
+  ControlLeaseRequests as LeaseRequestsService,
+  type ExternalControl,
+  approvePendingLeaseRequest,
+  dismissPendingLeaseRequest,
+  externalControl,
+  triggerControlKillSwitch,
+} from "./control.vibe";
 
 export interface ControlBannerProps {
   /** Runtime providing the external-app control machine and resident agent control client. */
-  readonly runtime: ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl, unknown>;
+  readonly runtime: ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl | ControlLeaseRequests, unknown>;
 }
 
 /**
- * Compact system-overlay kill-switch banner showing when Alpha holds an active third-party app
- * control lease or in-flight UI operation, with an immediate owner Stop action.
+ * Compact system-overlay banner showing pending owner control lease approvals and active
+ * third-party app control leases with an immediate Stop kill-switch.
  * @model spec/app/control/index.md
  */
 export function ControlBanner({ runtime }: ControlBannerProps) {
   const { state, can } = useMachine(runtime);
-  if (state === undefined || (state.lease.status !== "LeaseActive" && !state.pending.active)) return null;
+  const requests = useMemo(() => runtime.runSync(LeaseRequestsService), [runtime]);
+  const pendingRequest = useSyncExternalStore(requests.subscribe, requests.snapshot, requests.snapshot);
+  if (state === undefined) return null;
+  if (state.lease.status !== "LeaseActive" && !state.pending.active) {
+    if (pendingRequest === undefined) return null;
+    const approve = () => {
+      void runtime.runPromise(approvePendingLeaseRequest());
+    };
+    const dismiss = () => {
+      void runtime.runPromise(dismissPendingLeaseRequest());
+    };
+    return (
+      <Banner
+        data-alpha-control-lease-request=""
+        variant="info"
+        aria-label="Approve external app control"
+        action={
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" onClick={dismiss}>Dismiss</Button>
+            <Button variant="primary" size="sm" onClick={approve}>Approve</Button>
+          </div>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <StatusDot status="busy" label="Approval requested" />
+          <span className="truncate text-sm font-medium text-foreground">
+            Allow Alpha in {pendingRequest.packageName}
+          </span>
+        </div>
+      </Banner>
+    );
+  }
   const busy = state.pending.active;
   const canStop = can({ type: "killSwitch" }, "Owner");
   const steps = `${state.lease.usedOps}/${state.lease.maxOps}`;
@@ -43,7 +83,7 @@ export function ControlBanner({ runtime }: ControlBannerProps) {
   );
 }
 
-const controlRuntimes = new WeakMap<Alpha, ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl, unknown>>();
+const controlRuntimes = new WeakMap<Alpha, ManagedRuntime.ManagedRuntime<ControlMachine | ExternalControl | ControlLeaseRequests, unknown>>();
 
 function controlRuntimeFor(alpha: Alpha) {
   const existing = controlRuntimes.get(alpha);

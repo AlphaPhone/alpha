@@ -1,5 +1,6 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import type { View } from "../gen/app__shell.ts";
+import { viewOrder } from "./shell/order.ts";
 
 /** Runtime surface mode: the full monolith launcher, the system-wide Ask Alpha overlay, or one standalone app view. */
 export type AlphaSurface =
@@ -7,30 +8,8 @@ export type AlphaSurface =
   | { readonly mode: "overlay" }
   | { readonly mode: "app"; readonly view: View };
 
-/** Authoritative set of built-in app views admitted as standalone surfaces. */
-const VIEW_INDEX = {
-  Phone: true,
-  Messages: true,
-  Inbox: true,
-  Telegram: true,
-  Slack: true,
-  Calendar: true,
-  Clock: true,
-  Reminders: true,
-  Browser: true,
-  Camera: true,
-  Photos: true,
-  Maps: true,
-  Notes: true,
-  Contacts: true,
-  Files: true,
-  Workflows: true,
-  Wallet: true,
-  Settings: true,
-} as const satisfies Record<View, true>;
-
 /** Every built-in view name in canonical casing. */
-export const SURFACE_VIEWS: readonly View[] = Object.keys(VIEW_INDEX) as View[];
+export const SURFACE_VIEWS: readonly View[] = viewOrder;
 
 const VIEW_BY_LOWER = new Map<string, View>(
   SURFACE_VIEWS.map((view) => [view.toLowerCase(), view]),
@@ -39,7 +18,7 @@ const VIEW_BY_LOWER = new Map<string, View>(
 const COMMS_VIEWS: ReadonlySet<View> = new Set<View>(["Phone", "Messages", "Contacts"]);
 const OCR_VIEWS: ReadonlySet<View> = new Set<View>(["Camera", "Files"]);
 
-/** Parse an untrusted view name into a validated `View`, matching canonical or lowercase spelling. */
+/** Parse an untrusted view name into a validated `View`, matching canonical or lowercase spelling. @throws {never} */
 export function parseView(raw: string | null | undefined): View | undefined {
   if (raw === null || raw === undefined) return undefined;
   const trimmed = raw.trim();
@@ -54,7 +33,7 @@ export interface SurfaceInputs {
   readonly search?: string;
 }
 
-/** Resolve the active `AlphaSurface`; defaults to `{ mode: "monolith" }` when unset or invalid. */
+/** Resolve the active `AlphaSurface`; defaults to `{ mode: "monolith" }` when unset or invalid. @throws {never} */
 export function parseSurface({ envSurface, envView, search }: SurfaceInputs): AlphaSurface {
   const normalizedEnv = envSurface?.trim().toLowerCase();
   if (normalizedEnv === "overlay") return { mode: "overlay" };
@@ -74,7 +53,7 @@ export function parseSurface({ envSurface, envView, search }: SurfaceInputs): Al
   return { mode: "monolith" };
 }
 
-/** Resolve the active surface for the current page from Vite env and `location.search`. */
+/** Resolve the active surface for the current page from Vite env and `location.search`. @throws {never} */
 export function currentSurface(): AlphaSurface {
   const meta = import.meta as unknown as { readonly env?: Record<string, unknown> };
   const env = meta.env;
@@ -84,7 +63,7 @@ export function currentSurface(): AlphaSurface {
   return parseSurface({ envSurface, envView, search });
 }
 
-/** Lock key scoped to `surface` so multi-surface tabs do not contend with one another. */
+/** Lock key scoped to `surface` so multi-surface tabs do not contend with one another. @throws {never} */
 export function lockNameFor(surface: AlphaSurface): string {
   switch (surface.mode) {
     case "monolith":
@@ -96,7 +75,7 @@ export function lockNameFor(surface: AlphaSurface): string {
   }
 }
 
-/** Whether `surface` requires offline OCR assets (`monolith`, `Camera`, and `Files` only). */
+/** Whether `surface` requires offline OCR assets (`monolith`, `Camera`, and `Files` only). @throws {never} */
 export function needsLocalOcr(surface: AlphaSurface): boolean {
   switch (surface.mode) {
     case "monolith":
@@ -108,7 +87,7 @@ export function needsLocalOcr(surface: AlphaSurface): boolean {
   }
 }
 
-/** Whether a mount at `place` belongs to `surface`. */
+/** Whether a mount at `place` belongs to `surface`. @throws {never} */
 export function allowsPlace(surface: AlphaSurface, place: string): boolean {
   switch (surface.mode) {
     case "monolith":
@@ -116,14 +95,14 @@ export function allowsPlace(surface: AlphaSurface, place: string): boolean {
     case "overlay":
       return place === "assistant" || place === "assistant/calendar" || place === "overlay" || place === "notice";
     case "app":
-      if (place === `view:${surface.view}` || place === "notice") return true;
+      if (place === `view:${surface.view}` || place === "overlay" || place === "notice") return true;
       if (place === "phone/stage") return COMMS_VIEWS.has(surface.view);
       if (place.startsWith("settings/")) return surface.view === "Settings";
       return false;
   }
 }
 
-/** Filter `all` screen mounts to the subset belonging to `surface`, preserving order and reference identity in monolith mode. */
+/** Filter `all` screen mounts to the subset belonging to `surface`, preserving order and reference identity in monolith mode. @throws {never} */
 export function mountsFor<T extends { readonly at: string }>(surface: AlphaSurface, all: readonly T[]): readonly T[] {
   if (surface.mode === "monolith") return all;
   return all.filter((mount) => allowsPlace(surface, mount.at));

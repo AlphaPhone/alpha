@@ -5,6 +5,7 @@ import ai.alphacompute.alphaphone.ipc.AlphaSuitePolicyLoader;
 import ai.alphacompute.control.AlphaControlPolicy;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
+import ai.alphacompute.ipc.IAlphaActionCallback;
 import android.app.ActivityOptions;
 import android.app.KeyguardManager;
 import android.app.assist.AssistContent;
@@ -28,6 +29,8 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -48,8 +51,11 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
     private final Object regionsLock = new Object();
     private final List<Rect> touchableRects = new ArrayList<>();
 
+    private record InsetsSnapshot(int top, int bottom, boolean keyboard) {}
+
     private FrameLayout container;
     private WebView attachedWebView;
+    private volatile InsetsSnapshot lastInsets;
     private volatile boolean overlayFocusable;
 
     public AlphaVoiceInteractionSession(Context context, AlphaVoiceInteractionSessionService.WarmOverlayWebViewPool webViewPool) {
@@ -72,6 +78,22 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
         ));
         container = root;
         configureOverlayWindow();
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, incoming) -> {
+            var bars = incoming.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            float density = getContext().getResources().getDisplayMetrics().density;
+            if (!Float.isFinite(density) || density <= 0f) density = 1f;
+            InsetsSnapshot measured = new InsetsSnapshot(
+                Math.round(bars.top / density),
+                Math.round(bars.bottom / density),
+                incoming.isVisible(WindowInsetsCompat.Type.ime())
+            );
+            if (!measured.equals(lastInsets)) {
+                lastInsets = measured;
+                webViewPool.publishInsets(measured.top(), measured.bottom(), measured.keyboard());
+            }
+            return ViewCompat.onApplyWindowInsets(view, incoming);
+        });
+        ViewCompat.requestApplyInsets(root);
         return root;
     }
 
@@ -80,6 +102,11 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
         AlphaOverlayHostPlugin.attachHost(this);
         configureOverlayWindow();
         applyFocusableFlag(overlayFocusable);
+        webViewPool.onSessionShow();
+        InsetsSnapshot snapshot = lastInsets;
+        if (snapshot != null) {
+            webViewPool.publishInsets(snapshot.top(), snapshot.bottom(), snapshot.keyboard());
+        }
 
         JSONObject showDetail = new JSONObject();
         try {
@@ -108,6 +135,7 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
         overlayFocusable = false;
         applyFocusableFlag(false);
         AlphaOverlayHostPlugin.detachHost(this);
+        webViewPool.onSessionHide();
         webViewPool.dispatchWindowEvent("alpha-overlay-hide", new JSONObject());
         super.onHide();
     }
@@ -238,6 +266,24 @@ public final class AlphaVoiceInteractionSession extends VoiceInteractionSession 
             .putExtra(AlphaIpcContract.EXTRA_NONCE, UUID.randomUUID().toString());
         if (claimId != null && !claimId.isEmpty()) {
             intent.putExtra(AlphaIpcContract.EXTRA_CLAIM_ID, claimId);
+            IAlphaActionCallback.Stub callback = new IAlphaActionCallback.Stub() {
+                @Override public void onResult(String id, boolean switched, String resultJson, String errorCode) {
+                    JSONObject receipt = new JSONObject();
+                    try {
+                        receipt.put("claimId", id == null ? claimId : id)
+                            .put("switched", switched)
+                            .put("resultJson", resultJson == null ? JSONObject.NULL : resultJson)
+                            .put("errorCode", errorCode == null ? "" : errorCode);
+                    } catch (JSONException ignored) {
+                        return;
+                    }
+                    AlphaOverlayHostPlugin.emitActionResult(receipt);
+                    webViewPool.emitActionResult(receipt);
+                }
+            };
+            Bundle callbackExtras = new Bundle();
+            callbackExtras.putBinder(AlphaIpcContract.EXTRA_CALLBACK, callback.asBinder());
+            intent.putExtras(callbackExtras);
         }
         if (payloadJson != null && !payloadJson.isEmpty()) {
             intent.putExtra(AlphaIpcContract.EXTRA_PAYLOAD, payloadJson);

@@ -1,6 +1,9 @@
 package ai.alphacompute.alphaphone.overlay;
 
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.graphics.Rect;
+import android.os.UserManager;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -46,8 +49,25 @@ public final class AlphaOverlayHostPlugin extends Plugin {
         return activeHost.get();
     }
 
+    /** Whether an active Ask Alpha overlay session is currently attached on an unlocked device. */
+    public static boolean isOverlayForeground(Context context) {
+        if (context == null || activeHost.get() == null) return false;
+        KeyguardManager lock = context.getSystemService(KeyguardManager.class);
+        UserManager users = context.getSystemService(UserManager.class);
+        return lock != null && users != null && users.isUserUnlocked() && !lock.isDeviceLocked() && !lock.isKeyguardLocked();
+    }
+
+    /** Broadcasts an asynchronous cross-app action callback receipt to mounted {@code AlphaOverlayHost} listeners. */
+    public static void emitActionResult(JSONObject payload) {
+        broadcastEvent("actionResult", payload);
+    }
+
     /** Broadcasts captured Assist context metadata to all mounted {@code AlphaOverlayHost} Capacitor listeners. */
     public static void emitAssistContext(JSONObject payload) {
+        broadcastEvent("assistContext", payload);
+    }
+
+    private static void broadcastEvent(String eventName, JSONObject payload) {
         JSObject event;
         try {
             event = payload == null ? new JSObject() : JSObject.fromJSONObject(payload);
@@ -59,7 +79,7 @@ public final class AlphaOverlayHostPlugin extends Plugin {
             if (instance == null) {
                 INSTANCES.remove(ref);
             } else {
-                instance.notifyListeners("assistContext", event);
+                instance.notifyListeners(eventName, event);
             }
         }
     }

@@ -1,8 +1,10 @@
 package ai.alphacompute.alphaphone.overlay;
 
 import ai.alphacompute.alphaphone.BuildConfig;
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
@@ -15,6 +17,8 @@ import android.service.voice.VoiceInteractionSessionService;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -109,6 +113,37 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
             }
         }
 
+        void emitActionResult(JSONObject payload) {
+            AlphaOverlayCapacitorBridge bridge = capacitorBridge;
+            if (bridge != null) {
+                bridge.emitPluginEvent("AlphaOverlayHost", "actionResult", payload);
+            }
+            dispatchWindowEvent("alpha-action-result", payload);
+        }
+
+        void publishInsets(int top, int bottom, boolean keyboard) {
+            evaluateScript("(() => { const root = document.documentElement; if (!root) return;"
+                + " const detail = { top:" + top + ", bottom:" + bottom + ", keyboard:" + keyboard + " };"
+                + " root.style.setProperty('--alpha-native-inset-top', detail.top + 'px');"
+                + " root.style.setProperty('--alpha-native-inset-bottom', detail.bottom + 'px');"
+                + " root.dataset.alphaNativeKeyboard = String(detail.keyboard);"
+                + " window.dispatchEvent(new CustomEvent('alpha-insets', { detail })); })()");
+        }
+
+        void onSessionShow() {
+            AlphaOverlayCapacitorBridge bridge = capacitorBridge;
+            if (bridge != null) {
+                bridge.onSessionShow();
+            }
+        }
+
+        void onSessionHide() {
+            AlphaOverlayCapacitorBridge bridge = capacitorBridge;
+            if (bridge != null) {
+                bridge.onSessionHide();
+            }
+        }
+
         private void evaluateScript(String script) {
             if (script == null || script.isEmpty()) return;
             mainHandler.post(() -> {
@@ -145,10 +180,29 @@ public final class AlphaVoiceInteractionSessionService extends VoiceInteractionS
             WebSettings settings = webView.getSettings();
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
+            settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
             settings.setAllowFileAccess(false);
             settings.setAllowContentAccess(false);
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+
+            webView.setWebChromeClient(new WebChromeClient() {
+                @Override public void onPermissionRequest(PermissionRequest request) {
+                    if (request == null || !isOverlayOrigin(request.getOrigin())) {
+                        if (request != null) request.deny();
+                        return;
+                    }
+                    List<String> granted = new ArrayList<>();
+                    for (String resource : request.getResources()) {
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)
+                            && appContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            granted.add(resource);
+                        }
+                    }
+                    if (granted.isEmpty()) request.deny();
+                    else request.grant(granted.toArray(new String[0]));
+                }
+            });
 
             capacitorBridge = AlphaOverlayCapacitorBridge.attach(
                 appContext,
