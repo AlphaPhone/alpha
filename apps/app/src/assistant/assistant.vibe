@@ -48,7 +48,7 @@ import { MailQuestions, reviewedMail, type MailQuestion } from "../inbox/mail-co
 import { MessagingBridge, type MessagingBridgeApi, type MessagingPlatform, boundedMessagingContext } from "../messaging/bridge.vibe"
 import { type Job, answer, applying, asides, contained, filledStore, following, reacting, run, started, stream, together, untimed, withFields, withoutFields } from "../runtime/index.vibe"
 import { Time } from "../runtime/index.vibe"
-import { type SpokenChatContext, type SpokenChatLease, VoiceWords } from "../voice/voice.vibe"
+import { type SpokenChatContext, type SpokenChatLease, type TalkTurnGuard, VoiceWords, noteTalkTurn } from "../voice/voice.vibe"
 import { FileContext, documentObservation } from "./file-context.vibe"
 import { MapsContext } from "./maps-context.vibe"
 import { MediaReview, mediaReview, noted, ranDirect, standing } from "./media-review.vibe"
@@ -411,15 +411,30 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
   const chats = try Chats.Machine
   const composer = try Composer.Machine
   const conversation = try Conversation.Machine
+  const refused = (guard: TalkTurnGuard) => effect {
+    try noteTalkTurn(guard, session, turn)
+    return undefined
+  }
   const seat = board.draftSeat
-  if (seat === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  const heldBack = effect {
+    if (seat === undefined || seat !== board.draftSeat) return "NoSeat" as const
+    if (!(try current)) return "TurnRetired" as const
+    return (try ownsSeat(board, seat)) ? undefined : "NoSeat" as const
+  }
+  const unseated = try heldBack
+  if (seat === undefined || unseated !== undefined) return try refused(unseated ?? "NoSeat")
   const boardChanges = Stream.callback<void>((queue) => acquireRelease(
     sync(() => board.subscribe(() => { Queue.offerUnsafe(queue, undefined) })),
     (off) => sync(off),
   ))
   const retiredSeat = Stream.filter(Stream.concat(Stream.succeed(undefined), boardChanges), () => board.draftSeat !== seat)
-  const started = try chats.get()
-  if (Chats.making(started) || Conversation.inFlight((try conversation.get()).turn)) return undefined
+  // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"
+  const free = Stream.filter(Stream.zipLatest(chats.changes, conversation.changes), ([page, asked]) => !Chats.making(page) && !Conversation.inFlight(asked.turn))
+  const settled = try Effect.raceFirst(Effect.map(Stream.runHead(free), Option.map(([page]) => page)), Effect.as(Stream.runHead(retiredSeat), Option.none<Chats.Chats>()))
+  if (Option.isNone(settled)) return try refused("NoSeat")
+  const moved = try heldBack
+  if (moved !== undefined) return try refused(moved)
+  const started = settled.value
   let chosen = started.chosen
   if (chosen === 0) {
     const empty = (writing: Composer.Composer) =>
@@ -427,25 +442,27 @@ effect function spokenChat(session: number, turn: number, current: boolean!!): (
       && writing.away === "Free" && !writing.unsettled && writing.draft.sync === "Kept" && !Composer.content(writing.editor)
       && !Composer.attached(writing.editor) && board.snapshot().typed === "" && board.sendWhenMade === 0
       && board.waitingRequest === undefined && board.postingRequest === undefined
-    if (!empty(try composer.get())) return undefined
+    if (!empty(try composer.get())) return try refused("DraftInBlankChat")
     const begin = { type: "start", replying: false, holding: false } as const
     if (seat !== board.draftSeat || !(try current) || !(try contained(chats.send(begin, (live) =>
-      live.chosen === 0 && live.make.id === started.make.id && seat === board.draftSeat && empty(Effect.runSync(composer.get()))), "starting a chat for Talk"))) return undefined
+      live.chosen === 0 && live.make.id === started.make.id && seat === board.draftSeat && empty(Effect.runSync(composer.get()))), "starting a chat for Talk"))) return try refused("ChatNotMade")
     const ticket = started.make.id + 1
     const made = Stream.runHead(Stream.filter(chats.changes, (live) =>
       live.make.id > ticket || (live.make.id === ticket && !Chats.making(live))))
     const answer = try Effect.raceFirst(made, Effect.as(Stream.runHead(retiredSeat), Option.none<Chats.Chats>()))
-    if (Option.isNone(answer) || answer.value.make.id !== ticket || answer.value.make.outcome !== "Confirmed") return undefined
+    if (Option.isNone(answer) || answer.value.make.id !== ticket || answer.value.make.outcome !== "Confirmed") return try refused("ChatNotMade")
     chosen = answer.value.chosen
   }
   const record = board.known(chosen)?.record
-  if (record === undefined || !(try current) || !(try ownsSeat(board, seat))) return undefined
+  if (record === undefined) return try refused("RecordMissing")
+  const lost = try heldBack
+  if (lost !== undefined) return try refused(lost)
   const selected = effect {
     const live = try chats.get()
     const now = board.known(live.chosen)?.record
     return board.draftSeat === seat && live.chosen === chosen && now?.id === record.id && now?.roomId === record.roomId
   }
-  if (!(try selected)) return undefined
+  if (!(try selected)) return try refused("SelectionMoved")
   const retired = Stream.filterEffect(
     Stream.merge(Stream.succeed(undefined), Stream.merge(boardChanges, Stream.as(chats.changes, undefined))),
     () => Effect.map(selected, (matches) => !matches),

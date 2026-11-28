@@ -1100,6 +1100,100 @@ describe("Talk from Ask Alpha's composer (spec/app/voice/index.md, \"Story: Hold
     await talksAgain(world, alpha, area);
   });
 
+  // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"; spec/app/voice/index.md, "A stop that could not be confirmed keeps voice closed until the microphone and speech are confirmed off"
+  it("sends the first turn heard after a stop in the middle of a turn that could not be confirmed, once voice recovers", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await talkingOnComposer(world);
+    world.ask.acknowledgment = "Let me look.";
+    world.ask.holdAfterTools = true;
+    speakUtterance(world, "Take your time");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Speaking" && state.mic === "On");
+    world.voice.liveCaptureReleaseFails = true;
+    await press("Open conversation");
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.latched);
+    world.ask.acknowledgment = undefined;
+    world.voice.liveCaptureReleaseFails = false;
+    await drawn(() => advance(area, Voice.releaseAgainMs));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => !state.latched);
+    await talksAgain(world, alpha, area);
+    const spokenBefore = world.voice.spoken.length;
+    const { sent } = await area.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.get()));
+    speakUtterance(world, "Are you there");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.sent > sent && state.turn > state.sent);
+    expect([world.ask.said, world.voice.spoken.slice(spokenBefore).map(({ text }) => text)]).toEqual([["Take your time", "Are you there"], ["You said, Are you there"]]);
+  });
+
+  // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"; spec/app/voice/index.md, "The owner speaking over Alpha interrupts it and starts the next turn, but Alpha's own voice never does"
+  it("sends a turn the owner says over Alpha once, after the turn it interrupted has let go of the agent", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await talkingOnComposer(world);
+    world.ask.acknowledgment = "Let me think of one.";
+    world.ask.holdAfterTools = true;
+    world.ask.holdAborts = true;
+    world.ask.nextReplyChunks = ["Once there was a lighthouse."];
+    speakUtterance(world, "Tell me a story");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Speaking" && state.mic === "On" && state.queued > 0);
+    world.voice.emitLocal?.("liveCaptureBargeIn", { captureId: world.voice.activeMicSession });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.heard);
+    world.ask.acknowledgment = undefined;
+    world.ask.nextReplyChunks = ["It is noon."];
+    const spokenBefore = world.voice.spoken.length;
+    speakUtterance(world, "What time is it");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Thinking" && state.sent === state.turn);
+    for (let turn = 0; turn < 30; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    expect(world.ask.said).toEqual(["Tell me a story"]);
+
+    world.ask.holdAborts = false;
+    await drawn(() => { for (const release of world.ask.heldAborts.splice(0)) release(); });
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.turn > state.sent && state.sent > 1);
+    expect([world.ask.said, world.voice.spoken.slice(spokenBefore).map(({ text }) => text)]).toEqual([["Tell me a story", "What time is it"], ["It is noon."]]);
+  });
+
+  // spec/app/voice/index.md, "A heard turn waits for the send in hand, is sent once after it, and is given up quietly only after 30 s"
+  it("sends a turn heard while a typed message is still reaching the agent once, after it, and gives one up quietly only after 30 s", async () => {
+    const world = { ...scene(), phone: true, signedIn: false };
+    const { alpha, area } = await onComposer(world);
+    await drawnUntil(alpha, area, Conversation, (state) => state.ready && state.observing);
+    await drawnUntil(alpha, area, Composer, (state) => state.slot === "Open" && state.binding.owner > 0);
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.warmed);
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, listening);
+    world.ask.holdAfterTools = true;
+    await fill("Message Alpha", "Typed first");
+    await press("Send");
+    await settleComposer(alpha, () => world.ask.turns.size === 1);
+    speakUtterance(world, "Spoken second");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Thinking" && state.sent === state.turn);
+    for (let turn = 0; turn < 30; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    expect([world.ask.said, world.voice.spoken]).toEqual([["Typed first"], []]);
+
+    await drawn(() => [...world.ask.turns.values()][0]?.());
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.turn > state.sent && state.sent > 0);
+    expect([world.ask.said, world.voice.spoken.map(({ text }) => text)]).toEqual([["Typed first", "Spoken second"], ["You said, Spoken second"]]);
+    expect(world.ask.kept.get("c1")?.messages.filter(({ role }) => role === "user").map(({ text }) => text)).toEqual(["Typed first", "Spoken second"]);
+
+    await press("Stop voice conversation");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Idle");
+    await press("Talk");
+    await drawnUntil(alpha, area, Voice.Machine, listening);
+    world.ask.holdAfterTools = true;
+    await fill("Message Alpha", "Typed again");
+    await press("Send");
+    await settleComposer(alpha, () => world.ask.turns.size === 1);
+    speakUtterance(world, "Never sent");
+    await drawnUntil(alpha, area, Voice.Machine, (state) => state.phase === "Thinking");
+    await drawn(() => advance(area, Voice.spokenTurnWaitMs - 1));
+    expect((await area.runPromise(Effect.flatMap(Voice.Machine, (machine) => machine.get()))).phase).toBe("Thinking");
+    await drawn(() => advance(area, 1));
+    await drawnUntil(alpha, area, Voice.Machine, (state) => listening(state) && state.turn > state.sent);
+    await drawn(() => [...world.ask.turns.values()][0]?.());
+    await drawnUntil(alpha, area, Conversation, (state) => state.turn.reply === "Complete");
+    for (let turn = 0; turn < 30; turn += 1) await drawn(() => alpha.runtime.runPromise(Effect.yieldNow));
+    expect([world.ask.said.slice(2), world.voice.spoken.length, (await getToasts(area as unknown as VoiceRuntime)).issued, document.querySelector("[data-alpha-voice-said]")]).toEqual([["Typed again"], 1, 0, null]);
+  });
+
   it("keeps the speaker control hidden when the live bridge refuses gain (spec/app/voice/index.md, \"Speaker mute is offered after the current speech bridge confirms gain control\")", async () => {
     const world = { ...scene(), phone: true, signedIn: false };
     world.voice.speakerGainGate = () => Promise.reject(new Error("Output gain unavailable"));
