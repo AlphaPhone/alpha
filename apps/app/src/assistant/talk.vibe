@@ -186,7 +186,6 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and the make ticket of a send waiting for its conversation. */
   outgoing: string
   lastSent: string
-  lastSentWire: string
   lastPost: PostedMessage | undefined
   /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
   lastSentId: string
@@ -302,7 +301,6 @@ export const talk = Layer.effect(Talk, effect {
     queueSend: (ticket) => { board.sendWhenMade = ticket },
     outgoing: "",
     lastSent: "",
-    lastSentWire: "",
     lastPost: undefined,
     get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? restoredSentId },
     set lastSentId(id: string) { restoredSentId = id },

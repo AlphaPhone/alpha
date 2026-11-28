@@ -100,6 +100,9 @@ export function draftKey(owner: string, agent: string, conversation?: string, ro
   return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
 }
 
+/** The most UTF-8 bytes AlphaAssistantDraft takes for a slot row it compares or writes, as its `RAW_LIMIT`. */
+const rawLimit = 256 * 1024;
+
 /** The rows AlphaAssistantDraft writes, as `AlphaDraftRow.admits` checks a `next` before the plugin exchanges it: a whole revision of at least 1, a text, a sending flag, and only beside a sending mark a string `lastSentId` and `lastSentWire`. */
 function admitsRow(next: string) {
   let row: unknown;
@@ -133,6 +136,7 @@ export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<Draft
         scene.refusedDraftExchanges += 1;
         return { status: "denied" };
       }
+      if ([address.expected, address.next].some((raw) => raw !== undefined && encoder.encode(raw).length > rawLimit)) return { status: "denied" };
       if (address.next !== undefined && !admitsRow(address.next)) return { status: "denied" };
       if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
       if (address.next === undefined) scene.drafts.delete(key);
