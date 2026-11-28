@@ -101,7 +101,7 @@ const words = Layer.sync(AutomationWords, () => {
 })
 
 /** Classify a failed scheduled task's decision log and cloud failure kind into a user-facing reason. */
-export function taskFailureReason(log: string | undefined, cloudFailure: string | undefined): TaskFailureReason {
+function taskFailureReason(log: string | undefined, cloudFailure: string | undefined): TaskFailureReason {
   if (log !== undefined && log.includes("NoModel")) {
     switch (cloudFailure) {
       case "insufficient_credits": return "InsufficientCredits"

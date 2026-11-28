@@ -97,11 +97,12 @@ describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A pack is admitted only when its manifest names the pinned commit, Node 26, the local speech module, the plugins it carries, the Alpha product plugin, a pinned workflow worker and every allowed action"
   // spec/agent/index.md, "Every package the bundle carries is the pinned eliza's, except the pack's entry and Alpha's product plugin"
   // spec/agent/index.md, "Only Android's native speech transport can call the resident recognizer"
-  // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason"
+  // spec/agent/index.md, "The agent may run the actions the old phone's agent ran plus Alpha's Clock, Reminders and Device Control actions, and every other action the bundle registers is listed as refused with its reason"
   // spec/agent/index.md, "The pack carries the plugins the old phone's agent loaded, under the pinned eliza's names, and the launch loads them with the agent's own modules the old agent had"
   // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
   // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by"
   // spec/agent/index.md, "The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack's host file consents to neither"
+  // spec/agent/index.md, "Only Android's native control executor can post UI observations, poll queued operations, submit receipts, or fire native interrupts"
   it("Build the pack only from the pinned eliza", () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
@@ -119,8 +120,12 @@ describe("Build the pack only from the pinned eliza", () => {
         query: [{ key: "clientId", accepts: { kind: "pattern", pattern: "[A-Za-z0-9][A-Za-z0-9_-]{0,127}" } }] },
       { method: "POST", path: "/api/workflow/hosted/results/ack", stream: false, maxBodyBytes: 1024 },
       { method: "POST", path: "/api/alpha-runtime/notes-recording-cleanup", stream: false, maxBodyBytes: 2048 },
+      { method: "POST", path: "/api/alpha-control/observe", stream: false, maxBodyBytes: 1572864 },
+      { method: "GET", path: "/api/alpha-control/next", stream: false },
+      { method: "POST", path: "/api/alpha-control/receipt", stream: false, maxBodyBytes: 65536 },
+      { method: "POST", path: "/api/alpha-control/interrupt", stream: false, maxBodyBytes: 2048 },
     ])
-    expect(listed().some(({ path }) => ["/api/alpha-speech/scope", "/api/asr/local-inference/live", "/api/alpha-runtime/scope", "/api/alpha-runtime/notes-recording-cleanup", "/api/notes/trash/recordings/complete"].includes(path))).toBe(false)
+    expect(listed().some(({ path }) => ["/api/alpha-speech/scope", "/api/asr/local-inference/live", "/api/alpha-runtime/scope", "/api/alpha-runtime/notes-recording-cleanup", "/api/notes/trash/recordings/complete", "/api/alpha-control/observe", "/api/alpha-control/next", "/api/alpha-control/receipt", "/api/alpha-control/interrupt"].includes(path))).toBe(false)
     expect(plugins.product).toBe(productPluginName)
     expect(entryCarried(built.packages.map(({ name }) => name))).toBe(true)
     expect(built.packages.filter(({ name }) => name.startsWith("@repo/") || name.startsWith("@alphacompute/") || name === productPluginName).map(({ name }) => name).sort())

@@ -360,7 +360,7 @@ describe("Home on a phone", () => {
 
     await press("Telegram");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.at(-1) === "Telegram");
-    await vi.waitFor(() => expect(document.querySelector<HTMLAnchorElement>('a[href="https://web.telegram.org/a/"]')?.href).toBe("https://web.telegram.org/a/"));
+    await vi.waitFor(() => expect(document.querySelector("[data-alpha-telegram-auth]")?.textContent).toContain("Sign in to Telegram"));
     await hardware("home");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.length === 0);
     await press("Wallet");

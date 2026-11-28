@@ -21,11 +21,11 @@ beforeAll(async () => {
 }, 600_000);
 afterEach(closeAll);
 
-const rows = () => [...document.querySelectorAll("ul[aria-label=Workflows] li > button")];
-const choose = (name: string) => drawn(() => {
-  const row = rows().find((one) => one.textContent?.startsWith(name));
-  if (!(row instanceof HTMLButtonElement)) throw new Error(`No workflow named ${name}`);
-  row.click();
+const workflowButtons = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label=Workflows] li > button")];
+const openWorkflow = (title: string) => drawn(() => {
+  const target = workflowButtons().find((item) => item.textContent?.startsWith(title));
+  if (target === undefined) throw new Error(`Missing workflow row: ${title}`);
+  target.click();
 });
 
 const NoticePage = Schema.Struct({
@@ -42,15 +42,17 @@ it("Runs Morning check-in end-to-end against the real resident agent and deliver
   await until(alpha, area, Listing, (state) => state.list.status === "Loaded" && state.complete);
 
   expect(document.querySelectorAll('[role="alert"]')).toHaveLength(0);
-  expect(rows().some((row) => row.textContent?.startsWith("Morning check-in"))).toBe(true);
+  expect(workflowButtons().some((item) => item.textContent?.startsWith("Morning check-in"))).toBe(true);
 
-  await choose("Morning check-in");
+  await openWorkflow("Morning check-in");
   await until(alpha, area, Automations, (state) => state.present && state.list.status === "Loaded" && state.status === "Scheduled");
   expect(button("Run now")).toBeDefined();
 
   await press("Run now");
   await press("Confirm Run now");
-  await until(alpha, area, Automations, (state) => state.list.status === "Loaded" && state.fired === "Dispatched" && state.change.attempt.outcome === "Confirmed");
+  const dispatched = (state: { list: { status: string }; fired: string; change: { attempt: { outcome: string } } }) =>
+    state.list.status === "Loaded" && state.fired === "Dispatched" && state.change.attempt.outcome === "Confirmed";
+  await until(alpha, area, Automations, dispatched);
 
   const rawNotices = await alpha.runtime.runPromise(Effect.flatMap(Agent, (agent) =>
     agent.call(HttpClientRequest.get("/api/notifications?nativeTransport=true"))));

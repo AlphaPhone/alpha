@@ -146,16 +146,19 @@ pure def lawTheWalletRequiresTheLaunchKey(launchKey: bool): bool =
   walletGetsKey(launchKey) iff launchKey
 ```
 
-### The agent may run the actions the old phone's agent ran plus Alpha's Clock and Reminders actions, and every other action the bundle registers is listed as refused with its reason
+### The agent may run the actions the old phone's agent ran plus Alpha's Clock, Reminders and Device Control actions, and every other action the bundle registers is listed as refused with its reason
 
 The old agent had no allowlist: every action its plugins registered could
 run. The pack's plugins register those same actions under the pinned
 eliza's names, and Alpha's `alpha-apps` product plugin registers
-`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD` and `REMINDERS_MANAGE`.
+`CLOCK_ALARM`, `CLOCK_TIMER`, `CLOCK_WORLD`, `REMINDERS_MANAGE` and
+`DEVICE_CONTROL`.
 `CLOCK_ALARM` tells the model that an alarm rings at a clock time, that
 being woken up is an alarm, and that a reminder never stands in for one,
 as the old phone's agent was told; which tool a request needs stays the
-model's to decide. Eliza's
+model's to decide. `DEVICE_CONTROL` lets the agent observe and act inside
+an owner-approved third-party app within the lease and screen-safety rules
+of `spec/app/control/index.md`. Eliza's
 wallet module registers `WALLET`, which reads the wallet and asks for a
 transfer and can approve none.
 `BROWSER_OPEN` hands a web page the owner asks for to the screen they asked
@@ -171,7 +174,7 @@ calculator.
 ```quint
 pure val productPluginName: str = "alpha-apps"
 pure val coreActions: List[str] = List("REPLY", "IGNORE", "NONE")
-pure val alphaAppActions: List[str] = List("CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE")
+pure val alphaAppActions: List[str] = List("CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE", "DEVICE_CONTROL")
 pure val allowedActions: List[str] = List(
   "REPLY", "IGNORE", "NONE",
   "OWNER_REMINDERS", "OWNER_GOALS", "TODO", "OWNER_ROUTINES", "BRIEF",
@@ -183,7 +186,7 @@ pure val allowedActions: List[str] = List(
   "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD", "BROWSER_OPEN",
   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_RESTORE", "NOTES_MOVE",
   "PROPOSE_DEVICE_ACTION", "VIEWS",
-  "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE",
+  "CLOCK_ALARM", "CLOCK_TIMER", "CLOCK_WORLD", "REMINDERS_MANAGE", "DEVICE_CONTROL",
   "WALLET"
 )
 pure def lawCoreActionsAreAlwaysAllowed(a: str): bool = coreActions.includes(a) implies allowedActions.includes(a)
@@ -340,7 +343,8 @@ through the approvals module. Ask Alpha completes a reviewed Messages read only
 for the exact owner turn after the agent acknowledges its device receipt.
 Wallet reads the wallet module's status, holdings, waiting requests and
 activity, makes and switches the wallet, asks for a transfer, and opens and
-decides its review. A route an area
+decides its review. Settings reads and updates Alpha's on-device local LLM
+status, pinned model catalog, AI routing mode, active model, and model removal. A route an area
 fakes for want of an agent plugin is not listed: none does today. Each line
 of `apps/agent/host/routes.jsonl` is one route; the pack is refused unless
 that list is this one, and eliza's route gate admits each of its routes.
@@ -480,7 +484,23 @@ pure val pageRoutesTasksWallet: List[Route] = List(
   { method: Post, path: "/api/wallet/requests", stream: false },
   { method: Post, path: "/api/wallet/requests/{id}/review", stream: false },
   { method: Post, path: "/api/wallet/requests/{id}/decide", stream: false },
+  { method: Get, path: "/api/alpha/control/state", stream: false },
+  { method: Post, path: "/api/alpha/control/lease", stream: false },
+  { method: Post, path: "/api/alpha/control/stop", stream: false },
+  { method: Get, path: "/api/alpha/local-llm/status", stream: false },
+  { method: Get, path: "/api/alpha/local-llm/catalog", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/mode", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/activate", stream: false },
+  { method: Post, path: "/api/alpha/local-llm/delete", stream: false },
 )
+pure val controlLeasePath = "/api/alpha/control/lease"
+pure val controlStopPath = "/api/alpha/control/stop"
+pure val controlLeaseLimit = 4096
+pure val controlStopLimit = 1024
+pure val localLlmModePath = "/api/alpha/local-llm/mode"
+pure val localLlmActivatePath = "/api/alpha/local-llm/activate"
+pure val localLlmDeletePath = "/api/alpha/local-llm/delete"
+pure val localLlmControlLimit = 1024
 pure def concatRoutes(a: List[Route], b: List[Route]): List[Route] = a.concat(b)
 pure val pageRoutes: List[Route] = concatRoutes(concatRoutes(pageRoutesCore, pageRoutesApps), concatRoutes(pageRoutesWorkflows, pageRoutesTasksWallet))
 pure def admitted(listed: List[Route], r: Route): bool = listed.includes(r)
@@ -579,7 +599,20 @@ The page can read pending receipts. It cannot complete them.
 ```quint
 pure val nativeNotesCleanup = "/api/alpha-runtime/notes-recording-cleanup"
 pure val nativeNotesCleanupLimit = 2048
+pure val nativeControlObserve = "/api/alpha-control/observe"
+pure val nativeControlNext = "/api/alpha-control/next"
+pure val nativeControlReceipt = "/api/alpha-control/receipt"
+pure val nativeControlInterrupt = "/api/alpha-control/interrupt"
+pure val nativeControlObserveLimit = 1572864
+pure val nativeControlReceiptLimit = 65536
+pure val nativeControlInterruptLimit = 2048
 pure val nativeRecordingRoutes: List[Route] = List({ method: Post, path: nativeNotesCleanup, stream: false })
+pure val nativeControlRoutes: List[Route] = List(
+  { method: Post, path: nativeControlObserve, stream: false },
+  { method: Get, path: nativeControlNext, stream: false },
+  { method: Post, path: nativeControlReceipt, stream: false },
+  { method: Post, path: nativeControlInterrupt, stream: false },
+)
 pure val nativeRoutes: List[Route] = List(
   { method: Get, path: "/api/alpha-speech/scope", stream: false },
   { method: Post, path: "/api/asr/local-inference/live", stream: false },
@@ -588,10 +621,28 @@ pure val nativeRoutes: List[Route] = List(
   { method: Get, path: "/api/workflow/hosted/results", stream: false },
   { method: Post, path: nativeDigestAck, stream: false },
   { method: Post, path: nativeNotesCleanup, stream: false },
+  { method: Post, path: nativeControlObserve, stream: false },
+  { method: Get, path: nativeControlNext, stream: false },
+  { method: Post, path: nativeControlReceipt, stream: false },
+  { method: Post, path: nativeControlInterrupt, stream: false },
 )
 pure def nativeRoutesAdmitted(listed: List[Route]): bool =
   listed.length() == nativeRoutes.length() and listed.every(route => nativeRoutes.includes(route))
     and nativeRoutes.every(route => listed.includes(route))
+```
+
+### Only Android's native control executor can post UI observations, poll queued operations, submit receipts, or fire native interrupts
+
+The page's route table carries only the overlay's state read, owner lease
+grant, and stop switch. Raw screen observations, queued operations, execution
+receipts, and touch-preemption interrupts stay on the phone's root-only native
+channel so no untrusted WebView page can inject forged UI trees or spoof
+receipts.
+
+```quint
+pure val controlRouteValues: Set[Route] = nativeControlRoutes.foldl(Set(), (routes, route) => routes.union(Set(route)))
+pure def lawControlNativeRoutesAreAbsentFromThePage(controlRoute: Route): bool =
+  nativeControlRoutes.includes(controlRoute) implies not(pageRoutes.includes(controlRoute))
 ```
 
 ### The page names the query values each gated route can receive

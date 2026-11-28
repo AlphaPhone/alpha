@@ -358,14 +358,15 @@ const signIns = Layer.effect(MailSignIn, effect {
       if (stillHere) try say("Gmail authorization could not be opened", true)
       return
     }
+    const setReauthForm = (error: string | undefined, busy: boolean) => {
+      reauthShelf.update((state) => (state.kind === "EnterCode" || state.kind === "UseFactor" ? { ...state, error, busy } : state))
+    }
     const code = signInCode(typed)
     if (Option.isNone(code)) {
-      reauthShelf.update((state) => (state.kind === "EnterCode" || state.kind === "UseFactor"
-        ? { ...state, error: "Check the code and try again.", busy: false } : state))
+      setReauthForm("Check the code and try again.", false)
       return
     }
-    reauthShelf.update((state) => (state.kind === "EnterCode" || state.kind === "UseFactor"
-      ? { ...state, error: undefined, busy: true } : state))
+    setReauthForm(undefined, true)
     const receipt: SignInReceipt | undefined = tryPromise(() => signInAccounts().verify({
       attempt: current.attempt, code: code.value, ...(factor === undefined ? {} : { factor }),
     })) catch () => undefined
@@ -382,8 +383,7 @@ const signIns = Layer.effect(MailSignIn, effect {
       return
     }
     if (reply.kind === "TryAgain") {
-      reauthShelf.update((state) => (state.kind === "EnterCode" || state.kind === "UseFactor"
-        ? { ...state, error: "Check the code and try again.", busy: false } : state))
+      setReauthForm("Check the code and try again.", false)
       return
     }
     pending = undefined
