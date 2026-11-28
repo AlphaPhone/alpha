@@ -13,7 +13,7 @@ import {
   slackAmbientSnapshot,
   syncSlackAgentScreen,
 } from "./agent.vibe"
-import { slackAuth } from "./auth.vibe"
+import { slackAccountChanges, slackAuth, slackOAuthReturns } from "./auth.vibe"
 import { slackComposer } from "./composer.vibe"
 import { slackConversation } from "./conversation.vibe"
 import { SlackLedger, channelTitleOf, slackLedger } from "./ledger.vibe"
@@ -128,6 +128,8 @@ export const slackBack = effect {
 export const slackResident = together(
   slackLedger,
   slackAuth,
+  slackOAuthReturns,
+  slackAccountChanges,
   slackWorkspaces,
   slackConversation,
   slackComposer,

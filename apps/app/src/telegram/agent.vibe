@@ -13,6 +13,7 @@ import {
   type TelegramAgentMutationPayload,
   type TelegramSnapshot,
   TelegramStore,
+  acceptedReply,
   currentSessionToken,
   dialogTitle,
   isRevokedFailure,
@@ -106,9 +107,10 @@ function formatAgentMessage(
 }
 
 effect function runReadCall<A>(
+  token: string,
   call: A!MessagingFailure,
 ): Option.Option<A>!!(MessagingSessions | TelegramStore | Auth.Machine) {
-  const res = call catch (failure) => ({ failed: failure })
+  const res = acceptedReply(token, call) catch (failure) => ({ failed: failure })
   if (typeof res === "object" && res !== null && "failed" in res) {
     if (isRevokedFailure(res.failed)) try reportSessionRevoked()
     return Option.none()
@@ -132,7 +134,7 @@ effect function executeReadTool(
   const store = try TelegramStore
   const bounded = Math.max(1, Math.min(AgentTelegram.maxReadLimit, limit))
   if (tool === "TelegramListChats") {
-    const res = try runReadCall(client.getDialogs(token.value, { limit: bounded }))
+    const res = try runReadCall(token.value, client.getDialogs(token.value, { limit: bounded }))
     if (Option.isNone(res)) return { ok: false }
     for (const dialog of res.value.dialogs) try store.chatIdOf(dialog.peer_key)
     const snap = try store.update((current) => ({ ...current, ...mergeEntities(current, res.value.users, res.value.chats) }))
@@ -151,7 +153,7 @@ effect function executeReadTool(
   }
   if (tool === "TelegramSearchMessages") {
     const peerKey = chat > 0 ? try store.peerKeyOf(chat) : undefined
-    const res = try runReadCall(client.searchGlobal(token.value, query, { peer: peerKey, limit: bounded }))
+    const res = try runReadCall(token.value, client.searchGlobal(token.value, query, { peer: peerKey, limit: bounded }))
     if (Option.isNone(res)) return { ok: false }
     const snap = try store.update((current) => ({ ...current, ...mergeEntities(current, res.value.users, res.value.chats) }))
     return {
@@ -178,7 +180,7 @@ effect function executeReadTool(
       },
     }
   }
-  const res = try runReadCall(client.getHistory(token.value, peerKey, { limit: bounded }))
+  const res = try runReadCall(token.value, client.getHistory(token.value, peerKey, { limit: bounded }))
   if (Option.isNone(res)) return { ok: false }
   const snap = try store.get()
   return {
@@ -263,7 +265,7 @@ effect function readBackMutation(
   const target = try resolveAuthedPeer(chat)
   if (Option.isNone(target)) return { type: "readBackAnswered", ticket, ok: false, applied: false }
   const { token, peerKey } = target.value
-  const res = (try Telegram).getHistory(token, peerKey, { limit: 20 }) catch (failure) => ({ failed: failure })
+  const res = acceptedReply(token, (try Telegram).getHistory(token, peerKey, { limit: 20 })) catch (failure) => ({ failed: failure })
   if ("failed" in res) {
     if (isRevokedFailure(res.failed)) try reportSessionRevoked()
     return { type: "readBackAnswered", ticket, ok: false, applied: false }

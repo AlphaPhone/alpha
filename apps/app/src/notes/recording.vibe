@@ -405,6 +405,7 @@ const updates = started(effect {
   const device = try NoteDevice
   if (!device.available) return
   const recorder = try Rec.Machine
+  const takes = try TakeRegistry
   const devicePage = try Device
   const shell = try Shell
   const shown = try RecordingDisplay
@@ -444,12 +445,16 @@ const updates = started(effect {
     if (tape.state === "stopped" && (state.phase === "Recording" || state.phase === "Paused")) {
       if (tape.stopReason === "user" || tape.stopReason === "done") try ignore(recorder.send({ type: "stop", take: state.take }, "Owner"))
       else try ignore(recorder.send({ type: "broke", capture: state.capture }, phone))
-    } else if (moved && tape.state === "paused" && state.phase === "Recording") {
+      return
+    }
+    const mapped = try takes.recordingFor(state.owner, state.take)
+    const owned = tape.recordingId !== undefined && tape.recordingId === mapped
+    if (owned && moved && tape.state === "paused" && state.phase === "Recording") {
       try ignore(recorder.send({ type: "pause", take: state.take }, "Owner"))
-    } else if ((moved || state.recovered) && tape.state === "recording" && state.phase === "Paused") {
+    } else if (owned && (moved || state.recovered) && tape.state === "recording" && state.phase === "Paused") {
       try ignore(recorder.send({ type: "resume", take: state.take, room: try room() }, "Owner"))
     }
-    if (!apart(tape, (try recorder.get()).phase)) agreed = tape
+    if (!apart(tape, (try recorder.get()).phase) && (mapped === undefined || tape.recordingId === mapped)) agreed = tape
   }
   const read = effect { return device.status() catch () => undefined }
   const answered = (tape: Tape | undefined): tape is Tape => tape !== undefined
@@ -468,6 +473,12 @@ const updates = started(effect {
     if (try device.consumeOpen()) try ignore(shell.send({ type: "openView", view: "Notes" }))
   }
   try reopen()
+  const initial = try currentTape()
+  if (initial !== undefined && initial.recordingId !== undefined) {
+    const state = try recorder.get()
+    const mapped = try takes.recordingFor(state.owner, state.take)
+    if (!apart(initial, state.phase) && (mapped === undefined || initial.recordingId === mapped)) agreed = initial
+  }
   try Effect.all([
     Stream.runForEach(opened, reopen),
     Stream.runForEach(Stream.merge(device.changed, Stream.merge(ticks, looks)), report),

@@ -216,6 +216,8 @@ lets the slot the message came from be cleared. A write that finds a
 revision another Alpha marked as sending, such as a second window sending
 from the same conversation, puts that message under review as a slot read
 does, never into the editor: the editor keeps only the owner's own text.
+So does the first write of a message moved from a new conversation, whose
+old slot then keeps its copy, never cleared.
 
 ```quint
 type Wrote = Landed | Collided | Marked | Lost
@@ -228,10 +230,11 @@ pure def canWrote(c: Composer, ticket: int, revision: int): bool = D::canLand(c.
 pure def wrote(c: Composer, ticket: int, result: Wrote, revision: int): Moved =
   val landed = { ...c, draft: D::land(c.draft) }
   val clear = A::dispatch(A::record(A::plan(c.clear.id + 1)))
-  val review = result == Marked and c.slot == Open and c.source == 0
+  val review = result == Marked and c.slot == Open
   val stopped =
     if (result == Lost) { ...c, draft: D::interrupt(c.draft), failing: true }
-    else { ...c, draft: D::collide(c.draft, revision), unsettled: c.unsettled or review, marked: c.marked or review }
+    else { ...c, draft: D::collide(c.draft, revision), unsettled: c.unsettled or review, marked: c.marked or review,
+      source: if (review) 0 else c.source }
   if (result == Landed and c.away == Marking)
     { state: { ...landed, away: Asked, marked: true }, out: List(Ask({ hold: c.hold, attachments: attachments(c.held) })) }
   else if (result == Landed and c.source > 0)
@@ -467,7 +470,9 @@ the conversation's one read tells. If the message arrived, or the slot no
 longer holds the mark under review because the Alpha that marked it
 settled it, the mark is written away and nothing is shown; if it was never
 recorded, it goes back into the editor, ahead of what the owner typed
-since, for the owner to send. Nothing is ever sent by itself. Once those
+since, for the owner to send. A history read without the exact key leaves
+the mark under review while the original request may still arrive.
+Nothing is ever sent by itself. Once those
 tries cannot tell, the conversation shows one card that the message may
 already have been sent, with its text, Check again, It was sent, and Put
 back in the field: It was sent keeps only what the owner typed since

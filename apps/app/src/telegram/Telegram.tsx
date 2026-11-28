@@ -26,6 +26,7 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  WalletQr,
 } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { ArrowLeft, Bell, BellOff, LogOut, MessageSquare, MoreVertical, RefreshCw } from "lucide-react";
@@ -42,7 +43,7 @@ import type { Machine as ConversationMachine } from "../../gen/app__telegram__co
 import { composable } from "../../gen/app__telegram__conversation.ts";
 import { useMachine as useConversation } from "../../gen/app__telegram__conversation.react.ts";
 import type { Machine as NoticesMachine } from "../../gen/app__telegram__notices.effect.vibe";
-import type { TelegramDialogSummary } from "../platform/index.vibe";
+import { Telegram, type TelegramDialogSummary } from "../platform/index.vibe";
 import { useTimed } from "../runtime/ui.tsx";
 import { swapComposerTarget } from "../messaging/composer.ts";
 import { untimed } from "../runtime/index.vibe";
@@ -59,7 +60,7 @@ import {
 export interface TelegramScreenProps {
   /** Runtime supplying Telegram's auth, chat list, conversation, composer, notices, store, and clock services. */
   runtime: ManagedRuntime.ManagedRuntime<
-    AuthMachine | ChatListMachine | ConversationMachine | ComposerMachine | NoticesMachine | TelegramStore | Time,
+    AuthMachine | ChatListMachine | ConversationMachine | ComposerMachine | NoticesMachine | TelegramStore | Telegram | Time,
     unknown
   >;
   onBack?: (() => void) | undefined;
@@ -273,6 +274,7 @@ function AuthFlow({ runtime, onBack }: { runtime: Runtime; onBack?: (() => void)
     );
   }
 
+  const retry = { type: "startQr", now: untimed, online: true } as const;
   const back = { type: "backToPhone" } as const;
   return (
     <AuthScreen state={state}>
@@ -282,14 +284,14 @@ function AuthFlow({ runtime, onBack }: { runtime: Runtime; onBack?: (() => void)
         subtitle="Open Telegram on another device, go to Settings > Devices > Link Desktop Device, and approve this code."
         error={errorText}
         waitNotice={waitNotice}
+        primaryAction={can(retry) ? { label: "Get a new code", onClick: () => { void send(retry); } } : undefined}
         onBack={can(back) ? () => { void send(back); } : undefined}
         secondaryAction={can(back) ? { label: "Use phone number", onClick: () => { void send(back); } } : undefined}
       >
         <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-secondary p-4 text-center">
-          <Spinner label="Waiting for QR approval" />
-          {snap.auth.qrLoginUrl ? (
-            <p data-telegram-qr-url className="font-mono text-xs break-all text-muted-foreground">{snap.auth.qrLoginUrl}</p>
-          ) : null}
+          {state.qrExpiresAt > 0 && snap.auth.qrLoginUrl ? (
+            <WalletQr value={snap.auth.qrLoginUrl} label="Telegram sign-in QR code" />
+          ) : busy ? <Spinner label="Getting Telegram sign-in code" /> : null}
         </div>
       </AuthStepFrame>
     </AuthScreen>
@@ -753,6 +755,16 @@ export function TelegramScreen({ runtime, onBack }: TelegramScreenProps) {
   const [confirmSignOut, setConfirmSignOut] = useState(false);
   if (auth.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Telegram</Alert>;
   if (!auth.state) return null;
+  if (runtime.runSync(Effect.map(Telegram, (client) => client.accountAccess)) === "officialWeb") {
+    return (
+      <Screen title="Telegram" data-alpha-sensitive="true" leading={onBack ? <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ArrowLeft /></Button> : null}>
+        <div className="flex flex-col items-start gap-3 p-4">
+          <p className="text-sm text-muted-foreground">The built-in Telegram connection is unavailable on this phone.</p>
+          <Button asChild><a href="https://web.telegram.org/a/" rel="noreferrer">Open Telegram Web</a></Button>
+        </div>
+      </Screen>
+    );
+  }
   if (auth.state.step !== "Authenticated") {
     return <AuthFlow runtime={runtime} onBack={onBack} />;
   }

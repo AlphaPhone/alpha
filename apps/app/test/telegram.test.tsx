@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
+import type { tl } from "@mtcute/web";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { NodeHttpClient } from "@effect/platform-node";
 import { startTelegramProvider, type RunningProvider } from "@repo/eliza-harness";
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Clock, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { TestClock } from "effect/testing";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Home from "../gen/app__home.effect.vibe";
 import * as Preferences from "../gen/app__settings__preferences.effect.vibe";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import * as ChatList from "../gen/app__telegram.effect.vibe";
@@ -15,10 +19,13 @@ import * as Auth from "../gen/app__telegram__auth.effect.vibe";
 import * as Composer from "../gen/app__telegram__composer.effect.vibe";
 import * as Conversation from "../gen/app__telegram__conversation.effect.vibe";
 import * as Notices from "../gen/app__telegram__notices.effect.vibe";
+import home from "../src/home/index.tsx";
 import { toasts } from "../src/notices/toasts.vibe";
 import { browserDevice } from "../src/platform/device.vibe";
 import { MessagingSessions, messagingSessions } from "../src/platform/messaging.vibe";
 import { grounded } from "../src/platform/platform.vibe";
+import { browserVoiceBridge } from "../src/platform/voice.vibe";
+import { telegramMessages } from "../src/platform/telegram-messages.vibe";
 import { telegramAt } from "../src/platform/telegram.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
@@ -30,6 +37,9 @@ import {
   telegramResident,
 } from "../src/telegram/resident.vibe";
 import { TELEGRAM_SESSION_KEY, TelegramStore } from "../src/telegram/store.vibe";
+
+import { closeAll, only, open, press, until as untilArea } from "./alpha.tsx";
+import { scene } from "./fakes/scene.ts";
 
 const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
 env.IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,6 +62,7 @@ async function controlJson(origin: string, path: string, body?: unknown): Promis
 function buildTestLayer(origin: string) {
   const base = Layer.mergeAll(
     browserDevice,
+    browserVoiceBridge,
     messagingSessions,
     Layer.provide(telegramAt(origin), NodeHttpClient.layerNodeHttp),
     Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(1_700_000_000_000)), TestClock.layer()),
@@ -317,26 +328,47 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     await clickButton("Continue");
     await until(rt, authChanges, (s) => s.step === "PhoneEntry");
 
-    await clickButton("Sign in with QR");
-    await until(rt, authChanges, (s) => s.step === "QrPending");
-    let qrToken = "";
-    for (let i = 0; i < 20; i += 1) {
-      const snap = await rt.runPromise(Effect.flatMap(TelegramStore, (s) => s.get()));
-      if (snap.auth.qrToken !== "") {
-        qrToken = snap.auth.qrToken;
-        break;
-      }
-      await tick(rt, 50);
-    }
-    expect(qrToken).not.toBe("");
-    await controlJson(provider.origin, "/__control/approve-qr", { token: qrToken });
-    for (let i = 0; i < 20; i += 1) {
-      const current = await rt.runPromise(Effect.flatMap(Auth.Machine, (m) => m.get()));
-      if (current.step === "Authenticated") break;
-      await tick(rt, 60);
-    }
-    const finalAuth = await rt.runPromise(Effect.flatMap(Auth.Machine, (m) => m.get()));
-    expect(finalAuth.step).toBe("Authenticated");
+    const readQr = () => rt.runPromise(Effect.flatMap(TelegramStore, (store) => Effect.map(store.get(), (snap) => snap.auth.qrToken)));
+    const startQr = async () => {
+      await clickButton("Sign in with QR");
+      await until(rt, authChanges, (s) => s.step === "QrPending" && s.qrExpiresAt > 0);
+      expect(document.querySelector("svg[aria-label='Telegram sign-in QR code'] path")).toBeTruthy();
+      return readQr();
+    };
+    const cancelled = await startQr();
+    await clickButton("Use phone number");
+    await until(rt, authChanges, (s) => s.step === "PhoneEntry");
+    await controlJson(provider.origin, "/__control/approve-qr", { token: cancelled });
+    await tick(rt, 2500);
+    expect(await rt.runPromise(MessagingSessions.use((sessions) => sessions.get(TELEGRAM_SESSION_KEY)))).toMatchObject({ _tag: "None" });
+
+    const clock = await rt.runPromise(Clock.currentTimeMillis);
+    const expires = Math.floor(clock / 1000) + 1;
+    const shortLived = "A".repeat(128);
+    await controlJson(provider.origin, "/__control/fault", {
+      path: "/rpc/auth.exportLoginToken", status: 200, remaining: 1,
+      body: { ok: true, _type: "auth.loginToken", token: shortLived, expires, login_url: `tg://login?token=${shortLived}` },
+    });
+    const expired = await startQr();
+    expect(expired).toBe(shortLived);
+    const offered = await rt.runPromise(Auth.Machine.use((m) => m.get()));
+    await tick(rt, expires * 1000 - clock);
+    await until(rt, authChanges, (s) => s.qrExpiresAt > offered.qrExpiresAt && s.work === "Idle");
+    const current = await readQr();
+    expect(current).not.toBe(expired);
+    await controlJson(provider.origin, "/__control/approve-qr", { token: current });
+    await tick(rt, 2000);
+    await until(rt, authChanges, (s) => s.step === "Authenticated");
+
+    await signOut(rt);
+    await clickButton("Continue");
+    const protectedToken = await startQr();
+    await controlJson(provider.origin, "/__control/approve-qr", { token: protectedToken, phone: "+15550109999" });
+    await tick(rt, 2000);
+    await until(rt, authChanges, (s) => s.step === "TwoFactorRequired");
+    await fillField("Two-factor password", "alpha-2fa");
+    await clickButton("Unlock account");
+    await until(rt, authChanges, (s) => s.step === "Authenticated");
   });
 
   // spec/app/telegram/index.md, "Story: Browse and search my Telegram chats"; spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/composer.md, "Story: Draft and send Telegram messages under my sole authority"
@@ -566,4 +598,108 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
     expect(afterSignOutSnap.dialogs).toEqual([]);
     expect(afterSignOutSnap.drafts.size).toBe(0);
   });
+});
+
+describe("Telegram on a phone", () => {
+  afterEach(closeAll);
+
+  it('keeps a pending sign-in bound to the Cloud account that requested it (spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account")', async () => {
+    const phone = { ...scene(), phone: true };
+    phone.telegram.enabled = true;
+    const mounts = only("home", "view:Telegram");
+    const { alpha, close } = await open(phone, mounts);
+    await untilArea(alpha, home.runtime(alpha), Home.Machine, (s) => s.tiles.load.status === "Loaded");
+    await press("Telegram");
+    await untilArea(alpha, alpha.runtime, Shell.Machine, (s) => s.trail.at(-1) === "Telegram");
+    await clickButton("Continue");
+    await fillField("Phone number", "+9996621234");
+    await clickButton("Send code");
+    await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "CodePending");
+    const originalOwner = phone.voice.organizationId;
+    phone.voice.organizationId = "other-phone-owner";
+    await fillField("Verification code", "22222");
+    await clickButton("Verify code");
+    await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "PhoneEntry" && s.trouble === "ExpiredCode");
+    const grants = MessagingSessions.use((s) => s.keys());
+    expect(await alpha.runtime.runPromise(grants)).toEqual([]);
+    phone.voice.organizationId = originalOwner;
+    expect(await alpha.runtime.runPromise(grants)).toEqual([]);
+
+    await fillField("Phone number", "+9996621234");
+    await clickButton("Send code");
+    await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "CodePending");
+    await fillField("Verification code", "22222");
+    await clickButton("Verify code");
+    await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "Authenticated");
+    await close();
+
+    phone.voice.organizationId = "other-phone-owner";
+    const other = await open(phone, mounts);
+    await untilArea(other.alpha, home.runtime(other.alpha), Home.Machine, (s) => s.tiles.load.status === "Loaded");
+    const previousView = await other.alpha.runtime.runPromise(Shell.Machine.use((m) => m.get()));
+    if (previousView.trail.at(-1) !== "Telegram") await press("Telegram");
+    await untilArea(other.alpha, other.alpha.runtime, Shell.Machine, (s) => s.trail.at(-1) === "Telegram");
+    expect(findButton("Continue")).toBeDefined();
+    expect(await other.alpha.runtime.runPromise(grants)).toEqual([]);
+    await other.close();
+
+    phone.voice.organizationId = originalOwner;
+    const reopened = await open(phone, mounts);
+    await untilArea(reopened.alpha, reopened.alpha.runtime, Auth.Machine, (s) => s.step === "Authenticated" && s.account === phone.telegram.user.id);
+    expect(await reopened.alpha.runtime.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
+  });
+});
+
+it('reads, replies and reconnects through Telegram MTProto (spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise")', async () => {
+  const { BaseTelegramClient, MemoryStorage, TelegramClient, WebCryptoProvider } = await import("@mtcute/web");
+  const require = createRequire(import.meta.url);
+  const wasm = createRequire(require.resolve("@mtcute/web")).resolve("@mtcute/wasm/mtcute.wasm");
+  const peer = { _: "peerChat", chatId: 9 } as const;
+  const chat = { _: "chat", id: 9, title: "Field team", participantsCount: 2, date: 1700000000, version: 1, photo: { _: "chatPhotoEmpty" } } as const;
+  const sender = { _: "user", id: 77, firstName: "Ria" } as const;
+  const state = { _: "updates.state", pts: 5, date: 1700000000, qts: 0, seq: 3, unreadCount: 0 };
+  const line = (id: number, text: string) => ({ _: "message", id, peerId: peer, fromId: { _: "peerUser", userId: 77 }, date: 1700000000, message: text });
+  const dialog = { _: "dialog", peer, topMessage: 2, readInboxMaxId: 1, readOutboxMaxId: 1, unreadCount: 1,
+    unreadMentionsCount: 0, unreadReactionsCount: 0, unreadPollVotesCount: 0, notifySettings: { _: "peerNotifySettings" } };
+  const sent = new Map<string, { id: number; text: string }>();
+  function replyToRpc(request: tl.RpcMethod): unknown {
+      switch (request._) {
+        case "updates.getState": return state;
+        case "messages.getDialogs": return { _: "messages.dialogs", dialogs: request.offsetId ? [] : [dialog], messages: [line(2, "Meet at ten")], users: [sender], chats: [chat] };
+        case "messages.getDialogFilters": return { _: "messages.dialogFilters", filters: [] };
+        case "messages.getHistory": return { _: "messages.messagesSlice", count: 2, messages: [line(2, "Meet at ten"), line(1, "Hello")].filter((m) => !request.offsetId || m.id < request.offsetId).slice(0, request.limit), users: [sender], chats: [chat] };
+        case "messages.sendMessage": {
+          const key = request.randomId.toString();
+          const saved = sent.get(key) ?? { id: 3 + sent.size, text: request.message };
+          sent.set(key, saved);
+          return { _: "updates", updates: [{ _: "updateNewMessage", message: line(saved.id, saved.text), pts: 6, ptsCount: 1 }], users: [sender], chats: [chat], date: state.date, seq: 4 };
+        }
+        case "updates.getDifference": return { _: "updates.difference", newMessages: [line(4, "Change of plan")], newEncryptedMessages: [], otherUpdates: [], users: [sender], chats: [chat], state: { ...state, pts: 7 } };
+        default: throw new Error(`Unexpected Telegram RPC ${request._}`);
+      }
+  }
+  const base = new BaseTelegramClient({ apiId: 1, apiHash: "local", storage: new MemoryStorage(), disableUpdates: true,
+    crypto: new WebCryptoProvider({ wasmInput: await WebAssembly.compile(Uint8Array.from(await readFile(wasm))) }),
+    network: { middlewares: [({ request }) => Promise.resolve(replyToRpc(request))] },
+  });
+  vi.spyOn(base.mt.network, "connect").mockResolvedValue(undefined);
+  const client = new TelegramClient({ client: base, disableUpdates: true });
+  try {
+    const telegram = telegramMessages(() => Promise.resolve(client));
+    const list = await Effect.runPromise(telegram.getDialogs("local-owner"));
+    expect(list.dialogs[0]).toMatchObject({ peer_key: "chat:9", can_post: true });
+    expect(list.chats[0]?.title).toBe("Field team");
+    const first = await Effect.runPromise(telegram.getHistory("local-owner", "chat:9", { limit: 1 }));
+    const older = await Effect.runPromise(telegram.getHistory("local-owner", "chat:9", { cursor: first.next_cursor, limit: 1 }));
+    expect([first.messages[0]?.message, older.messages[0]?.message, older.has_more]).toEqual(["Meet at ten", "Hello", false]);
+    const reply = { peer: "chat:9", message: "See you there", replyToMsgId: 2 };
+    const once = await Effect.runPromise(telegram.sendMessage("local-owner", reply, "approved-reply"));
+    const retry = await Effect.runPromise(telegram.sendMessage("local-owner", reply, "approved-reply"));
+    expect([once.message.id, retry.message.id, sent.size]).toEqual([3, 3, 1]);
+    const baseline = await Effect.runPromise(telegram.getDifference("local-owner", 0));
+    const gap = await Effect.runPromise(telegram.getDifference("local-owner", baseline.state.pts));
+    expect([gap.state.pts, gap.new_messages[0]?.message]).toEqual([7, "Change of plan"]);
+  } finally {
+    await client.destroy();
+  }
 });

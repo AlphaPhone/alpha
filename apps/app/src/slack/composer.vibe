@@ -25,7 +25,11 @@ effect function dispatchSend(
   const slack = try Slack
   const ledger = try SlackLedger
   const attempts = try Attempts
-  const token = try tokenForWorkspace(target.workspace)
+  const token = tokenForWorkspace(target.workspace) catch (failure) => failure
+  if (token !== undefined && typeof token !== "string") {
+    try handleSlackFailure(target.workspace, token)
+    return { type: "sendAnswered", id, confirmed: false, known: true }
+  }
   const channelId = ledger.channelId(target.workspace, target.channel)
   const recorded = ledger.sendPayload(id)
   if (token === undefined || channelId === undefined || recorded === undefined) {
@@ -62,7 +66,11 @@ effect function readBackSend(
 ): Event!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
   const slack = try Slack
   const ledger = try SlackLedger
-  const token = try tokenForWorkspace(target.workspace)
+  const token = tokenForWorkspace(target.workspace) catch (failure) => failure
+  if (token !== undefined && typeof token !== "string") {
+    try handleSlackFailure(target.workspace, token)
+    return { type: "readBackAnswered", ticket, ok: false, wasSent: false }
+  }
   const channelId = ledger.channelId(target.workspace, target.channel)
   const recorded = ledger.sendPayload(id)
   const ownerId = ledger.workspaceMeta(target.workspace)?.ownerUserId ?? ""

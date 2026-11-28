@@ -21,6 +21,7 @@ import { telegramAmbientSnapshot, telegramHomeCard } from "../telegram/resident.
 import {
   TelegramStore,
   chatKindOf,
+  acceptedReply,
   currentSessionToken,
   dialogTitle,
   isDialogMuted,
@@ -284,7 +285,7 @@ const messagingHandlers = started(effect {
     if (dialog !== undefined && !dialog.can_post) {
       return { status: "failed" as const, error: "This Telegram channel is read-only" }
     }
-    const tokenOpt = try currentSessionToken().pipe(Effect.provideService(MessagingSessions, sessions))
+    const tokenOpt = try currentSessionToken().pipe(Effect.provideService(TelegramStore, tgStore), Effect.provideService(MessagingSessions, sessions))
     if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Sign in to Telegram first" }
     const replyTo = draft.replyToMessageId ? Number(draft.replyToMessageId) : undefined
     const payload = {
@@ -292,7 +293,7 @@ const messagingHandlers = started(effect {
       message: draft.body,
       ...(replyTo !== undefined && Number.isFinite(replyTo) && replyTo > 0 ? { reply_to_msg_id: replyTo } : {}),
     }
-    const res = telegram.sendMessage(tokenOpt.value, payload, `alpha-card-${draft.id}-r${draft.revision}`) catch (failure) => ({ failed: failure })
+    const res = acceptedReply(tokenOpt.value, telegram.sendMessage(tokenOpt.value, payload, `alpha-card-${draft.id}-r${draft.revision}`)).pipe(Effect.provideService(TelegramStore, tgStore), Effect.provideService(MessagingSessions, sessions)) catch (failure) => ({ failed: failure })
     if ("failed" in res) {
       if (isRevokedFailure(res.failed)) {
         try reportSessionRevoked().pipe(

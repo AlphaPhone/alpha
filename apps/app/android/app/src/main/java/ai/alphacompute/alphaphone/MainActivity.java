@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.role.RoleManager;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
@@ -16,6 +18,7 @@ import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import com.getcapacitor.CapConfig;
 import com.getcapacitor.WebViewListener;
 import java.lang.ref.WeakReference;
@@ -51,6 +54,23 @@ public class MainActivity extends BridgeActivity {
 
  private record TextAsk(int ticket, boolean returnExternally) {}
  private record OfferedAsk(String nonce, TextAsk visit) {}
+
+ static boolean isLive() {
+  MainActivity live = livePage.get();
+  return live != null && !live.isFinishing() && !live.isDestroyed();
+ }
+
+ static void notifyBillingReturn() {
+  MainActivity live = livePage.get();
+  if (live == null || live.isFinishing() || live.isDestroyed()) return;
+  live.runOnUiThread(() -> {
+   if (live.getBridge() == null) return;
+   WebView billingView = live.getBridge().getWebView();
+   if (billingView != null) {
+    billingView.evaluateJavascript("window.dispatchEvent(new Event('alpha-billing-return'))", null);
+   }
+  });
+ }
 
  static void openTextAsk(Activity source) {
   MainActivity live = livePage.get();
@@ -151,6 +171,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
   registerPlugin(ai.eliza.plugins.securestore.SecureStorePlugin.class);
   registerPlugin(AlphaSystemPlugin.class);
+  registerPlugin(AlphaSlackOAuthPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
   registerPlugin(AlphaInboxAttachmentsPlugin.class);
@@ -165,6 +186,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMediaEnrollmentPlugin.class);
   registerPlugin(AlphaScanPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(ai.eliza.plugins.passwords.PasswordsPlugin.class);
@@ -180,6 +202,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaLocalSpeechPlugin.class);
   registerPlugin(AlphaCloudSpeechPlugin.class);
+  registerPlugin(ai.alphacompute.localllm.AlphaLocalLlmPlugin.class);
+  registerPlugin(ai.alphacompute.alphaphone.overlay.AlphaOverlayHostPlugin.class);
   boolean image = AlphaImageCapability.verified(this);
   telephonyAdmitted = image;
   if (image) {
@@ -197,6 +221,11 @@ public class MainActivity extends BridgeActivity {
   page.setFilterTouchesWhenObscured(true);
   page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
   android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+  page.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+   @Override public Bitmap getDefaultVideoPoster() {
+    return Bitmap.createBitmap(new int[] { Color.BLACK }, 1, 1, Bitmap.Config.ARGB_8888);
+   }
+  });
   AlphaDevicePlugin.applyTextScale(this);
   followWindowInsets();
   getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
