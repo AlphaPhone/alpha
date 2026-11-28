@@ -229,11 +229,21 @@ interface FlavorPluginProfile {
   readonly pluginClasses: readonly string[];
 }
 
+const messagingNotices = {
+  sourceDir: "../../app/src/main/java/ai/alphacompute/alphaphone/messaging",
+  plugin: "ai.alphacompute.alphaphone.messaging.AlphaMessagingNoticesPlugin",
+};
+
 const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
+  telegram: {
+    modules: [],
+    sourceDirs: [messagingNotices.sourceDir],
+    pluginClasses: [messagingNotices.plugin],
+  },
   slack: {
     modules: [],
-    sourceDirs: ["../../app/src/main/java/ai/alphacompute/alphaphone/slack"],
-    pluginClasses: ["ai.alphacompute.alphaphone.slack.AlphaSlackOAuthPlugin"],
+    sourceDirs: [messagingNotices.sourceDir, "../../app/src/main/java/ai/alphacompute/alphaphone/slack"],
+    pluginClasses: [messagingNotices.plugin, "ai.alphacompute.alphaphone.slack.AlphaSlackOAuthPlugin"],
   },
   phone: {
     modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts", ":eliza-action-journal"],
@@ -478,6 +488,14 @@ function renderFlavorComponents(app: SuiteAppEntry): readonly string[] {
       `        </provider>`,
     ];
   }
+  if (app.id === "slack" || app.id === "telegram") {
+    return [
+      `        <provider android:name="ai.alphacompute.alphaphone.messaging.MessagingNoticeAuthority"`,
+      `            android:authorities="${app.applicationId}.messaging-notices" android:exported="true"`,
+      `            android:permission="ai.alphacompute.permission.AGENT_IPC" />`,
+      `        <receiver android:name="ai.alphacompute.alphaphone.messaging.MessagingNotices$Dismissed" android:exported="false" />`,
+    ];
+  }
   if (app.id === "clock" || app.id === "reminders") {
     const clock = app.id === "clock";
     const receiver = clock ? "ai.alphacompute.alphaphone.clock.ClockAlertReceiver" : "ai.alphacompute.thinapp.ThinReminderReceiver";
@@ -632,6 +650,9 @@ function renderFlavorPluginsJava(app: SuiteAppEntry): string {
     `    private FlavorPlugins() {}`,
     ``,
     `    static void register(ThinAppActivity activity) {`,
+    ...(app.id === "slack" || app.id === "telegram"
+      ? ["        ai.alphacompute.alphaphone.messaging.MessagingNotices.opened(activity, activity.getIntent());"]
+      : []),
     ...calls,
     `    }`,
     `}`,

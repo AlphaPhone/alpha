@@ -149,6 +149,7 @@ public class MainActivity extends BridgeActivity {
  @Override public void onCreate(Bundle state) {
   SplashScreen.installSplashScreen(this);
   Intent incoming = getIntent();
+  ai.alphacompute.alphaphone.messaging.MessagingNotices.opened(this, incoming);
   BillingReturn.capture(incoming);
   if (incoming == null || !TEXT_ASK.equals(incoming.getAction())) HostedDigestDelivery.get().capture(incoming);
   InboxNoticeDelivery.get(this).capture(incoming);
@@ -172,6 +173,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(ai.eliza.plugins.securestore.SecureStorePlugin.class);
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(ai.alphacompute.alphaphone.clock.AlphaClockAlertsPlugin.class);
+  registerPlugin(ai.alphacompute.alphaphone.messaging.AlphaMessagingNoticesPlugin.class);
   registerPlugin(ai.alphacompute.alphaphone.slack.AlphaSlackOAuthPlugin.class);
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaSelectedDocumentsPlugin.class);
@@ -368,6 +370,7 @@ public class MainActivity extends BridgeActivity {
  }
 
  @Override protected void onNewIntent(Intent intent) {
+  ai.alphacompute.alphaphone.messaging.MessagingNotices.opened(this, intent);
   if (receiveTextAsk(intent) || receiveSmsDraft(intent)) return;
   if (BillingReturn.capture(intent) && getBridge() != null) {
    WebView billingView = getBridge().getWebView();

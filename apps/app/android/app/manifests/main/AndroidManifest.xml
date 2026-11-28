@@ -131,6 +131,8 @@
   <service android:name=".ipc.AlphaContextRegistryService" android:exported="true" android:permission="ai.alphacompute.permission.AGENT_IPC">
    <intent-filter><action android:name="ai.alphacompute.ipc.ACTION_CONTEXT_REGISTRY" /></intent-filter>
   </service>
+  <provider android:name=".messaging.MessagingNoticeAuthority" android:authorities="${applicationId}.messaging-notices" android:exported="true" android:permission="ai.alphacompute.permission.AGENT_IPC" />
+  <receiver android:name=".messaging.MessagingNotices$Dismissed" android:exported="false" />
   <provider android:name=".ipc.AlphaPreferencesProvider" android:authorities="ai.alphacompute.alphaphone.preferences" android:exported="true" android:permission="ai.alphacompute.permission.AGENT_IPC" />
   <service android:name=".overlay.AlphaVoiceInteractionService" android:label="@string/app_name" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
    <meta-data android:name="android.voice_interaction" android:resource="@xml/alpha_voice_interaction_service" />
