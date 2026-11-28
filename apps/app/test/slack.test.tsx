@@ -387,7 +387,13 @@ describe("Slack user-account client over live HTTP provider", () => {
     await controlPost("/__control/inject", { ...incoming, channel: "C02ENG", text: "<@U01OWNER> former account only" });
     await vi.waitFor(() => expect(phone.messagingNotices.posted()).toHaveLength(1), { timeout: 8000 });
     const [former] = phone.messagingNotices.posted();
+    expect(former.body).toContain("former account only");
+    const engineering = await channelNum(reopened, view.workspace, "C02ENG");
+    const earlier = restored.channelMessagesOf(view.workspace, engineering).find((message) => message.text.includes("former account only"));
+    if (!earlier) throw new Error("The private update did not reach the first Slack session");
     await reopened.close();
+    const currentMessage = "Updated engineering announcement";
+    expect(await controlPost("/__control/inject", { ...incoming, channel: "C02ENG", kind: "edit", ts: earlier.ts, text: currentMessage })).toMatchObject({ ok: true, message: { ts: earlier.ts, text: currentMessage } });
     const sibling = await mountSlack(provider.origin, { ...phone, messagingNotices: scene().messagingNotices });
     const before = await waitFor(sibling.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.connected.length === 1);
     await underAct(async () => { await sibling.runtime.runPromise(AuthMachine.use((m) => m.send({ type: "startConnect" }))); });
@@ -400,6 +406,8 @@ describe("Slack user-account client over live HTTP provider", () => {
     await vi.waitFor(() => expect(phone.messagingNotices.pending()).toBeUndefined());
     expect((await reauthorized.runtime.runPromise(ConversationMachine.use((m) => m.get()))).channel).toBe(0);
     expect(Shell.showing(await reauthorized.runtime.runPromise(Shell.Machine.use((m) => m.get())), "Slack")).toBe(false);
+    await waitFor(reauthorized.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    await vi.waitFor(() => expect(reauthorized.host.textContent).toContain(currentMessage));
     expect(reauthorized.host.textContent).not.toContain("former account only");
   }, 40_000);
 
