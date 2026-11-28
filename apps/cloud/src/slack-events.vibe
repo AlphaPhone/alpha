@@ -114,10 +114,10 @@ module slackWire {
     const fields = new URLSearchParams(new TextDecoder().decode(bytes))
     const renewal = fields.get("grant_type") === "refresh_token"
     const allowed = renewal ? ["client_id","grant_type","refresh_token"] : ["client_id","code","code_verifier","redirect_uri","grant_type"]
-    const redirect = fields.get("redirect_uri")
+    const redirects = ["alphaphone://slack/oauth/callback", "alphaphone://slack/oauth/standalone", origin + "/alpha-slack-return"]
     if (fields.get("client_id") !== clientId || [...fields.keys()].some(key => !allowed.includes(key) || fields.getAll(key).length !== 1) ||
       (renewal ? !fields.get("refresh_token") : (!fields.get("code") || !/^[A-Za-z0-9._~-]{43,128}$/.test(fields.get("code_verifier") ?? "") ||
-      ![null,"authorization_code"].includes(fields.get("grant_type")) || (redirect !== "alphaphone://slack/oauth/callback" && redirect !== origin + "/alpha-slack-return")))) throw new SlackRefusal(400, "invalid_grant")
+      ![null,"authorization_code"].includes(fields.get("grant_type")) || !redirects.includes(fields.get("redirect_uri") ?? "")))) throw new SlackRefusal(400, "invalid_grant")
     return fields
   }
 }

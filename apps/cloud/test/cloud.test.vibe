@@ -56,14 +56,14 @@ module node {
       body: JSON.stringify({path: "/api/apps.event.authorizations.list", status: 429, retryAfter: 2, remaining: 1}) })
     if (!response.ok) throw new Error("could not configure Slack rate limit")
   }
-  export async function consentCode(origin: string, team: string) {
+  export async function consentCode(origin: string, team: string, redirectUri: string) {
     const verifier = random()
-    const fields = new URLSearchParams({ client_id: receiverEnv.SLACK_CLIENT_ID, redirect_uri: "alphaphone://slack/oauth/callback",
+    const fields = new URLSearchParams({ client_id: receiverEnv.SLACK_CLIENT_ID, redirect_uri: redirectUri,
       state: random(), code_challenge: challengeOf(verifier), code_challenge_method: "S256", team, decision: "allow" })
     const answer = await fetch(origin + "/oauth/v2/authorize", { method: "POST", body: fields, redirect: "manual" })
     const code = new URL(answer.headers.get("location") ?? "").searchParams.get("code")
     if (!code) throw new Error("provider did not authorize grant")
-    return new URLSearchParams({ client_id: receiverEnv.SLACK_CLIENT_ID, redirect_uri: "alphaphone://slack/oauth/callback", code_verifier: verifier, code })
+    return new URLSearchParams({ client_id: receiverEnv.SLACK_CLIENT_ID, redirect_uri: redirectUri, code_verifier: verifier, code })
   }
   /** Fixed origin and test-owned request fields. @throws {never} */
   export function relayRequest(path: string, body: string, headers: Record<string,string> = {}): Request {
@@ -438,15 +438,15 @@ describe(`Cloud Slack events reach each authorized installation (spec/app/slack/
     const now = 1800000000000
     const relay = (request: Request, at = now) => slackRelay(request, receiverEnv, send, at)
     const readFor = (access: string, cursor?: number) => relay(relayRequest("events/read", JSON.stringify({ cursor }), { Authorization: "Bearer " + access }))
-    const grant = effect (team: string) => {
-      const fields = try tryPromise(() => consentCode(slack.origin, team))
+    const grant = effect (team: string, redirect: string) => {
+      const fields = try tryPromise(() => consentCode(slack.origin, team, redirect))
       const answer = try relay(relayRequest("oauth", fields.toString()))
       const body = try tryPromise(() => answer.json() as Promise<{ authed_user: { access_token: string; refresh_token: string } }>)
       try holds(() => assert.ok(body.authed_user?.access_token, JSON.stringify([answer.status, Object.keys(body)])))
       return body.authed_user
     }
-    const alpha = try grant("T01ALPHA")
-    const design = try grant("T02DESIGN")
+    const alpha = try grant("T01ALPHA", "alphaphone://slack/oauth/callback")
+    const design = try grant("T02DESIGN", "alphaphone://slack/oauth/standalone")
     const readBody = (answer: Response) => tryPromise(() => answer.json() as Promise<{ cursor: number; events: { event: { text: string; channel: string } }[] }>)
     const initial = try readBody(try readFor(alpha.access_token))
     try holds(() => assert.deepStrictEqual(initial, { cursor: 0, events: [] }))

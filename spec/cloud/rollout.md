@@ -198,8 +198,9 @@ The signed-in Alpha owner’s exported MTProto session stays in the phone’s se
 
 With a verified profile, `GET /.well-known/alpha-slack` publishes the deployment's
 registered public Slack client ID. Its operator supplies `SLACK_CLIENT_ID`
-from the Alpha Slack app with PKCE enabled and `alphaphone://slack/oauth/callback`
-registered. An absent or malformed ID yields a retryable 503. For live workspace
+from the Alpha Slack app with PKCE enabled. The registered redirects are
+`alphaphone://slack/oauth/callback` for the launcher and
+`alphaphone://slack/oauth/standalone` for the standalone Slack app. An absent or malformed ID yields a retryable 503. For live workspace
 notices, the operator enables token rotation and the Slack Events API, subscribes
 on behalf of users to `message.channels`, `message.groups`, `message.im` and
 `message.mpim`, and registers the API host's `/api/slack/events` as the request
