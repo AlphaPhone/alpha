@@ -1,6 +1,6 @@
 name: release
 
-# Alpha's launcher release (spec/release/index.md, `pnpm release` in apps/app). A push to main or develop builds
+# Alpha's launcher release (spec/release/index.md, `pnpm release` in apps/app). A push to a configured branch builds
 # an unsigned candidate, mirrors it privately with its signing plan, and stops. The release
 # owner reads the plan and dispatches this workflow with the candidate's run and the plan's digest: the
 # protected `release` environment signs exactly that plan's APK with Alpha's one key, delivers it with a
