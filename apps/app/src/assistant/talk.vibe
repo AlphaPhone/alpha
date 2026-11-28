@@ -192,6 +192,7 @@ export interface Board {
   lastSentId: string
   /** Whether any text had settled when the owner stopped the reply, by the id the agent keeps its message under, since Alpha started. */
   readonly ownerStops: Map<string, boolean>
+  /** A change to it, to `waitingRequest` or to `postingRequest` is told to subscribers, so a heard turn waiting on the send in hand sees it settle. */
   sendWhenMade: number
   staged: StagedFiles | undefined
   lastTranscriptOffer: number
@@ -281,6 +282,9 @@ export const talk = Layer.effect(Talk, effect {
   let readLines: readonly ReadLine[] = []
   let previewOrigin: { readonly preview: NonNullable<Seen["preview"]>; readonly conversation: number; readonly id: string } | undefined
   let restoredSentId = ""
+  let sendWhenMade = 0
+  let waitingRequest: Board["waitingRequest"] = undefined
+  let postingRequest: Board["postingRequest"] = undefined
   let seen: Seen = {
     pages: new Map(), reply: "", replyUntold: [], label: "", failure: undefined, typed: "", files: [], filesBinding: undefined, filesAuthority: undefined, contactDraft: undefined, transcript: undefined, attachmentNotice: "", preview: undefined, recordingSummary: undefined, media: [], mediaNotes: [], saved: "", hits: [],
     titles: new Map(), mending: undefined,
@@ -307,7 +311,12 @@ export const talk = Layer.effect(Talk, effect {
     get lastSentId() { return board.lastPost?.receipt?.clientMessageId ?? restoredSentId },
     set lastSentId(id: string) { restoredSentId = id },
     ownerStops: new Map(),
-    sendWhenMade: 0,
+    get sendWhenMade() { return sendWhenMade },
+    set sendWhenMade(ticket: number) {
+      if (ticket === sendWhenMade) return
+      sendWhenMade = ticket
+      for (const listener of listeners) listener()
+    },
     staged: undefined,
     lastTranscriptOffer: 0,
     previewFile: (file) => {
@@ -321,8 +330,18 @@ export const talk = Layer.effect(Talk, effect {
     rememberNetwork: (ticket, sighting) => { network = { ticket, sighting } },
     forgetNetwork: () => { network = undefined },
     networkFor: (ticket) => (network?.ticket === ticket ? network.sighting : undefined),
-    waitingRequest: undefined,
-    postingRequest: undefined,
+    get waitingRequest() { return waitingRequest },
+    set waitingRequest(request: Board["waitingRequest"]) {
+      if (request === waitingRequest) return
+      waitingRequest = request
+      for (const listener of listeners) listener()
+    },
+    get postingRequest() { return postingRequest },
+    set postingRequest(request: Board["postingRequest"]) {
+      if (request === postingRequest) return
+      postingRequest = request
+      for (const listener of listeners) listener()
+    },
     change: (patch) => {
       const previous = seen.recordingSummary
       seen = { ...seen, ...patch }

@@ -18,7 +18,7 @@ import { useMachine as useCards } from "../../gen/app__assistant__cards.react.ts
 import { offerShown } from "../../gen/app__assistant__cards.ts";
 import { useMachine as useChats } from "../../gen/app__assistant__chats.react.ts";
 import { type Composer as Writing, type Event as ComposerEvent, Machine as ComposerMachine } from "../../gen/app__assistant__composer.effect.vibe";
-import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
+import { enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
 import { browserFieldPull, composerLift, isOpen as dockOpen, pill as dockPill, sent as dockSent, touched as dockTouched } from "../../gen/app__assistant__dock.ts";
@@ -795,7 +795,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const contactFiles = contactDraft?.files ?? [];
   const sendable = subject !== undefined
     ? (request.trim() !== "" || contactFiles.length > 0) && request.length <= textLimit && askable(talking) && (!newChat || chats.can(start))
-    : newChat ? content(writing.editor) && !writing.long && chats.can(start) && askable(talking) : composer.can(hold);
+    : newChat ? composer.can(hold) && chats.can(start) : composer.can(hold);
   const notice = noticeOf(writing);
   const heldDraft = onComms ? undefined : draftCard(runtime, writing, seen, composer, conversation);
   const draftFiles = sameBinding(seen.filesBinding, writing.binding) ? seen.files : [];
