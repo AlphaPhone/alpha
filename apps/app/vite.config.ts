@@ -6,7 +6,6 @@ import vibelang from "vibelang-vite";
 import { type Plugin, defineConfig } from "vite";
 import { eliza } from "@repo/eliza-harness";
 import deployments from "@repo/deployment/deployments.json" with { type: "json" };
-import { production } from "./capacitor.config.ts";
 import { fakePhone, fakes } from "./test/fakes/serve.ts";
 import { localOcrAssets } from "./scripts/ocr-assets.ts";
 import { type AlphaSurface, allowsPlace, needsLocalOcr, parseSurface } from "./src/surface.ts";
@@ -103,7 +102,7 @@ export default defineConfig(({ mode }) => ({
   envPrefix: ["VITE_", "ELIZA_DEV_ALLOW_TEST_MOCKS"],
   // spec/app/settings/facts.md, "Facts hold the newest asking, which facts and accesses its answer reported, the roles, and Set as Home in flight": About names the version this build was made as where the phone names none.
   define: { "import.meta.env.VITE_ALPHA_VERSION": JSON.stringify(version),
-    "import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN": JSON.stringify(production.cloud),
+    "import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN": JSON.stringify(deployments.production.cloud),
     "import.meta.env.VITE_ALPHA_SLACK_BROWSER_APIS": JSON.stringify(mode === "hosted-slack"
       ? Object.fromEntries([deployments.production, deployments.staging].map((row) => [`https://${row.appLinkHost}`, row.cloud]))
       : {}),
