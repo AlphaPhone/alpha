@@ -36,7 +36,9 @@ import org.json.JSONObject;
 public final class AlphaCoreSignInHost {
     private static final long STANDARD_TIMEOUT_MS = 25_000L;
     private static final long BROWSER_OAUTH_TIMEOUT_MS = 180_000L;
+    private static final long ACTIVITY_LAUNCH_TIMEOUT_MS = 5_000L;
     private static final Set<String> BROWSER_METHODS = Set.of("startGoogle", "upgradeMailLease", "reauthenticate");
+    private static final Set<String> ACTIVITY_HOSTED_METHODS = Set.of("startGoogle", "upgradeMailLease");
     private static final Object SINGLETON_LOCK = new Object();
     private static AlphaCoreSignInHost sharedInstance;
 
@@ -106,6 +108,11 @@ public final class AlphaCoreSignInHost {
             && !AlphaIpcContract.CORE_PACKAGE.equals(callingPackage)) {
             pendingBrowserCaller.set(callingPackage);
         }
+        boolean launchedTrampoline = false;
+        if (ACTIVITY_HOSTED_METHODS.contains(methodName) && AlphaCoreSignInActivity.current() == null) {
+            launchedTrampoline = AlphaCoreSignInActivity.ensureActivity(appContext, callingPackage, ACTIVITY_LAUNCH_TIMEOUT_MS) != null;
+        }
+        boolean closeTrampolineOnReject = launchedTrampoline;
         JSONObject rawArgs = options == null ? new JSONObject() : options;
         if (!rawArgs.has("environment") && needsEnvironment(methodName)) {
             try {
@@ -129,6 +136,9 @@ public final class AlphaCoreSignInHost {
             }
 
             @Override public void reject(String message, String code, Exception cause, JSObject errorData) {
+                if (closeTrampolineOnReject) {
+                    AlphaCoreSignInActivity.finishActive();
+                }
                 String resolvedCode = code == null || code.isEmpty() ? "Rejected" : code;
                 String resolvedMessage = message == null || message.isEmpty() ? resolvedCode : message;
                 reject.accept(resolvedCode, resolvedMessage);
@@ -137,9 +147,11 @@ public final class AlphaCoreSignInHost {
         try {
             method.invoke(plugin, call);
         } catch (InvocationTargetException failure) {
+            if (closeTrampolineOnReject) AlphaCoreSignInActivity.finishActive();
             Throwable cause = failure.getTargetException();
             reject.accept("Unavailable", cause == null ? "Sign-in call failed" : String.valueOf(cause.getMessage()));
         } catch (IllegalAccessException | RuntimeException failure) {
+            if (closeTrampolineOnReject) AlphaCoreSignInActivity.finishActive();
             reject.accept("Unavailable", failure.getMessage() == null ? "Sign-in call failed" : failure.getMessage());
         }
     }

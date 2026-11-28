@@ -34,16 +34,21 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -66,6 +71,7 @@ public final class AlphaPlatformBrokerService extends Service {
     });
     private final RemoteCallbackList<IAlphaEventCallback> signInObservers = new RemoteCallbackList<>();
     private final AtomicLong signInEventSeq = new AtomicLong();
+    private final AtomicReference<SpeechCapture> activeSpeechCapture = new AtomicReference<>();
 
     private LargeBodyGrant grants;
     private CloudRequests cloudRequests;
@@ -73,6 +79,12 @@ public final class AlphaPlatformBrokerService extends Service {
     private AutoCloseable signInSubscription;
     private AutoCloseable signInHostSubscription;
     private AutoCloseable billingReturnSubscription;
+    private AutoCloseable localLlmProgressSubscription;
+
+    private static final class SpeechCapture {
+        final List<JSONObject> events = new CopyOnWriteArrayList<>();
+        final AtomicBoolean playbackStopped = new AtomicBoolean(false);
+    }
 
     private final IAlphaPlatformBroker.Stub binder = new IAlphaPlatformBroker.Stub() {
         @Override public void cloudRequest(
@@ -234,6 +246,9 @@ public final class AlphaPlatformBrokerService extends Service {
         signInSubscription = AlphaCorePluginDispatch.observeSignIn(this, this::broadcastSignInSettled);
         signInHostSubscription = AlphaCoreSignInHost.shared(this).subscribe(this::broadcastSignInEvent);
         billingReturnSubscription = BillingReturn.subscribe(this::broadcastBillingReturn);
+        localLlmProgressSubscription = AlphaCorePluginDispatch.subscribeLocalLlmProgress(
+            progress -> broadcastSignInEvent("downloadProgress", progress)
+        );
     }
 
     @Override public IBinder onBind(Intent intent) {
@@ -247,6 +262,8 @@ public final class AlphaPlatformBrokerService extends Service {
         signInHostSubscription = null;
         closeAutoQuietly(billingReturnSubscription);
         billingReturnSubscription = null;
+        closeAutoQuietly(localLlmProgressSubscription);
+        localLlmProgressSubscription = null;
         signInObservers.kill();
         if (speechHost != null) {
             speechHost.close();
@@ -331,9 +348,37 @@ public final class AlphaPlatformBrokerService extends Service {
 
     private synchronized AlphaCoreSpeechHost ensureSpeechHost() {
         if (speechHost == null) {
-            speechHost = new AlphaCoreSpeechHost(this, (plugin, event, data) -> {});
+            speechHost = new AlphaCoreSpeechHost(this, this::handleSpeechEvent);
         }
         return speechHost;
+    }
+
+    private void handleSpeechEvent(String pluginName, String eventName, JSONObject data) {
+        String name = eventName == null ? "" : eventName;
+        JSONObject payload = data == null ? new JSONObject() : data;
+        SpeechCapture capture = activeSpeechCapture.get();
+        if (capture != null && !name.isEmpty()) {
+            try {
+                capture.events.add(new JSONObject().put("name", name).put("payload", payload));
+            } catch (JSONException ignored) {
+            }
+            if ("playbackStopped".equals(name) || "playbackEnded".equals(name) || "playbackFailed".equals(name)) {
+                capture.playbackStopped.set(true);
+            }
+        }
+        if (!name.isEmpty()) {
+            broadcastSignInEvent(name, payload);
+            try {
+                broadcastSignInEvent(
+                    "speechEvent",
+                    new JSONObject()
+                        .put("plugin", pluginName == null ? "AlphaVoiceCloud" : pluginName)
+                        .put("name", name)
+                        .put("payload", payload)
+                );
+            } catch (JSONException ignored) {
+            }
+        }
     }
 
     private String invokeSpeechPluginSync(String pluginName, String method, String argsJson) {
@@ -343,26 +388,40 @@ public final class AlphaPlatformBrokerService extends Service {
         } catch (JSONException malformed) {
             options = new JSONObject();
         }
+        SpeechCapture capture = new SpeechCapture();
+        SpeechCapture previous = activeSpeechCapture.getAndSet(capture);
         CompletableFuture<String> pending = new CompletableFuture<>();
-        ensureSpeechHost().dispatch(
-            pluginName,
-            method,
-            "broker-" + System.nanoTime(),
-            options,
-            data -> {
-                JSONObject out = new JSONObject();
-                try {
-                    out.put("ok", true).put("result", data == null ? new JSONObject() : data);
-                } catch (JSONException ignored) {
-                }
-                pending.complete(out.toString());
-            },
-            (code, message) -> pending.complete(pluginErrorEnvelope(code, message))
-        );
         try {
+            ensureSpeechHost().dispatch(
+                pluginName,
+                method,
+                "broker-" + System.nanoTime(),
+                options,
+                data -> {
+                    JSONObject out = new JSONObject();
+                    try {
+                        out.put("ok", true).put("result", data == null ? new JSONObject() : data);
+                        if (!capture.events.isEmpty()) {
+                            JSONArray captured = new JSONArray();
+                            for (JSONObject item : new ArrayList<>(capture.events)) {
+                                captured.put(item);
+                            }
+                            out.put("events", captured);
+                        }
+                        if (capture.playbackStopped.get()) {
+                            out.put("playbackStopped", true);
+                        }
+                    } catch (JSONException ignored) {
+                    }
+                    pending.complete(out.toString());
+                },
+                (code, message) -> pending.complete(pluginErrorEnvelope(code, message))
+            );
             return pending.get(CORE_SPEECH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (Exception timedOut) {
             return pluginErrorEnvelope("TIMEOUT", "Core speech request timed out");
+        } finally {
+            activeSpeechCapture.compareAndSet(capture, previous);
         }
     }
 

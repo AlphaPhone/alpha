@@ -4,6 +4,7 @@ import ai.alphacompute.alphaphone.overlay.AlphaOverlayHostPlugin;
 import ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionService;
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.AlphaSuitePolicy;
+import ai.alphacompute.localllm.AlphaLocalLlmCatalog;
 import ai.alphacompute.localllm.AlphaLocalLlmPlugin;
 import ai.alphacompute.localllm.AlphaLocalModelManager;
 import ai.eliza.os.agent.AgentConfig;
@@ -59,7 +60,9 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -77,8 +80,32 @@ public final class AlphaCorePluginDispatch {
     private static final double MAX_REVISION = 9_007_199_254_740_991d;
     private static final long SYNC_DISPATCH_TIMEOUT_MS = 25_000L;
     private static final Pattern DELETION_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
+    private static final Set<Consumer<JSONObject>> localLlmProgressListeners = new CopyOnWriteArraySet<>();
 
     private AlphaCorePluginDispatch() {}
+
+    /** Subscribes to live {@code AlphaLocalLlm} download progress updates triggered through AlphaCore dispatch. */
+    public static AutoCloseable subscribeLocalLlmProgress(Consumer<JSONObject> listener) {
+        if (listener == null) return () -> {};
+        localLlmProgressListeners.add(listener);
+        return () -> localLlmProgressListeners.remove(listener);
+    }
+
+    private static void broadcastLocalLlmProgress(AlphaLocalModelManager.DownloadProgress progress) {
+        if (progress == null) return;
+        JSONObject payload;
+        try {
+            payload = progress.toJson();
+        } catch (JSONException ignored) {
+            return;
+        }
+        for (Consumer<JSONObject> listener : localLlmProgressListeners) {
+            try {
+                listener.accept(payload);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
 
     /** Builds the {@code ElizaSignIn.status()} payload matching {@code @elizaos/os-bridges}'s schema. */
     public static JSONObject signInStatus(Context context) {
@@ -388,6 +415,21 @@ public final class AlphaCorePluginDispatch {
         BiConsumer<String, String> reject
     ) {
         try {
+            if ("download".equals(method)) {
+                String modelId = options.optString("modelId", AlphaLocalLlmCatalog.DEFAULT_MODEL_ID);
+                boolean allowMetered = options.optBoolean("allowMetered", false);
+                AlphaLocalModelManager manager = AlphaLocalModelManager.shared(context);
+                AlphaLocalModelManager.DownloadProgress started = manager.startDownload(
+                    modelId,
+                    allowMetered,
+                    AlphaCorePluginDispatch::broadcastLocalLlmProgress
+                );
+                resolve.accept(new JSONObject()
+                    .put("ok", true)
+                    .put("modelId", started.modelId())
+                    .put("status", started.toJson()));
+                return;
+            }
             resolve.accept(AlphaLocalLlmPlugin.invoke(context, method, options));
         } catch (AlphaLocalModelManager.ModelRefusedException refused) {
             reject.accept(refused.code, refused.getMessage());

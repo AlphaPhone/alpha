@@ -82,6 +82,7 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
     private final AutoCloseable signInObserver;
     private final AutoCloseable signInHostObserver;
     private final AutoCloseable billingReturnObserver;
+    private final AutoCloseable localLlmProgressObserver;
     private final AutoCloseable callStateWatch;
     private final ContentObserver preferencesObserver;
     private volatile boolean closed;
@@ -114,6 +115,9 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
                 scriptSink.accept("window.dispatchEvent(new Event('alpha-billing-return'))");
             }
         });
+        this.localLlmProgressObserver = AlphaCorePluginDispatch.subscribeLocalLlmProgress(progress ->
+            emitPluginEvent("AlphaLocalLlm", "downloadProgress", progress)
+        );
         this.callStateWatch = AlphaCorePluginDispatch.watchCallState(appContext, state ->
             emitPluginEvent("AlphaCallState", "callState", state)
         );
@@ -408,6 +412,10 @@ final class AlphaOverlayCapacitorBridge implements AutoCloseable {
         }
         try {
             billingReturnObserver.close();
+        } catch (Exception ignored) {
+        }
+        try {
+            localLlmProgressObserver.close();
         } catch (Exception ignored) {
         }
         try {
