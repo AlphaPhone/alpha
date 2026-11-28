@@ -376,6 +376,17 @@ describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "St
     const env = { CLOUD_PROFILE_SHA256: sha256Hex(profile), ASSETS: holding(undefined) } as unknown as Parameters<typeof alphaCloudWorker.fetch>[1]
     const answer = try tryPromise(() => alphaCloudWorker.fetch(new EdgeRequest("https://api.alphaphone.dev/api/health"), env))
     try holds(() => assert.deepStrictEqual([answer.status, answer.headers.get("retry-after")], [503, "30"]))
+    const registration = new EdgeRequest("https://api.alphaphone.dev/.well-known/alpha-slack")
+    const ready = { ...env, ASSETS: holding(profile) }
+    const telegram = new EdgeRequest("https://api.alphaphone.dev/.well-known/alpha-telegram")
+    const absentTelegram = try tryPromise(() => alphaCloudWorker.fetch(telegram, ready))
+    const registeredTelegram = try tryPromise(() => alphaCloudWorker.fetch(telegram, { ...ready, TELEGRAM_API_ID: "1234" }))
+    const telegramInfo = try tryPromise(() => registeredTelegram.json())
+    try holds(() => assert.deepStrictEqual([absentTelegram.status, registeredTelegram.status, telegramInfo], [503, 200, { apiId: 1234 }]))
+    const missing = try tryPromise(() => alphaCloudWorker.fetch(registration, ready))
+    const published = try tryPromise(() => alphaCloudWorker.fetch(registration, { ...ready, SLACK_CLIENT_ID: "123.456" }))
+    const body = try tryPromise(() => published.json())
+    try holds(() => assert.deepStrictEqual([missing.status, published.status, body], [503, 200, { clientId: "123.456" }]))
   })
 })
 

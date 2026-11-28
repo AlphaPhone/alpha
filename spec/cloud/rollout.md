@@ -189,6 +189,18 @@ pure def renderAccepted(problems: List[RenderProblem], namesElizaCloud: bool): b
 > operator reviewed, and to ask a phone to try again rather than serve
 > another.
 
+A phone built with Alpha’s own Telegram application registration verifies its numeric
+API ID at `GET /.well-known/alpha-telegram` before starting an MTProto sign-in.
+The Android build takes `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from its release
+configuration. The Cloud deployment takes only `TELEGRAM_API_ID` and returns 503
+until it is configured. The phone sends login codes and two-factor proofs directly to Telegram.
+The signed-in Alpha owner’s exported MTProto session stays in the phone’s secure store.
+
+With a verified profile, `GET /.well-known/alpha-slack` publishes the deployment's
+registered public Slack client ID. Its operator supplies `SLACK_CLIENT_ID`
+from the Alpha Slack app with PKCE enabled and `alphaphone://slack/oauth/callback`
+registered. An absent or malformed ID yields a retryable 503.
+
 ### The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry
 
 The profile is larger than a Worker variable may be, so the Worker's static

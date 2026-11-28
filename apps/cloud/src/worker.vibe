@@ -1,10 +1,13 @@
 // spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker"; spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
 import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud-worker"
+import { EdgeResponse } from "./edge-platform.ts"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
 /** The API Worker's bindings: eliza's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */
 export type AlphaCloudBindings = Omit<CloudBindings, "CLOUD_PROFILE" | "ASSETS"> & {
   readonly CLOUD_PROFILE_SHA256: string
+  readonly SLACK_CLIENT_ID?: string
+  readonly TELEGRAM_API_ID?: string
   readonly ASSETS: AssetFetcher
 }
 
@@ -32,7 +35,24 @@ const alphaCloudWorker = {
   },
   async fetch(request: Request, env: AlphaCloudBindings, execution?: WorkerExecution): Promise<Response> {
     const bound = await bindingsOf(env)
-    return bound === undefined ? profileUnavailable() : upstream.fetch(request, bound, execution)
+    if (bound === undefined) return profileUnavailable()
+    const path = new URL(request.url).pathname
+    if (path === "/.well-known/alpha-slack" || path === "/.well-known/alpha-telegram") {
+      const headers = { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" }
+      if (request.method !== "GET" && request.method !== "HEAD")
+        return new EdgeResponse(null, { status: 405, headers: { ...headers, Allow: "GET, HEAD" } })
+      const clientId = env.SLACK_CLIENT_ID
+      const apiId = Number(env.TELEGRAM_API_ID)
+      const registered = path === "/.well-known/alpha-slack"
+        ? clientId && /^[0-9]+\.[0-9]+$/.test(clientId) ? { clientId } : undefined
+        : Number.isSafeInteger(apiId) && apiId > 0 ? { apiId } : undefined
+      if (registered === undefined)
+        return new EdgeResponse(null, { status: 503, headers: { ...headers, "Retry-After": "30" } })
+      return new EdgeResponse(request.method === "HEAD" ? null : JSON.stringify(registered), {
+        headers: { ...headers, "Content-Type": "application/json" },
+      })
+    }
+    return upstream.fetch(request, bound, execution)
   },
 }
 
