@@ -16,7 +16,7 @@ import {
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
 import type { Effect as Out, Event, Incoming, Target } from "../../gen/app__slack__notices.effect.vibe"
 import * as Auth from "../../gen/app__slack__auth.effect.vibe"
-import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
+import type * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
 import type * as Workspaces from "../../gen/app__slack.effect.vibe"
 
 const emptyIncoming: Incoming = {
