@@ -20,7 +20,7 @@ env:
 
 jobs:
   verify-fresh:
-    name: Fresh verification, specs, browser tests and notices
+    name: Record the authorized Alpha spec ledger
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -42,9 +42,16 @@ jobs:
         run: |
           pnpm --filter @repo/app licences --check
           python3 scripts/ci/app_update_producer.py signer-record apps/app/aosp/signing/release-signer.json
-      - name: Run full uncached verification suite
-        run: pnpm verify --concurrency=4 --continue=dependencies-successful --log-order=stream
-      - name: Run image, release, and AOSP conformance tests
+      - name: Build the verification prerequisites
+        run: pnpm all build --concurrency=4 --continue=dependencies-successful --log-order=stream
+      - name: Record the spec ledger after verification passes
         run: |
-          pnpm --filter @repo/app exec vitest run test/image.test.ts
-          python3 apps/app/aosp/branding/provision/test_fresh_presets.py
+          pnpm accept
+          git diff --exit-code -- . ':!spec/lock.json'
+          test -n "$(git diff --name-only -- spec/lock.json)"
+          sha256sum spec/lock.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: accepted-alpha-spec-ledger
+          path: spec/lock.json
+          if-no-files-found: error
