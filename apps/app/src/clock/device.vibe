@@ -1,0 +1,69 @@
+// spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"; spec/app/clock/timers.md, "Story: Run multiple countdown timers"
+import * as Alarms from "../../gen/app__clock__alarms.effect.vibe"
+import * as Timers from "../../gen/app__clock__timers.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as ClockView from "../../gen/app__clock.effect.vibe"
+import { Device, PhoneClockAlerts, type NativeClockAlert } from "../platform/index.vibe"
+import { contained, started } from "../runtime/index.vibe"
+import { currentSurface } from "../surface.ts"
+import { activeClockRecords, activeClockTicks } from "./shelf.vibe"
+
+export const deviceClock = started(effect {
+  const host = try PhoneClockAlerts
+  const surface = currentSurface()
+  if (!host.present || surface.mode === "overlay" || (surface.mode === "app" && surface.view !== "Clock")) return
+  const alarms = try Alarms.Machine
+  const timers = try Timers.Machine
+  const view = try ClockView.Machine
+  const shell = Context.getOption(try Effect.context<never>(), Shell.Machine)
+  const records = try activeClockRecords()
+  const { delivery } = try activeClockTicks()
+  const device = try Device
+  const wake = Stream.prepend(Stream.merge(host.changed, Stream.map(device.visible, () => undefined)), [undefined])
+  const changes = Stream.zipLatest(Stream.zipLatest(alarms.changes, timers.changes), wake)
+  try Stream.runForEach(changes, effect ([[a, t]]) => {
+    const desired: NativeClockAlert[] = []
+    for (const alarm of a.items) {
+      if (!alarm.enabled) continue
+      const ringing = alarm.phase === "Ringing"
+      const at = ringing ? alarm.fireAt : Alarms.dueAtOf(alarm)
+      if (at > 0) desired.push({ kind: "alarm", id: alarm.id, at, ringing, title: records.alarm(alarm.id).label || "Alarm",
+        vibrate: alarm.vibrate, snoozed: alarm.phase === "Snoozed", hour: alarm.hour, minute: alarm.minute, daysMask: alarm.daysMask })
+    }
+    for (const timer of t.items) {
+      const ringing = timer.status === "Ringing"
+      if (ringing || timer.status === "Running") desired.push({ kind: "timer", id: timer.id, at: ringing ? timer.ringStartedAt : timer.endAt,
+        ringing, title: records.timer(timer.id).label || "Timer", vibrate: true })
+    }
+    const result = try host.reconcile(desired)
+    delivery.set(desired.length === 0 ? "" : result === undefined ? "unavailable" : !result.notificationsEnabled ? "notifications" : !result.exact ? "exact" : "")
+    if (!(try device.showing())) return
+    const tap = try host.pendingTap()
+    if (tap === undefined) return
+    if (surface.mode === "monolith" && Option.isSome(shell) && (try shell.value.get()).trail.at(-1) !== "Clock") {
+      if (!(try contained(shell.value.send({ type: "openView", view: "Clock" }), "opening Clock from its notification"))) return
+    }
+    const tab = tap.kind === "alarm" ? "Alarms" : "Timers"
+    const selected = try view.get()
+    if (ClockView.canCloseSheet(selected)) {
+      if (!(try contained(view.send({ type: "closeSheet" }), "opening the notification over the Clock editor"))) return
+    }
+    if (selected.tab !== tab && !(try contained(view.send({ type: "selectTab", tab }), "opening the Clock notification tab"))) return
+    const target = desired.find((item) => item.kind === tap.kind && item.id === tap.id)
+    if (target !== undefined && !target.ringing && target.at <= (try Clock.currentTimeMillis)) return
+    if (target?.ringing === true) {
+      const ringing = try view.get()
+      const alarmId = tap.kind === "alarm" ? tap.id : ringing.ringingAlarm
+      const timerId = tap.kind === "timer" ? tap.id : ringing.ringingTimer
+      if (ClockView.canSyncAlerts(ringing, alarmId, timerId)) {
+        if (!(try contained(view.send({ type: "syncAlerts", alarmId, timerId }), "showing controls for the tapped Clock alert"))) return
+      }
+    }
+    try host.consumeTap(tap.token)
+  })
+}, "scheduling Clock alerts on Android")
+
+export effect function configureClockDelivery(access: "notifications" | "exact"): void!! {
+  const host = Context.getOption(try Effect.context<never>(), PhoneClockAlerts)
+  if (Option.isSome(host)) try host.value.configure(access)
+}

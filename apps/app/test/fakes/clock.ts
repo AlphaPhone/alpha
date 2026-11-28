@@ -1,5 +1,29 @@
 // spec/agent/index.md, "The page reaches exactly the routes its platform services call, and nothing else"
+import type { ClockTap, NativeClockAlert } from "../../src/platform/clock-alerts.vibe";
+import { plugIn } from "./phone.ts";
 import { type Route, readJsonBody } from "./routes.ts";
+
+/** The Android scheduler, independent of the Clock renderer which publishes deadlines and handles owner taps. */
+export function installClockScheduler() {
+  let alerts: readonly NativeClockAlert[] = [];
+  let notificationsEnabled = false;
+  let pending: ClockTap | undefined;
+  let changed = () => {};
+  const unplug = plugIn({ AlphaClockAlerts: (emit) => {
+    changed = () => emit("clockAlertOpen", {});
+    return {
+      reconcile(input: { alerts: readonly NativeClockAlert[] }) {
+        alerts = input.alerts;
+        return { notificationsEnabled, exact: true };
+      },
+      checkPermissions: () => ({ notifications: notificationsEnabled ? "granted" : "prompt" }),
+      requestPermissions() { notificationsEnabled = true; return { notifications: "granted" }; },
+      pendingTap: () => pending ?? {},
+      consumeTap({ token }: { token: string }) { if (pending?.token === token) pending = undefined; },
+    };
+  } });
+  return { unplug, alerts: () => alerts, tap(next: ClockTap) { pending = next; changed(); } };
+}
 
 /** Alarm record shape exchanged on `/api/alpha/clock/*`. */
 export interface FakeClockAlarm {

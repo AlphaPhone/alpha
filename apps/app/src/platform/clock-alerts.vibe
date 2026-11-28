@@ -1,0 +1,77 @@
+// spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"
+import { registered } from "./device.vibe"
+import { plugin } from "./capacitor.ts"
+
+interface AlarmFields {
+  readonly id: number
+  readonly at: number
+  readonly ringing: boolean
+  readonly title: string
+  readonly vibrate: boolean
+}
+
+export type NativeClockAlert = AlarmFields & ({ readonly kind: "timer" } | {
+  readonly kind: "alarm"; readonly snoozed: boolean; readonly hour: number; readonly minute: number; readonly daysMask: number
+})
+
+const permissions = Schema.Struct({ notificationsEnabled: Schema.Boolean, exact: Schema.Boolean })
+const permissionState = Schema.Struct({ notifications: Schema.Literals(["granted", "denied", "prompt", "prompt-with-rationale"]) })
+const tap = Schema.Struct({ token: Schema.NonEmptyString, kind: Schema.Literals(["alarm", "timer"]), id: Schema.Int })
+export type ClockTap = typeof tap.Type
+
+interface ClockPlugin {
+  reconcile(input: { alerts: readonly NativeClockAlert[] }): Promise<unknown>
+  pendingTap(): Promise<unknown>
+  consumeTap(input: { token: string }): Promise<void>
+  checkPermissions(): Promise<unknown>
+  openNotificationSettings(): Promise<void>
+  requestPermissions(input: { permissions: readonly string[] }): Promise<unknown>
+  openExactAlarmSettings(): Promise<void>
+  addListener(event: "clockAlertOpen", listener: () => void): Promise<{ remove(): Promise<void> }>
+}
+
+export service PhoneClockAlerts {
+  readonly present: boolean
+  readonly changed: Stream.Stream<void>
+  configure(access: "notifications" | "exact"): void!!
+  reconcile(alerts: readonly NativeClockAlert[]): (typeof permissions.Type | undefined)!!
+  pendingTap(): (ClockTap | undefined)!!
+  consumeTap(token: string): void!!
+}
+
+export const phoneClockAlerts = Layer.effect(PhoneClockAlerts, effect {
+  const present = registered("AlphaClockAlerts")
+  const host = () => plugin<ClockPlugin>("AlphaClockAlerts")
+  const permission = try PubSub.unbounded<void>()
+  const tapped = Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(tryPromise(() => host().addListener("clockAlertOpen", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
+    (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
+  )))
+  return {
+    present,
+    changed: Stream.merge(Stream.fromPubSub(permission), tapped),
+    effect configure(access: "notifications" | "exact") {
+      if (access === "exact") try ignore(tryPromise(() => host().openExactAlarmSettings()))
+      else {
+        const raw = tryPromise(() => host().checkPermissions()) catch () => undefined
+        const grant = Option.getOrUndefined(Schema.decodeUnknownOption(permissionState)(raw))?.notifications
+        if (grant === "granted" || grant === "denied") try ignore(tryPromise(() => host().openNotificationSettings()))
+        else try ignore(tryPromise(() => host().requestPermissions({ permissions: ["notifications"] })))
+      }
+      try PubSub.publish(permission, undefined)
+    },
+    effect reconcile(alerts: readonly NativeClockAlert[]) {
+      const result = tryPromise(() => host().reconcile({ alerts })) catch () => undefined
+      return Option.getOrUndefined(Schema.decodeUnknownOption(permissions)(result))
+    },
+    effect pendingTap() {
+      const result = tryPromise(() => host().pendingTap()) catch () => undefined
+      return Option.getOrUndefined(Schema.decodeUnknownOption(tap)(result))
+    },
+    consumeTap: (token: string) => ignore(tryPromise(() => host().consumeTap({ token }))),
+  }
+})
+
+export const browserClockAlerts = Layer.succeed(PhoneClockAlerts, {
+  present: false, changed: Stream.empty, configure: () => Effect.void, reconcile: () => succeed(undefined), pendingTap: () => succeed(undefined), consumeTap: () => Effect.void,
+})

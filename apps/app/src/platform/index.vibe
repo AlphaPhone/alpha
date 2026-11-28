@@ -51,3 +51,5 @@ export * from "./vault.vibe"
 export * from "./videoCanvas.vibe"
 export * from "./voice.vibe"
 export * from "./wifi.vibe"
+
+export * from "./clock-alerts.vibe"

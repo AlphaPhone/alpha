@@ -11,6 +11,7 @@ import { Agent, Device, ask } from "../platform/index.vibe"
 import { contained, started, together, Time } from "../runtime/index.vibe"
 import { alarms, persistClockMeta } from "./alarms.vibe"
 import { alert } from "./alert.vibe"
+import { deviceClock } from "./device.vibe"
 import { cityById, findCityMatch } from "./cities.ts"
 import { clockView } from "./clock.vibe"
 import {
@@ -565,6 +566,7 @@ export const clockResident = together(
   worldClock,
   clockView,
   alert,
+  deviceClock,
   residentClockTick,
   clockSync,
 )
