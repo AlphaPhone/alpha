@@ -4,6 +4,7 @@ import { page, userEvent } from "vitest/browser";
 import { Machine as Storage } from "../gen/app__files.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import files from "../src/files/index.tsx";
+import { watchChrome } from "../src/shell/chrome.vibe";
 import { offer, say } from "../src/notices/toasts.vibe";
 import { closeAll, coverLifted, only, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
@@ -117,6 +118,42 @@ describe("Browser hit-test", () => {
     await page.getByRole("button", { name: "Undo" }).click();
     await expect.poll(() => undone).toBe(1);
     await expect.element(page.getByText("Deleted Lunch")).not.toBeInTheDocument();
+  });
+
+  // spec/app/shell/keyboard.md, "Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays"
+  it("measures the header again when a transition that moved it ends, until the shell lets it go", async () => {
+    const root = document.createElement("div");
+    root.style.cssText = "position: fixed; inset: 0";
+    const shellPage = document.createElement("div");
+    shellPage.setAttribute("data-alpha-shell-page", "");
+    const header = document.createElement("header");
+    header.setAttribute("data-host-chrome", "");
+    header.style.cssText = "height: 100px; transition: translate 40ms linear";
+    shellPage.append(header);
+    root.append(shellPage);
+    document.body.append(root);
+    const heard: number[] = [];
+    const stop = watchChrome(root, (event) => { if (event.type === "headerMeasured") heard.push(event.px); });
+    const clearance = () => root.style.getPropertyValue("--alpha-header-clearance");
+    const moved = () => new Promise<void>((done) => header.addEventListener("transitionend", () => done(), { once: true }));
+    try {
+      expect(clearance()).toBe("100px");
+      const risen = moved();
+      header.style.translate = "0 -20px";
+      await risen;
+      expect(clearance()).toBe("80px");
+      expect(heard).toEqual([100, 80]);
+
+      stop();
+      const back = moved();
+      header.style.translate = "0 0";
+      await back;
+      expect(clearance()).toBe("80px");
+      expect(heard).toEqual([100, 80]);
+    } finally {
+      stop();
+      root.remove();
+    }
   });
 
   // spec/app/shell/index.md, "Story: Move between Home and the apps"

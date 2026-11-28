@@ -11,7 +11,7 @@ Undo is tapped. How long the change stays undoable is the area's: it
 sets the window from `duration` here at the scale this layer reads. A toast only
 passes the tap on. An Undo toast takes a tap only on its Undo: a tap anywhere
 else on it reaches what is under it, so it never stands in the way of a row
-or a control beneath, as on Alpha's earlier build.
+or a control beneath.
 
 ## Story: Read a toast before it goes
 
