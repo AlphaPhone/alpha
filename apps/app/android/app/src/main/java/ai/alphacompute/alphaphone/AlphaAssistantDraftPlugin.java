@@ -16,14 +16,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 /** The renderer may name a conversation and assert its current seat. Native custody derives the key. */
 @CapacitorPlugin(name = "AlphaAssistantDraft")
 public final class AlphaAssistantDraftPlugin extends Plugin {
  private static final Pattern ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_-]{0,127}");
  private static final int RAW_LIMIT = 256 * 1024;
- private static final long MAX_REVISION = 9_007_199_254_740_991L;
  private final ExecutorService drafts = Executors.newSingleThreadExecutor();
 
  @PluginMethod public void read(PluginCall call) { drafts.execute(() -> perform(call, false)); }
@@ -99,14 +97,7 @@ public final class AlphaAssistantDraftPlugin extends Plugin {
   if (call.getData().has("expected") != (expected != null)
     || call.getData().has("next") != (next != null)) return result("denied");
   if (expected != null && expected.getBytes(StandardCharsets.UTF_8).length > RAW_LIMIT) return result("denied");
-  if (next != null) {
-   if (next.getBytes(StandardCharsets.UTF_8).length > RAW_LIMIT) return result("denied");
-   JSONObject row = new JSONObject(next);
-   Object revision = row.opt("revision");
-   if (row.length() != 3 || !(revision instanceof Integer || revision instanceof Long)
-     || row.getLong("revision") < 1 || row.getLong("revision") > MAX_REVISION
-     || !(row.opt("sending") instanceof Boolean) || !(row.opt("text") instanceof String)) return result("denied");
-  }
+  if (next != null && (next.getBytes(StandardCharsets.UTF_8).length > RAW_LIMIT || !AlphaDraftRow.admits(next))) return result("denied");
   return switch (slots.compareAndExchange(Caller.NativeCaller, slot, expected, next)) {
    case Written, Removed -> result("landed");
    case Conflict -> result("conflict");
