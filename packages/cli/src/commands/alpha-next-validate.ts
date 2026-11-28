@@ -442,7 +442,7 @@ export function scanSecurityInvariants(rootDir: string): readonly SecurityInvari
 
 /** Locate the Android SDK root from environment variables or standard home directory. */
 export function resolveAndroidSdkRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return env.ANDROID_HOME ?? env.ANDROID_SDK_ROOT ?? path.join(os.homedir(), "Android/Sdk");
+  return env.ANDROID_HOME || env.ANDROID_SDK_ROOT || path.join(os.homedir(), process.platform === "darwin" ? "Library/Android/sdk" : "Android/Sdk");
 }
 
 /** Locate `aapt2` under Android SDK build-tools. */

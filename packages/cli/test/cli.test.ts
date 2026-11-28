@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   REQUIRED_CORE_COMPONENTS,
   WALKTHROUGH_VIEWS,
@@ -542,6 +542,23 @@ describe("project CLI", () => {
       "verify-accessibility-and-browser-control",
       "teardown",
     ]);
+
+    const attached = createRecorder();
+    const sdk = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-adb-sdk-"));
+    try {
+      fs.mkdirSync(path.join(sdk, "platform-tools"));
+      fs.writeFileSync(path.join(sdk, "platform-tools", "adb"), "");
+      vi.stubEnv("ANDROID_HOME", sdk);
+      expect(await runCli({ argv: ["alpha-next", "emulator-e2e", "--dry-run", "--serial", "emulator-5586", "--json"],
+        commands, rootDir: templateRoot, cwd: templateRoot, io: attached.io })).toBe(0);
+      const result = parseJson(attached.out()) as { readonly data: EmulatorE2eReport };
+      expect(result.data.ready).toBe(true);
+      expect(result.data.plan.missingTools).toEqual([]);
+      expect(result.data.plan.systemImagePresent).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(sdk, { recursive: true, force: true });
+    }
 
     const missingSub = createRecorder();
     expect(await runCli({

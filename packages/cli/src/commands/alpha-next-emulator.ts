@@ -519,9 +519,11 @@ export function buildEmulatorPlan(flags: EmulatorE2eFlags, ctx: CliContext): Emu
 
   const missingTools: string[] = [];
   if (!adbPath) missingTools.push("platform-tools/adb");
-  if (!emulatorPath) missingTools.push("emulator/emulator");
-  if (!avdmanagerPath) missingTools.push("cmdline-tools/latest/bin/avdmanager");
-  if (!systemImagePresent) missingTools.push(DEFAULT_SYSTEM_IMAGE);
+  if (flags.serial === undefined) {
+    if (!emulatorPath) missingTools.push("emulator/emulator");
+    if (!avdmanagerPath) missingTools.push("cmdline-tools/latest/bin/avdmanager");
+    if (!systemImagePresent) missingTools.push(DEFAULT_SYSTEM_IMAGE);
+  }
 
   const apkDirAbsList = flags.apkDir
     ? [path.resolve(ctx.cwd, flags.apkDir)]
@@ -677,6 +679,10 @@ export async function ensureAndBootEmulator(
   readonly bootedProcess?: ChildProcess;
   readonly avdDetail: string;
 }> {
+  if (plan.adbPath && explicitSerial !== undefined) {
+    const serial = await waitForEmulatorBoot(plan.adbPath, new Set(), timeoutSeconds, explicitSerial);
+    return { serial, avdDetail: `Attached to Android device ${serial}` };
+  }
   if (!plan.adbPath || !plan.emulatorPath || !plan.avdmanagerPath) {
     throw new Error(`Android emulator toolchain incomplete: missing ${plan.missingTools.join(", ")}.`);
   }
@@ -701,17 +707,14 @@ export async function ensureAndBootEmulator(
   }
 
   const priorSerials = new Set(listConnectedEmulators(plan.adbPath));
-  let bootedProcess: ChildProcess | undefined;
-  if (!explicitSerial) {
-    bootedProcess = spawn(plan.emulatorPath, [...plan.emulatorArgs], {
-      stdio: "ignore",
-      detached: true,
-      env: emulatorEnv,
-    });
-    bootedProcess.unref();
-  }
-  const serial = await waitForEmulatorBoot(plan.adbPath, priorSerials, timeoutSeconds, explicitSerial, bootedProcess);
-  return { serial, ...(bootedProcess !== undefined ? { bootedProcess } : {}), avdDetail };
+  const bootedProcess = spawn(plan.emulatorPath, [...plan.emulatorArgs], {
+    stdio: "ignore",
+    detached: true,
+    env: emulatorEnv,
+  });
+  bootedProcess.unref();
+  const serial = await waitForEmulatorBoot(plan.adbPath, priorSerials, timeoutSeconds, undefined, bootedProcess);
+  return { serial, bootedProcess, avdDetail };
 }
 
 /** Cleanly shut down a booted emulator process via `adb -s <serial> emu kill` and wait up to 15s for exit. */
@@ -988,25 +991,34 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
 
   if (flags.dryRun) {
     const ready = plan.missingTools.length === 0;
+    const attachedSteps: Readonly<Record<string, string>> = {
+      "ensure-avd": `Attach to the requested Android device ${flags.serial ?? ""}`,
+      "boot-emulator": "Wait for Android to report boot completion",
+      teardown: "Leave the attached device running",
+    };
+    const stages = flags.serial === undefined ? PLANNED_STAGES : PLANNED_STAGES.map((stage) => ({
+      ...stage,
+      detail: attachedSteps[stage.stage] ?? stage.detail,
+    }));
     const report: EmulatorE2eReport = {
       subcommand: "emulator-e2e",
       mode: "dry-run",
       serial: flags.serial ?? null,
       ready,
       plan,
-      stages: PLANNED_STAGES,
+      stages,
     };
     const lines = [
       `alpha-next emulator-e2e (dry-run)  ready:${String(ready)}  kvm:${String(plan.kvmAvailable)}  avd:${plan.avdName}`,
       `  sdk: ${plan.sdkRoot}`,
       `  apkDirs: ${plan.apkDirs.join(", ")} (${String(plan.discoveredApks.length)} APK(s) found)`,
       ...(plan.missingTools.length > 0 ? [`  missing: ${plan.missingTools.join(", ")}`] : []),
-      ...PLANNED_STAGES.map((stage) => `  [planned] ${stage.stage}: ${stage.detail}`),
+      ...stages.map((stage) => `  [planned] ${stage.stage}: ${stage.detail}`),
     ];
     return { ok: true, data: report, lines };
   }
 
-  if (plan.missingTools.length > 0 || !plan.adbPath || !plan.emulatorPath || !plan.avdmanagerPath) {
+  if (plan.missingTools.length > 0 || !plan.adbPath) {
     return {
       ok: false,
       message: `Android emulator toolchain incomplete: missing ${plan.missingTools.join(", ")}.`,
@@ -1045,7 +1057,7 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
     bootedProcess = booted.bootedProcess;
     activeSerial = booted.serial;
     stages.push({ stage: "ensure-avd", status: "passed", detail: booted.avdDetail });
-    stages.push({ stage: "boot-emulator", status: "passed", detail: `Booted ${activeSerial}` });
+    stages.push({ stage: "boot-emulator", status: "passed", detail: flags.serial ? `Android boot confirmed on ${activeSerial}` : `Booted ${activeSerial}` });
     stages.push(...await verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir, allowExplicitNonEmulator));
   } finally {
     const teardownDetail = await stopBootedEmulator(plan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
