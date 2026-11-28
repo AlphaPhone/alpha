@@ -204,7 +204,7 @@ effect function postSlackNotice(target: Target, ts: number): void!!(SlackLedger 
     workspace: target.workspace,
     channel: target.channel,
     threadTs: target.threadTs,
-    ts,
+    timestamp: tsStr ?? "",
     title,
     body,
   })

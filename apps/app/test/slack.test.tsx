@@ -17,6 +17,7 @@ import { Machine as ConversationMachine } from "../gen/app__slack__conversation.
 import { Machine as NoticesMachine } from "../gen/app__slack__notices.effect.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
+import { MessagingNotices } from "../src/platform/messaging-notices.vibe";
 import { MessagingSessions, messagingSessions, tokenValue } from "../src/platform/messaging.vibe";
 import { slackAt } from "../src/platform/slack.vibe";
 import { slackPhone } from "./fakes/messaging.ts";
@@ -43,6 +44,7 @@ type SlackTestServices =
   | NoticesMachine
   | SlackLedger
   | MessagingSessions
+  | MessagingNotices
   | Slack
   | KeyValueStore.KeyValueStore;
 
@@ -362,10 +364,17 @@ describe("Slack user-account client over live HTTP provider", () => {
 
     await underAct(() => findButton(app.host, "Enable Slack notifications").click());
     await waitFor(app.runtime, notices, (s) => s.notifyAllowed);
+    await controlPost("/__control/inject", { ...incoming, channel: "G01LAUNCH", text: "<@U01OWNER> from a former private channel" });
     const thread = "1730000100.000100";
     await controlPost("/__control/inject", { ...incoming, thread_ts: thread, text: "<@U01OWNER> please review this thread" });
-    await waitFor(app.runtime, notices, (s) => s.up.length === 1);
-    await vi.waitFor(() => expect(phone.messagingNotices.posted()).toHaveLength(1));
+    await waitFor(app.runtime, notices, (s) => s.up.length === 2);
+    await vi.waitFor(() => expect(phone.messagingNotices.posted()).toHaveLength(2));
+    const deniedChannel = phone.messagingNotices.posted().find((item) => item.target.provider === "slack" && item.target.channel === "G01LAUNCH");
+    if (!deniedChannel) throw new Error("Missing private-channel notice");
+    await controlPost("/__control/fault", { path: "/api/conversations.info", status: 200, remaining: 1, body: { ok: false, error: "channel_not_found" } });
+    await underAct(() => { expect(phone.messagingNotices.tap(deniedChannel.token)).toBe(true); });
+    await vi.waitFor(() => expect(phone.messagingNotices.pending()).toBeUndefined());
+    expect((await app.runtime.runPromise(ConversationMachine.use((m) => m.get()))).channel).toBe(0);
     const [posted] = phone.messagingNotices.posted();
     expect(posted.target.scope).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(posted.target).toMatchObject({ provider: "slack", workspace: "T01ALPHA", channel: "C01GENERAL", thread });
@@ -382,6 +391,12 @@ describe("Slack user-account client over live HTTP provider", () => {
     expect(reopened.host.textContent).toContain("please review this thread");
     expect(phone.messagingNotices.pending()).toBeUndefined();
     expect(phone.messagingNotices.tap(posted.token)).toBe(false);
+    const matching = MessagingNotices.use((host) => host.post(posted.target, posted.title, posted.body));
+    expect(await reopened.runtime.runPromise(matching)).toBe(false);
+    await underAct(async () => { await reopened.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "goHome" }))); });
+    await waitFor(reopened.runtime, notices, (s) => s.front.workspace === 0);
+    await vi.waitFor(async () => expect(await reopened.runtime.runPromise(matching)).toBe(true));
+    await reopened.runtime.runPromise(MessagingNotices.use((host) => host.withdraw(posted.target)));
 
     await waitFor(reopened.runtime, notices, (s) => (s.watermarks[view.workspace] ?? 0) > 0);
     await controlPost("/__control/inject", { ...incoming, channel: "C02ENG", text: "<@U01OWNER> former account only" });

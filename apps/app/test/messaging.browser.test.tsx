@@ -256,11 +256,16 @@ describe("Messaging E2E", () => {
       team_id: "T01ALPHA",
       channel: "C02ENG",
       user: "U02MAYA",
+      thread_ts: "1730000200.000100",
       text: "Hey <@U01OWNER> check the Chromium Slack mention",
     });
     await later(alpha, 5_000);
     await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => s.posts > 0);
-    await expect.element(page.getByText(/Alpha Team · engineering.*Maya Chen:.*Chromium Slack mention/)).toBeVisible();
+    await page.getByRole("button", { name: /Alpha Team · engineering.*Maya Chen:.*Chromium Slack mention/ }).click();
+    await until(alpha, alpha.runtime, SlackConversation.Machine, (s) => s.workspace === alphaWs && s.threadTs > 0 && s.threadLoaded);
+    await expect.element(page.getByText("Shipping the new HTTP client layer today.")).toBeVisible();
+    await expect.element(page.getByText(/check the Chromium Slack mention/)).toBeVisible();
+    await page.getByRole("button", { name: "Back to channel" }).click();
 
     await controlJson(slackOrigin, "/__control/revoke", { team_id: "T02DESIGN" });
     await later(alpha, 5_000);
@@ -270,7 +275,6 @@ describe("Messaging E2E", () => {
       SlackAuth.Machine,
       (s) => !s.connected.some((w) => w.workspace === designWs) && s.connected.some((w) => w.workspace === alphaWs),
     );
-    await page.getByRole("button", { name: /^Slack/ }).first().click();
     await page.getByRole("button", { name: "Back to conversations" }).click();
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await expect.element(page.getByText("Design Guild")).not.toBeInTheDocument();

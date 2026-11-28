@@ -56,7 +56,7 @@ interface SlackNoticeRecord {
   readonly workspace: number
   readonly channel: number
   readonly threadTs: number
-  readonly ts: number
+  readonly timestamp: string
   readonly title: string
   readonly body: string
 }
@@ -453,7 +453,7 @@ function buildDraftAndNoticeOps(core: LedgerCore) {
       for (const bucket of core.buckets.values()) {
         for (const item of bucket.notices.values()) all.push(item)
       }
-      return all
+      return all.sort((a, b) => compareSlackTs(a.timestamp, b.timestamp))
     },
     nextWatermarkPoint(workspace: number) {
       const bucket = core.bucketOf(workspace)
@@ -747,7 +747,7 @@ export effect function handleSlackFailure(
 /** Result of one workspace-authenticated Slack HTTP call with unified failure/revocation handling. */
 export type SlackCallResult<A> =
   | { readonly ok: true; readonly value: A }
-  | { readonly ok: false; readonly failure: "Revoked" | "Offline" | "Unreachable"; readonly known: boolean }
+  | { readonly ok: false; readonly failure: "Revoked" | "Offline" | "Unreachable"; readonly known: boolean; readonly code?: string }
 
 /** Execute one authenticated Slack API call for `workspace`, clearing rate-limit state on success and handling revocation on failure. */
 export effect function runWorkspaceCall<A>(
@@ -764,7 +764,7 @@ export effect function runWorkspaceCall<A>(
   } catch (err) => ({ ok: false as const, err })
   if (!("err" in outcome)) return outcome
   const failure = try handleSlackFailure(workspace, outcome.err)
-  return { ok: false, failure, known: !(outcome.err instanceof Unreachable) }
+  return { ok: false, failure, known: !(outcome.err instanceof Unreachable), ...("code" in outcome.err ? { code: outcome.err.code } : {}) }
 }
 
 /** Execute a channel-scoped Slack mutation and report `{ ok, known }` for `kit/attempt` conclusion. */

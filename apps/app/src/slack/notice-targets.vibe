@@ -41,7 +41,10 @@ export effect function openSlackNotice(target: SlackTarget) {
   if (!(try auth.get()).connected.some((grant) => grant.workspace === meta.num)) return "pending" as const
   const channel = ledger.channelNum(meta.num, target.channel)
   const info = try runWorkspaceCall(meta.num, (slack, token) => slack.conversationInfo(token, target.channel))
-  if (!info.ok) return info.failure === "Revoked" ? "stale" as const : "pending" as const
+  if (!info.ok) {
+    const denied = info.failure === "Revoked" || info.code === "channel_not_found" || info.code === "not_in_channel" || info.code === "missing_scope"
+    return denied ? "stale" as const : "pending" as const
+  }
   if (info.value.channel.id !== target.channel || !(try holdsWorkspace(meta))) return "stale" as const
   const summary = info.value.channel
   ledger.putConversations(meta.num, [summary], true)

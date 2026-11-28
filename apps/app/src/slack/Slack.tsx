@@ -1,4 +1,5 @@
 // spec/app/slack/index.md, "Story: Switch workspaces and browse Slack conversations with strict isolation"; spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"; spec/app/slack/conversation.md, "Story: Read Slack channels and threaded replies accurately"; spec/app/slack/composer.md, "Story: Draft and send Slack messages and thread replies safely"
+import { useSlackLedger } from "./Notice.tsx";
 import { configureSlackNotices, openSlackNotice } from "./notice-targets.vibe";
 import {
   type AuthScopeItem,
@@ -29,9 +30,9 @@ import {
   TabsList,
   TabsTrigger,
 } from "@repo/ui";
-import { Effect, type ManagedRuntime } from "effect";
+import type { ManagedRuntime } from "effect";
 import { ArrowLeft, Bell, BellOff, ChevronDown, Hash, LogOut, MessageSquare, Plus, RefreshCw } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import type { Machine as WorkspacesMachine, Section } from "../../gen/app__slack.effect.vibe";
 import { useMachine as useWorkspaces } from "../../gen/app__slack.react.ts";
 import type { Machine as AgentMachine } from "../../gen/app__slack__agent.effect.vibe";
@@ -50,7 +51,7 @@ import { untimed } from "../runtime/index.vibe";
 import type { Time } from "../runtime/index.vibe";
 import {
   type SlackLedgerStore,
-  SlackLedger,
+  type SlackLedger,
   type WorkspaceMeta,
   channelTitleOf,
   convKindOf,
@@ -99,12 +100,6 @@ function uiKindOf(ch: SlackChannelSummary): ConversationKind {
   if (ch.is_mpim) return "group";
   if (ch.is_private || ch.is_group) return "channel-private";
   return "channel-public";
-}
-
-function useSlackLedger(runtime: SlackRuntime): SlackLedgerStore {
-  const ledger = runtime.runSync(SlackLedger.use((store) => Effect.succeed(store)));
-  useSyncExternalStore((listener) => ledger.subscribe(listener), () => ledger.snapshot(), () => ledger.snapshot());
-  return ledger;
 }
 
 function messageReactions(msg: SlackMessage, ownerId: string) {
