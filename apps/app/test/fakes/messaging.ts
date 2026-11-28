@@ -37,7 +37,7 @@ export function messagingNoticePhone() {
         configure: ({ provider }: { provider: ProviderName }) => setAllowed(provider, true),
         post({ target, title, body }: Omit<Entry, "token">) {
           if (!enabled.has(target.provider)) return { posted: false };
-          withdraw(target);
+          for (const [token, item] of entries) if (matches(item.target, target)) entries.delete(token);
           const token = crypto.randomUUID();
           entries.set(token, { target, title, body, token });
           return { posted: true };
