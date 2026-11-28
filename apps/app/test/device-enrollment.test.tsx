@@ -158,6 +158,19 @@ async function openAssistantSession(world: Scene, agent: Answering) {
   return { opened, session };
 }
 
+async function expectSteadyRestartSkipsRevoke(
+  world: Scene,
+  deviceAgent: StatefulDeviceAgent,
+  prior: Awaited<ReturnType<typeof openAssistantSession>>,
+) {
+  await prior.opened.close();
+  deviceAgent.calls.length = 0;
+  const restarted = await openAssistantSession(world, deviceAgent.agent);
+  expect(restarted.session).toBeDefined();
+  expect(deviceAgent.calls.filter((entry) => entry === "POST revoke")).toHaveLength(0);
+  expect(deviceAgent.offerCalendarAvailability()).toEqual({ ok: true });
+}
+
 describe("Device capability re-enrollment on upgrade", () => {
   it("revokes and re-registers a persisted enrollment missing synced capabilities, then skips revoke on steady-state restart", async () => {
     const world = phoneScene();
@@ -182,13 +195,7 @@ describe("Device capability re-enrollment on upgrade", () => {
     expect(localStorage.getItem(storedKey)).toContain(CALENDAR_AVAILABILITY_CAPABILITY);
     expect(localStorage.getItem(storedKey)).not.toContain(ENROLLMENT_KEY);
 
-    await first.opened.close();
-    deviceAgent.calls.length = 0;
-
-    const second = await openAssistantSession(world, deviceAgent.agent);
-    expect(second.session).toBeDefined();
-    expect(deviceAgent.calls.filter((entry) => entry === "POST revoke")).toHaveLength(0);
-    expect(deviceAgent.offerCalendarAvailability()).toEqual({ ok: true });
+    await expectSteadyRestartSkipsRevoke(world, deviceAgent, first);
   });
 
   it("revokes and re-registers when stored synced capabilities differ from the current capability list", async () => {
@@ -215,12 +222,7 @@ describe("Device capability re-enrollment on upgrade", () => {
     expect(deviceAgent.bridgeCapabilities).toContain(CALENDAR_AVAILABILITY_CAPABILITY);
     expect(deviceAgent.offerCalendarAvailability()).toEqual({ ok: true });
 
-    await upgraded.opened.close();
-    deviceAgent.calls.length = 0;
-
-    const steady = await openAssistantSession(world, deviceAgent.agent);
-    expect(steady.session).toBeDefined();
-    expect(deviceAgent.calls.filter((entry) => entry === "POST revoke")).toHaveLength(0);
+    await expectSteadyRestartSkipsRevoke(world, deviceAgent, upgraded);
   });
 
   it("does not mark capabilities synced on transient revoke or register failure and safely retries without losing identity", async () => {
@@ -275,11 +277,6 @@ describe("Device capability re-enrollment on upgrade", () => {
     expect(deviceAgent.bridgeCapabilities).toContain(CALENDAR_AVAILABILITY_CAPABILITY);
     expect(syncedCapabilityKeys()).toHaveLength(1);
 
-    await first.opened.close();
-    deviceAgent.calls.length = 0;
-
-    const second = await openAssistantSession(world, deviceAgent.agent);
-    expect(second.session).toBeDefined();
-    expect(deviceAgent.calls.filter((entry) => entry === "POST revoke")).toHaveLength(0);
+    await expectSteadyRestartSkipsRevoke(world, deviceAgent, first);
   });
 });
