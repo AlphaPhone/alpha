@@ -24,6 +24,20 @@ lemma lawUndoStaysLonger_ensures(chars: int, scale: int)
   }
 }
 
+lemma lawExtendedTimeoutsStayLonger_ensures(chars: int, undo: bool, scale: int)
+  ensures (lawExtendedTimeoutsStayLonger(chars, undo, scale) == true)
+{
+  if scale >= 100 {
+    var base := if undo then 10000 else 1900;
+    var reading := chars * 50 + 500;
+    var capped := if reading > 12000 then 12000 else reading;
+    var unscaled := if capped > base then capped else base;
+    ScaleKeepsOrder(scale, 100, unscaled);
+    assert duration(chars, undo, scale) == JSFloorDiv(scale * unscaled, 100);
+    assert duration(chars, undo, 100) == JSFloorDiv(100 * unscaled, 100);
+  }
+}
+
 lemma RetractKeepsTheRest(s: Toasts, area: string, about: int)
   ensures !(s.showing && offers(s.current, area, about)) ==> retract(s, area, about) == s.(undos := ProofLib.Filter((t: Toast) => !(offers(t, area, about)), s.undos))
 {
