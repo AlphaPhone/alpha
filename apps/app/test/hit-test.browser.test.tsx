@@ -1,9 +1,11 @@
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
+import { Machine as Storage } from "../gen/app__files.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
-import { say } from "../src/notices/toasts.vibe";
-import { closeAll, coverLifted, only, open } from "./alpha.tsx";
+import files from "../src/files/index.tsx";
+import { offer, say } from "../src/notices/toasts.vibe";
+import { closeAll, coverLifted, only, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import "../src/main.css";
 
@@ -79,6 +81,42 @@ describe("Browser hit-test", () => {
     const shrink = page.getByRole("button", { name: "Shrink chat" });
     await expect.element(shrink).toBeVisible();
     expect(hitAtCenter(shrink.element())).toContain(shrink.element());
+  });
+
+  // spec/app/files/index.md, "The owner opens a volume, a category, a listed folder, a step of the path, or goes back to the top; a category lists exactly the files of its kind"; spec/app/notices/toasts.md, "Story: Keep an Undo in reach"; spec/app/shell/keyboard.md, "Ask Alpha's footprint is what it covers now and its bar alone, which is never more; while nothing of Ask Alpha shows, the last footprint stays"
+  it("opens the Files folder under an Undo toast, which keeps its Undo and sits just below the risen header", async () => {
+    await page.viewport(390, 844);
+    const { alpha } = await open({ ...scene(), phone: true }, only("home", "view:Files", "notice"));
+    await coverLifted(alpha);
+    const storage = files.runtime(alpha);
+    await alpha.runtime.runPromise(Shell.use((shell) => shell.send({ type: "openView", view: "Files" })));
+    await until(alpha, storage, Storage, (s) => s.storage.status === "Loaded");
+    await page.getByRole("button", { name: "Internal storage" }).click();
+    await until(alpha, storage, Storage, (s) => s.listing.status === "Loaded" && s.trail.length === 1);
+    let undone = 0;
+    await alpha.runtime.runPromise(offer("Deleted Lunch", "notes", 1, Effect.sync(() => { undone += 1; })));
+    await expect.element(page.getByText("Deleted Lunch")).toBeVisible();
+    const pill = page.getByText("Deleted Lunch").element().closest("[data-host-chrome]");
+    const header = document.querySelector("[data-alpha-shell-page] [data-host-chrome]:not([data-alpha-comms-dock]):not([data-host-chrome=bottom])");
+    if (!pill || !header) throw new Error("no Undo toast or Files header");
+
+    await expect.poll(() => Math.round(pill.getBoundingClientRect().top - header.getBoundingClientRect().bottom)).toBe(8);
+
+    const toast = pill.getBoundingClientRect();
+    const row = [...document.querySelectorAll("[aria-label=Listed] button:not([role=checkbox])")].find((one) => {
+      const box = one.getBoundingClientRect();
+      return box.top < toast.bottom && box.bottom > toast.top;
+    });
+    if (!row) throw new Error("the Undo toast covers no listed row");
+    const box = row.getBoundingClientRect();
+    const tap = { x: toast.left + 8, y: (Math.max(box.top, toast.top) + Math.min(box.bottom, toast.bottom)) / 2 };
+    expect(row.contains(document.elementFromPoint(tap.x, tap.y))).toBe(true);
+    await userEvent.click(row, { position: { x: tap.x - box.left, y: tap.y - box.top } });
+    await until(alpha, storage, Storage, (s) => s.listing.status === "Loaded" && s.trail.length === 2);
+
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect.poll(() => undone).toBe(1);
+    await expect.element(page.getByText("Deleted Lunch")).not.toBeInTheDocument();
   });
 
   // spec/app/shell/index.md, "Story: Move between Home and the apps"
