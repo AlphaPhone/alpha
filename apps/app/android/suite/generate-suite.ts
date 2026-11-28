@@ -283,9 +283,15 @@ const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
     pluginClasses: ["ai.alphacompute.thinapp.ThinCalendarPlugin"],
   },
   clock: {
-    modules: [":eliza-system"],
-    sourceDirs: ["src/plugins/system/java"],
-    pluginClasses: ["ai.alphacompute.thinapp.ThinSystemPlugin"],
+    modules: [":eliza-system", ":eliza-secure-store"],
+    sourceDirs: [
+      "src/plugins/system/java",
+      "../../app/src/main/java/ai/alphacompute/alphaphone/clock",
+    ],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinSystemPlugin",
+      "ai.alphacompute.alphaphone.clock.AlphaClockAlertsPlugin",
+    ],
   },
   reminders: {
     modules: [":eliza-reminders"],
@@ -472,15 +478,26 @@ function renderFlavorComponents(app: SuiteAppEntry): readonly string[] {
       `        </provider>`,
     ];
   }
-  if (app.id === "reminders") {
+  if (app.id === "clock" || app.id === "reminders") {
+    const clock = app.id === "clock";
+    const receiver = clock ? "ai.alphacompute.alphaphone.clock.ClockAlertReceiver" : "ai.alphacompute.thinapp.ThinReminderReceiver";
     return [
+      ...(clock ? [
+        `        <provider android:name="ai.alphacompute.alphaphone.clock.ClockAuthority"`,
+        `            android:authorities="ai.alphacompute.clock.alerts" android:exported="true"`,
+        `            android:permission="ai.alphacompute.permission.AGENT_IPC" />`,
+      ] : []),
       `        <receiver`,
-      `            android:name="ai.alphacompute.thinapp.ThinReminderReceiver"`,
+      `            android:name="${receiver}"`,
       `            android:exported="false">`,
       `            <intent-filter>`,
       `                <action android:name="android.intent.action.BOOT_COMPLETED" />`,
       `                <action android:name="android.intent.action.TIME_SET" />`,
       `                <action android:name="android.intent.action.TIMEZONE_CHANGED" />`,
+      ...(clock ? [
+        `                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />`,
+        `                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />`,
+      ] : []),
       `            </intent-filter>`,
       `        </receiver>`,
     ];
@@ -853,7 +870,11 @@ function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string
   const permissionLines = [
     registry.ipcPermission,
     ...app.permissions.filter((perm) => perm !== registry.ipcPermission),
-  ].map((perm) => `    <uses-permission android:name="${escapeXml(perm)}" />`);
+  ].map((perm) => {
+    const maxSdk = perm === "android.permission.SCHEDULE_EXACT_ALARM" && permSet.has("android.permission.USE_EXACT_ALARM")
+      ? ' android:maxSdkVersion="32"' : "";
+    return `    <uses-permission android:name="${escapeXml(perm)}"${maxSdk} />`;
+  });
 
   if (permSet.has("android.permission.READ_MEDIA_IMAGES") && !permSet.has("android.permission.READ_EXTERNAL_STORAGE")) {
     permissionLines.push(

@@ -25,6 +25,7 @@ def elizaAndroidModules = [
     'eliza-location': 'location',
     'eliza-wifi': 'wifi',
     'eliza-system': 'system',
+    'eliza-secure-store': 'secure-store',
     'eliza-filesystem': 'filesystem',
     'eliza-calendar': 'calendar',
     'eliza-contacts': 'contacts',
