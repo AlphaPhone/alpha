@@ -4,7 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { readBundleManifest } from "@elizaos/agent-host"
 import { decodeLaunchDocument, defineRoutes } from "@elizaos/agent"
 import { deployment } from "@repo/deployment"
-import { pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
+import { packWorkerDir, packagedWorkflowWorker, pinnedCheckout, pinnedPack } from "@repo/eliza-harness"
 import {
   type Environment, type Manifest, browserNotesCleanup, browserNotesTranscription, browserNotesTranscriptionLimit, bundledPlugins, calendarEdits, characterAdmitted, cloudModel, corePlugins, entryCarried, gmailChanges, googleAdmitted,
   hostedPlugins, inputAdmitted, localEmbeddings, nativeDigestAck, nativeDigestAckLimit, nativeDigestQueries, nativeDigestScope, nativeNotesCleanup, nativeNotesCleanupLimit, nativeRoutes, nativeRoutesAdmitted, nativeSpeechRoutes, notesTrashDays, packAdmitted, packEntry, packedFor, packedPlugins, pageQueries, persistMemory, personalDetailSwap,
@@ -426,7 +426,11 @@ effect function build(name: string) {
     }),
     catch: (cause) => new Refused({ message: `eliza refused to build the bundle: ${String(cause)} ${cause instanceof Error && "detail" in cause ? String(cause.detail) : ""}` }),
   })
+  const workflow = pack.packages.get(workflowPluginName)
+  if (workflow === undefined) throw new Refused({ message: `the bundle needs ${workflowPluginName}` })
   const fs = try FileSystem.FileSystem
+  try fs.remove(packWorkerDir, { recursive: true, force: true })
+  try fs.copy(`${workflow}/dist`, packWorkerDir)
   try fs.makeDirectory(at.host, { recursive: true })
   for (const file of ["character.json", "policy.json"]) try fs.copyFile(`${at.data}/${file}`, `${at.host}/${file}`)
   const service = try decoded(`${at.data}/service.json`, Service)
@@ -461,6 +465,8 @@ effect function check() {
   const pin = try pinned()
   const at = places()
   const manifest = try admittedManifest(at.bundle, pin.commit)
+  const worker = try Effect.try({ try: packagedWorkflowWorker, catch: (cause) => new Refused({ message: `the packaged workflow worker could not be read: ${String(cause)}` }) })
+  if (worker.sha256 !== manifest.workflowWorkerSha256) throw new Refused({ message: "the packaged workflow worker differs from the bundle's pin" })
   const host = try admittedHost(at.host, manifest.actions.map(({ name }) => name))
   const fs = try FileSystem.FileSystem
   const files = try fs.readDirectory(at.bundle)
