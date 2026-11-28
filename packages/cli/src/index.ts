@@ -2,6 +2,7 @@ export { commands } from "./commands/index.ts";
 export type { AlphaNextSubcommand } from "./commands/alpha-next.ts";
 export {
   REQUIRED_CORE_COMPONENTS,
+  assertSafeEmulatorSerial,
   buildEmulatorPlan,
   extractPackageUid,
   inspectAccessibilityDump,
@@ -9,6 +10,8 @@ export {
   inspectCorePackageDump,
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
+  inspectThinAppLaunchLog,
+  inspectVoiceAndOverlayDump,
   resolveAndroidAvdHome,
   resolveInstalledBlockedGuards,
   sortApksCoreFirst,
@@ -20,7 +23,25 @@ export {
   type EmulatorStageResult,
   type EmulatorToolchainPlan,
   type LauncherActivityInspection,
+  type ThinAppLaunchInspection,
+  type VoiceOverlayInspection,
 } from "./commands/alpha-next-emulator.ts";
+export {
+  buildWalkthroughPlan,
+  type CapturedArtifact,
+  type WalkthroughAction,
+  type WalkthroughPlan,
+  type WalkthroughReport,
+} from "./commands/alpha-next-walkthrough.ts";
+export {
+  WALKTHROUGH_VIEWS,
+  buildStoryboardHtml,
+  buildWalkthroughStoryboard,
+  type WalkthroughChapterSpec,
+  type WalkthroughRenderReport,
+  type WalkthroughVideoMetadata,
+  type WalkthroughViewDescriptor,
+} from "./commands/alpha-next-walkthrough-render.ts";
 export {
   cssLengthToDp,
   generateAndroidResources,

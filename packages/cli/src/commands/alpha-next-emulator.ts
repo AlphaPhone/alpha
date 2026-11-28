@@ -13,12 +13,14 @@ const DEFAULT_BOOT_TIMEOUT_SECONDS = 180;
 const UI_POLL_INTERVAL_MS = 500;
 const UI_POLL_TIMEOUT_MS = 8000;
 const IPC_POLL_TIMEOUT_MS = 6000;
+const THIN_APP_POLL_TIMEOUT_MS = 4000;
 const ACCESSIBILITY_LABEL_PATTERN = /AlphaAccessibilityService|Alpha(?: Device)? Control/i;
 const CORE_PACKAGE = "ai.alphacompute.alphaphone";
 const PREFERENCES_AUTHORITY = `${CORE_PACKAGE}.preferences`;
 const IPC_PERMISSION = "ai.alphacompute.permission.AGENT_IPC";
 const ACCESSIBILITY_COMPONENT = `${CORE_PACKAGE}/ai.alphacompute.control.AlphaAccessibilityService`;
 const PREFERRED_THIN_PACKAGE = "ai.alphacompute.notes";
+const FULL_SUITE_THIN_COUNT = 18;
 
 const DEFAULT_APK_DIRS = [
   "apps/app/artifacts",
@@ -102,6 +104,14 @@ export interface CorePackageInspection {
   readonly missingComponents: readonly string[];
 }
 
+/** Parsed result of verifying VoiceInteractionService and system overlay components. */
+export interface VoiceOverlayInspection {
+  readonly passed: boolean;
+  readonly hasVoiceService: boolean;
+  readonly hasSessionService: boolean;
+  readonly hasOverlayIntake: boolean;
+}
+
 /** Parsed result of verifying cross-APK Binder IPC and shared preferences read across distinct UIDs. */
 export interface CrossAppIpcInspection {
   readonly passed: boolean;
@@ -111,6 +121,14 @@ export interface CrossAppIpcInspection {
   readonly hasThinAppTag: boolean;
   readonly hasPreferencesEvidence: boolean;
   readonly hasBrokerEvidence: boolean;
+}
+
+/** Parsed result of launching one standalone thin Alpha APK and checking crash-free IPC readiness. */
+export interface ThinAppLaunchInspection {
+  readonly passed: boolean;
+  readonly packageName: string;
+  readonly hasCrash: boolean;
+  readonly ipc: CrossAppIpcInspection;
 }
 
 /** Parsed result of verifying `AlphaAccessibilityService` enabled and bound status in `dumpsys accessibility`. */
@@ -154,7 +172,7 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
   {
     stage: "install-apks",
     status: "planned",
-    detail: "Install AlphaCore (ai.alphacompute.alphaphone) first and all discovered thin Alpha APKs via adb install -r -g",
+    detail: "Install AlphaCore (ai.alphacompute.alphaphone) first and all discovered thin Alpha APKs (up to 18) via adb -s <emulator> install -r -g",
   },
   {
     stage: "verify-launcher-activities",
@@ -169,12 +187,17 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
   {
     stage: "verify-voice-interaction",
     status: "planned",
-    detail: "Verify AlphaVoiceInteractionService registers for android.service.voice.VoiceInteractionService",
+    detail: "Verify AlphaVoiceInteractionService, AlphaVoiceInteractionSessionService, and AlphaOverlayIntakeActivity are registered for system overlay & voice",
   },
   {
     stage: "verify-cross-app-ipc",
     status: "planned",
     detail: `Launch ${PREFERRED_THIN_PACKAGE} (or installed thin Alpha APK) and verify distinct UID + logcat (AlphaThinApp, AlphaPreferencesProvider, AlphaAgentBroker)`,
+  },
+  {
+    stage: "verify-all-thin-apps",
+    status: "planned",
+    detail: "Launch every installed standalone Alpha thin APK, asserting distinct UIDs, zero FATAL EXCEPTION / ANR crashes, and AlphaThinApp IPC diagnostics",
   },
   {
     stage: "verify-accessibility-and-browser-control",
@@ -184,9 +207,23 @@ const PLANNED_STAGES: readonly EmulatorStageResult[] = [
   {
     stage: "teardown",
     status: "planned",
-    detail: "Shutdown booted emulator cleanly via adb emu kill",
+    detail: "Shutdown booted emulator cleanly via adb -s <emulator> emu kill",
   },
 ];
+
+/** Fail closed if an ADB target serial is empty or targets a physical non-emulator device without explicit opt-in. */
+export function assertSafeEmulatorSerial(serial: string, allowExplicitNonEmulator = false): string {
+  const trimmed = serial.trim();
+  if (trimmed === "") {
+    throw new Error("Refusing to invoke ADB without an explicit target serial.");
+  }
+  if (!allowExplicitNonEmulator && !trimmed.startsWith("emulator-")) {
+    throw new Error(
+      `Refusing to run ADB against non-emulator device "${trimmed}". Pass --serial explicitly to override.`,
+    );
+  }
+  return trimmed;
+}
 
 function isCoreApkPath(apkPath: string): boolean {
   const base = path.basename(apkPath).toLowerCase();
@@ -290,6 +327,19 @@ export function inspectCorePackageDump(coreDump: string): CorePackageInspection 
   };
 }
 
+/** Inspect `query-services VoiceInteractionService` and `dumpsys package` output for overlay & voice readiness. */
+export function inspectVoiceAndOverlayDump(voiceDump: string, coreDump: string): VoiceOverlayInspection {
+  const hasVoiceService = voiceDump.includes("AlphaVoiceInteractionService");
+  const hasSessionService = coreDump.includes("AlphaVoiceInteractionSessionService");
+  const hasOverlayIntake = coreDump.includes("AlphaOverlayIntakeActivity");
+  return {
+    passed: hasVoiceService && hasSessionService && hasOverlayIntake,
+    hasVoiceService,
+    hasSessionService,
+    hasOverlayIntake,
+  };
+}
+
 /** Extract the numeric Linux `userId` or `appId` from `dumpsys package <pkg>` output. */
 export function extractPackageUid(packageDump: string): number | null {
   const match = /\b(?:userId|appId)=(\d+)\b/.exec(packageDump);
@@ -324,6 +374,27 @@ export function inspectCrossAppIpcLog(
     hasThinAppTag,
     hasPreferencesEvidence,
     hasBrokerEvidence,
+  };
+}
+
+/** Inspect launch logcat for one thin Alpha app to confirm zero FATAL/ANR crashes plus valid cross-UID IPC. */
+export function inspectThinAppLaunchLog(
+  logcat: string,
+  packageName: string,
+  coreUid: number | null,
+  thinUid: number | null,
+): ThinAppLaunchInspection {
+  const escapedPkg = packageName.replaceAll(".", "\\.");
+  const hasFatal = new RegExp(`FATAL EXCEPTION[\\s\\S]{0,240}${escapedPkg}`, "i").test(logcat)
+    || new RegExp(`Process:\\s*${escapedPkg},\\s*PID:`, "i").test(logcat);
+  const hasAnr = new RegExp(`ANR in\\s+${escapedPkg}\\b`, "i").test(logcat);
+  const hasCrash = hasFatal || hasAnr;
+  const ipc = inspectCrossAppIpcLog(logcat, coreUid, thinUid);
+  return {
+    passed: !hasCrash && ipc.passed,
+    packageName,
+    hasCrash,
+    ipc,
   };
 }
 
@@ -496,11 +567,29 @@ function runTool(
   });
 }
 
-function adbShell(adbPath: string, serial: string, command: readonly string[]): string {
-  return runTool(adbPath, ["-s", serial, "shell", ...command]).trim();
+/** Run an ADB command strictly scoped to a validated `-s <serial>` target. */
+export function adbWithSerial(
+  adbPath: string,
+  serial: string,
+  args: readonly string[],
+  allowExplicitNonEmulator = false,
+): string {
+  const safeSerial = assertSafeEmulatorSerial(serial, allowExplicitNonEmulator);
+  return runTool(adbPath, ["-s", safeSerial, ...args]);
 }
 
-function listConnectedEmulators(adbPath: string): readonly string[] {
+/** Run `adb -s <serial> shell ...` strictly scoped to a validated emulator serial. */
+export function adbShell(
+  adbPath: string,
+  serial: string,
+  command: readonly string[],
+  allowExplicitNonEmulator = false,
+): string {
+  return adbWithSerial(adbPath, serial, ["shell", ...command], allowExplicitNonEmulator).trim();
+}
+
+/** List connected `emulator-*` serials from `adb devices`, ignoring physical USB devices. */
+export function listConnectedEmulators(adbPath: string): readonly string[] {
   const output = runTool(adbPath, ["devices"]);
   return output
     .split(/\r?\n/)
@@ -539,6 +628,7 @@ async function waitForEmulatorBoot(
   explicitSerial?: string,
   bootedProcess?: ChildProcess,
 ): Promise<string> {
+  const allowNonEmulator = explicitSerial !== undefined;
   let spawnError: Error | undefined;
   bootedProcess?.once("error", (err) => {
     spawnError = err;
@@ -560,7 +650,7 @@ async function waitForEmulatorBoot(
     }
     if (serial) {
       try {
-        const booted = adbShell(adbPath, serial, ["getprop", "sys.boot_completed"]);
+        const booted = adbShell(adbPath, serial, ["getprop", "sys.boot_completed"], allowNonEmulator);
         if (booted === "1") return serial;
       } catch {
         serial = explicitSerial ?? serial;
@@ -571,16 +661,91 @@ async function waitForEmulatorBoot(
   throw new Error(`Emulator did not finish booting within ${String(timeoutSeconds)}s`);
 }
 
+/** Ensure the configured AVD exists and boot an isolated KVM emulator unless `--serial` is provided. */
+export async function ensureAndBootEmulator(
+  plan: EmulatorToolchainPlan,
+  timeoutSeconds: number,
+  explicitSerial?: string,
+): Promise<{
+  readonly serial: string;
+  readonly bootedProcess?: ChildProcess;
+  readonly avdDetail: string;
+}> {
+  if (!plan.adbPath || !plan.emulatorPath || !plan.avdmanagerPath) {
+    throw new Error(`Android emulator toolchain incomplete: missing ${plan.missingTools.join(", ")}.`);
+  }
+  const emulatorEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    ANDROID_AVD_HOME: plan.avdHome,
+  };
+  fs.mkdirSync(plan.avdHome, { recursive: true });
+  const avds = runTool(plan.emulatorPath, ["-list-avds"], { env: emulatorEnv })
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+  let avdDetail: string;
+  if (!avds.includes(plan.avdName)) {
+    runTool(
+      plan.avdmanagerPath,
+      ["create", "avd", "--force", "-n", plan.avdName, "-k", plan.systemImage, "-d", DEFAULT_DEVICE_PROFILE],
+      { input: "no\n", env: emulatorEnv },
+    );
+    avdDetail = `Created AVD ${plan.avdName} in ${plan.avdHome}`;
+  } else {
+    avdDetail = `Reused existing AVD ${plan.avdName} in ${plan.avdHome}`;
+  }
+
+  const priorSerials = new Set(listConnectedEmulators(plan.adbPath));
+  let bootedProcess: ChildProcess | undefined;
+  if (!explicitSerial) {
+    bootedProcess = spawn(plan.emulatorPath, [...plan.emulatorArgs], {
+      stdio: "ignore",
+      detached: true,
+      env: emulatorEnv,
+    });
+    bootedProcess.unref();
+  }
+  const serial = await waitForEmulatorBoot(plan.adbPath, priorSerials, timeoutSeconds, explicitSerial, bootedProcess);
+  return { serial, ...(bootedProcess !== undefined ? { bootedProcess } : {}), avdDetail };
+}
+
+/** Cleanly shut down a booted emulator process via `adb -s <serial> emu kill` with SIGTERM fallback. */
+export function stopBootedEmulator(
+  adbPath: string,
+  serial: string | undefined,
+  bootedProcess: ChildProcess | undefined,
+  allowExplicitNonEmulator = false,
+): string | null {
+  const processStillRunning = bootedProcess !== undefined
+    && bootedProcess.exitCode === null
+    && bootedProcess.signalCode === null;
+  if (bootedProcess && serial) {
+    try {
+      adbWithSerial(adbPath, serial, ["emu", "kill"], allowExplicitNonEmulator);
+      return `Stopped ${serial}`;
+    } catch {
+      if (processStillRunning) bootedProcess.kill("SIGTERM");
+      return `Terminated emulator process for ${serial}`;
+    }
+  }
+  if (bootedProcess && processStillRunning) {
+    bootedProcess.kill("SIGTERM");
+    return "Terminated emulator process before serial attached";
+  }
+  return null;
+}
+
 async function verifyDeviceSuite(
   adbPath: string,
   serial: string,
   plan: EmulatorToolchainPlan,
   rootDir: string,
+  allowExplicitNonEmulator: boolean,
 ): Promise<readonly EmulatorStageResult[]> {
   const results: EmulatorStageResult[] = [];
+  const shell = (command: readonly string[]) => adbShell(adbPath, serial, command, allowExplicitNonEmulator);
 
   for (const relApk of plan.discoveredApks) {
-    runTool(adbPath, ["-s", serial, "install", "-r", "-g", path.join(rootDir, relApk)]);
+    adbWithSerial(adbPath, serial, ["install", "-r", "-g", path.join(rootDir, relApk)], allowExplicitNonEmulator);
   }
   results.push({
     stage: "install-apks",
@@ -588,7 +753,7 @@ async function verifyDeviceSuite(
     detail: `Installed ${String(plan.discoveredApks.length)} APK(s): ${plan.discoveredApks.map((item) => path.basename(item)).join(", ")}`,
   });
 
-  const launcherDump = adbShell(adbPath, serial, [
+  const launcherDump = shell([
     "cmd",
     "package",
     "query-activities",
@@ -602,10 +767,10 @@ async function verifyDeviceSuite(
   results.push({
     stage: "verify-launcher-activities",
     status: launcherCheck.passed ? "passed" : "failed",
-    detail: `core=${String(launcherCheck.coreActivities.length)} thin=${String(launcherCheck.thinAlphaActivities.length)} thirdParty=${String(launcherCheck.thirdPartyActivities.length)}`,
+    detail: `core=${String(launcherCheck.coreActivities.length)} thin=${String(launcherCheck.thinAlphaActivities.length)} all18=${String(launcherCheck.thinAlphaActivities.length >= FULL_SUITE_THIN_COUNT)} thirdParty=${String(launcherCheck.thirdPartyActivities.length)}`,
   });
 
-  const coreDump = adbShell(adbPath, serial, ["dumpsys", "package", CORE_PACKAGE]);
+  const coreDump = shell(["dumpsys", "package", CORE_PACKAGE]);
   const coreCheck = inspectCorePackageDump(coreDump);
   const coreUid = extractPackageUid(coreDump);
   results.push({
@@ -616,7 +781,7 @@ async function verifyDeviceSuite(
       : `authority=${String(coreCheck.hasPreferencesAuthority)} permission=${String(coreCheck.hasIpcPermission)} signature=${String(coreCheck.ipcPermissionIsSignature)} missing=[${coreCheck.missingComponents.join(",")}]`,
   });
 
-  const voiceDump = adbShell(adbPath, serial, [
+  const voiceDump = shell([
     "cmd",
     "package",
     "query-services",
@@ -624,13 +789,11 @@ async function verifyDeviceSuite(
     "-a",
     "android.service.voice.VoiceInteractionService",
   ]);
-  const hasVoiceService = voiceDump.includes("AlphaVoiceInteractionService");
+  const voiceCheck = inspectVoiceAndOverlayDump(voiceDump, coreDump);
   results.push({
     stage: "verify-voice-interaction",
-    status: hasVoiceService ? "passed" : "failed",
-    detail: hasVoiceService
-      ? "AlphaVoiceInteractionService registered for VoiceInteractionService"
-      : "AlphaVoiceInteractionService not found in query-services output",
+    status: voiceCheck.passed ? "passed" : "failed",
+    detail: `voiceService=${String(voiceCheck.hasVoiceService)} sessionService=${String(voiceCheck.hasSessionService)} overlayIntake=${String(voiceCheck.hasOverlayIntake)}`,
   });
 
   const targetThinActivity = launcherCheck.thinAlphaActivities.find((entry) => entry.startsWith(`${PREFERRED_THIN_PACKAGE}/`))
@@ -643,13 +806,13 @@ async function verifyDeviceSuite(
     });
   } else {
     const thinPkg = targetThinActivity.split("/")[0] ?? PREFERRED_THIN_PACKAGE;
-    const thinDump = adbShell(adbPath, serial, ["dumpsys", "package", thinPkg]);
+    const thinDump = shell(["dumpsys", "package", thinPkg]);
     const thinUid = extractPackageUid(thinDump);
-    adbShell(adbPath, serial, ["logcat", "-c"]);
-    adbShell(adbPath, serial, ["am", "start", "-W", "-n", targetThinActivity]);
+    shell(["logcat", "-c"]);
+    shell(["am", "start", "-W", "-n", targetThinActivity]);
     const ipcPoll = await pollUntil(
       () => {
-        const logcat = adbShell(adbPath, serial, ["logcat", "-d", "-s", "AlphaThinApp", "AlphaPreferencesProvider", "AlphaAgentBroker"]);
+        const logcat = shell(["logcat", "-d", "-s", "AlphaThinApp", "AlphaPreferencesProvider", "AlphaAgentBroker"]);
         return { logcat, check: inspectCrossAppIpcLog(logcat, coreUid, thinUid) };
       },
       (sample) => sample.check.passed,
@@ -662,14 +825,57 @@ async function verifyDeviceSuite(
     });
   }
 
-  adbShell(adbPath, serial, ["settings", "put", "secure", "accessibility_enabled", "0"]);
-  adbShell(adbPath, serial, ["settings", "delete", "secure", "enabled_accessibility_services"]);
-  await timersPromises.scheduler.wait(500);
-  adbShell(adbPath, serial, ["logcat", "-c"]);
-  adbShell(adbPath, serial, ["settings", "put", "secure", "enabled_accessibility_services", ACCESSIBILITY_COMPONENT]);
-  adbShell(adbPath, serial, ["settings", "put", "secure", "accessibility_enabled", "1"]);
+  if (launcherCheck.thinAlphaActivities.length === 0) {
+    results.push({
+      stage: "verify-all-thin-apps",
+      status: "failed",
+      detail: "No installed thin Alpha APKs discovered for suite launch verification",
+    });
+  } else {
+    const suiteFailures: string[] = [];
+    let distinctUidCount = 0;
+    let crashCount = 0;
+    let ipcPassCount = 0;
+    for (const activity of launcherCheck.thinAlphaActivities) {
+      const thinPkg = activity.split("/")[0] ?? "";
+      const thinDump = shell(["dumpsys", "package", thinPkg]);
+      const thinUid = extractPackageUid(thinDump);
+      shell(["logcat", "-c"]);
+      shell(["am", "start", "-W", "-n", activity]);
+      const launchCheck = await pollUntil(
+        () => {
+          const logcat = shell(["logcat", "-d", "-s", "AlphaThinApp", "AlphaPreferencesProvider", "AlphaAgentBroker", "AndroidRuntime", "ActivityManager"]);
+          return inspectThinAppLaunchLog(logcat, thinPkg, coreUid, thinUid);
+        },
+        (sample) => sample.passed || sample.hasCrash,
+        THIN_APP_POLL_TIMEOUT_MS,
+        400,
+      );
+      if (launchCheck.ipc.distinctUids) distinctUidCount += 1;
+      if (launchCheck.hasCrash) crashCount += 1;
+      if (launchCheck.ipc.passed) ipcPassCount += 1;
+      if (!launchCheck.passed) {
+        suiteFailures.push(`${thinPkg}(crash=${String(launchCheck.hasCrash)},uid=${String(launchCheck.ipc.distinctUids)},prefs=${String(launchCheck.ipc.hasPreferencesEvidence)},broker=${String(launchCheck.ipc.hasBrokerEvidence)})`);
+      }
+    }
+    const totalThin = launcherCheck.thinAlphaActivities.length;
+    results.push({
+      stage: "verify-all-thin-apps",
+      status: suiteFailures.length === 0 ? "passed" : "failed",
+      detail: suiteFailures.length === 0
+        ? `launched=${String(totalThin)}/${String(totalThin)} distinctUids=${String(distinctUidCount)}/${String(totalThin)} crashes=${String(crashCount)} ipcOk=${String(ipcPassCount)}/${String(totalThin)}`
+        : `launched=${String(totalThin)} crashes=${String(crashCount)} failures=[${suiteFailures.join("; ")}]`,
+    });
+  }
 
-  const readControlLogcat = () => adbShell(adbPath, serial, [
+  shell(["settings", "put", "secure", "accessibility_enabled", "0"]);
+  shell(["settings", "delete", "secure", "enabled_accessibility_services"]);
+  await timersPromises.scheduler.wait(500);
+  shell(["logcat", "-c"]);
+  shell(["settings", "put", "secure", "enabled_accessibility_services", ACCESSIBILITY_COMPONENT]);
+  shell(["settings", "put", "secure", "accessibility_enabled", "1"]);
+
+  const readControlLogcat = () => shell([
     "logcat",
     "-d",
     "-s",
@@ -680,24 +886,24 @@ async function verifyDeviceSuite(
 
   const a11yCheck = await pollUntil(
     () => {
-      const enabledA11y = adbShell(adbPath, serial, ["settings", "get", "secure", "enabled_accessibility_services"]);
-      const accessibilityDump = adbShell(adbPath, serial, ["dumpsys", "accessibility"]);
+      const enabledA11y = shell(["settings", "get", "secure", "enabled_accessibility_services"]);
+      const accessibilityDump = shell(["dumpsys", "accessibility"]);
       return inspectAccessibilityDump(accessibilityDump, enabledA11y);
     },
     (sample) => sample.passed,
     IPC_POLL_TIMEOUT_MS,
   );
 
-  const packagesOutput = adbShell(adbPath, serial, ["pm", "list", "packages"]);
+  const packagesOutput = shell(["pm", "list", "packages"]);
   const browserPkg = BROWSER_CANDIDATES.find((candidate) => packagesOutput.includes(`package:${candidate}`));
   if (browserPkg) {
-    adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com", browserPkg]);
+    shell(["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com", browserPkg]);
   } else {
-    adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com"]);
+    shell(["am", "start", "-W", "-a", "android.intent.action.VIEW", "-d", "https://example.com"]);
   }
   const browserPoll = await pollUntil(
     () => {
-      const windowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
+      const windowDump = shell(["dumpsys", "window", "displays"]);
       const observed = browserPkg
         ? windowDump.includes(browserPkg)
         : /mCurrentFocus=Window\{[^\n}]+ (?!ai\.alphacompute\.)[a-z][a-z0-9_.]*\//i.test(windowDump);
@@ -714,10 +920,10 @@ async function verifyDeviceSuite(
   let settingsObserved = false;
   let telemetryCheck = browserPoll.telemetry;
   if (blockedPresent) {
-    adbShell(adbPath, serial, ["am", "start", "-W", "-a", "android.settings.SETTINGS"]);
+    shell(["am", "start", "-W", "-a", "android.settings.SETTINGS"]);
     const settingsPoll = await pollUntil(
       () => {
-        const windowDump = adbShell(adbPath, serial, ["dumpsys", "window", "displays"]);
+        const windowDump = shell(["dumpsys", "window", "displays"]);
         const observed = windowDump.includes(SETTINGS_PACKAGE);
         const telemetry = inspectControlTelemetry(readControlLogcat(), browserPkg);
         return { observed, telemetry };
@@ -799,55 +1005,19 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
   const stages: EmulatorStageResult[] = [];
   let bootedProcess: ChildProcess | undefined;
   let activeSerial: string | undefined = flags.serial;
-  const emulatorEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    ANDROID_AVD_HOME: plan.avdHome,
-  };
+  const allowExplicitNonEmulator = flags.serial !== undefined;
 
   try {
-    fs.mkdirSync(plan.avdHome, { recursive: true });
-    const avds = runTool(plan.emulatorPath, ["-list-avds"], { env: emulatorEnv })
-      .split(/\r?\n/)
-      .map((line) => line.trim());
-    if (!avds.includes(plan.avdName)) {
-      runTool(
-        plan.avdmanagerPath,
-        ["create", "avd", "--force", "-n", plan.avdName, "-k", plan.systemImage, "-d", DEFAULT_DEVICE_PROFILE],
-        { input: "no\n", env: emulatorEnv },
-      );
-      stages.push({ stage: "ensure-avd", status: "passed", detail: `Created AVD ${plan.avdName} in ${plan.avdHome}` });
-    } else {
-      stages.push({ stage: "ensure-avd", status: "passed", detail: `Reused existing AVD ${plan.avdName} in ${plan.avdHome}` });
-    }
-
-    const priorSerials = new Set(listConnectedEmulators(plan.adbPath));
-    if (!activeSerial) {
-      bootedProcess = spawn(plan.emulatorPath, [...plan.emulatorArgs], {
-        stdio: "ignore",
-        detached: true,
-        env: emulatorEnv,
-      });
-      bootedProcess.unref();
-    }
-    activeSerial = await waitForEmulatorBoot(plan.adbPath, priorSerials, timeoutSeconds, activeSerial, bootedProcess);
+    const booted = await ensureAndBootEmulator(plan, timeoutSeconds, flags.serial);
+    bootedProcess = booted.bootedProcess;
+    activeSerial = booted.serial;
+    stages.push({ stage: "ensure-avd", status: "passed", detail: booted.avdDetail });
     stages.push({ stage: "boot-emulator", status: "passed", detail: `Booted ${activeSerial}` });
-
-    stages.push(...await verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir));
+    stages.push(...await verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir, allowExplicitNonEmulator));
   } finally {
-    const processStillRunning = bootedProcess !== undefined
-      && bootedProcess.exitCode === null
-      && bootedProcess.signalCode === null;
-    if (bootedProcess && activeSerial) {
-      try {
-        runTool(plan.adbPath, ["-s", activeSerial, "emu", "kill"]);
-        stages.push({ stage: "teardown", status: "passed", detail: `Stopped ${activeSerial}` });
-      } catch {
-        if (processStillRunning) bootedProcess.kill("SIGTERM");
-        stages.push({ stage: "teardown", status: "passed", detail: `Terminated emulator process for ${activeSerial}` });
-      }
-    } else if (bootedProcess && processStillRunning) {
-      bootedProcess.kill("SIGTERM");
-      stages.push({ stage: "teardown", status: "passed", detail: "Terminated emulator process before serial attached" });
+    const teardownDetail = stopBootedEmulator(plan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
+    if (teardownDetail) {
+      stages.push({ stage: "teardown", status: "passed", detail: teardownDetail });
     }
   }
 

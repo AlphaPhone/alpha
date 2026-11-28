@@ -2,6 +2,7 @@ import { defineCommand, type CliContext, type CommandResult } from "../runner.ts
 import { runEmulatorE2e } from "./alpha-next-emulator.ts";
 import { runSyncFonts, runSyncTokens } from "./alpha-next-tokens.ts";
 import { runManifest, runValidate } from "./alpha-next-validate.ts";
+import { isWalkthroughAction, runWalkthrough, type WalkthroughAction } from "./alpha-next-walkthrough.ts";
 
 /** Validated subcommands supported under `pnpm cli alpha-next`. */
 export type AlphaNextSubcommand =
@@ -9,7 +10,8 @@ export type AlphaNextSubcommand =
   | "sync-fonts"
   | "manifest"
   | "validate"
-  | "emulator-e2e";
+  | "emulator-e2e"
+  | "walkthrough";
 
 interface AlphaNextFlags {
   readonly check: boolean;
@@ -19,6 +21,7 @@ interface AlphaNextFlags {
   readonly "dry-run": boolean;
   readonly target: string | undefined;
   readonly out: string | undefined;
+  readonly url: string | undefined;
   readonly tokens: string | undefined;
   readonly suite: string | undefined;
   readonly "apk-dir": string | undefined;
@@ -30,14 +33,18 @@ interface AlphaNextFlags {
 interface SubcommandSlot {
   readonly name: AlphaNextSubcommand;
   readonly summary: string;
-  readonly run: (flags: AlphaNextFlags, ctx: CliContext) => CommandResult | Promise<CommandResult>;
+  readonly run: (
+    flags: AlphaNextFlags,
+    positionals: readonly string[],
+    ctx: CliContext,
+  ) => CommandResult | Promise<CommandResult>;
 }
 
 const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
   "sync-tokens": {
     name: "sync-tokens",
     summary: "Generate or check Android colors/dimens XML from packages/design-system/tokens.json",
-    run: (flags, ctx) => runSyncTokens({
+    run: (flags, _positionals, ctx) => runSyncTokens({
       check: flags.check,
       write: flags.write,
       withFonts: flags["with-fonts"],
@@ -49,7 +56,7 @@ const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
   "sync-fonts": {
     name: "sync-fonts",
     summary: "Derive Android .ttf fonts and alpha_fonts.xml for Launcher3 without mutating packages/design-system/fonts/",
-    run: (flags, ctx) => runSyncFonts({
+    run: (flags, _positionals, ctx) => runSyncFonts({
       check: flags.check,
       write: flags.write,
       out: flags.out,
@@ -58,7 +65,7 @@ const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
   manifest: {
     name: "manifest",
     summary: "Validate the Alpha NEXT suite app registry (apps/app/android/suite/apps.json)",
-    run: (flags, ctx) => runManifest({
+    run: (flags, _positionals, ctx) => runManifest({
       check: flags.check,
       suite: flags.suite,
     }, ctx),
@@ -66,7 +73,7 @@ const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
   validate: {
     name: "validate",
     summary: "Verify Alpha NEXT token sync, suite manifest, artifacts, security invariants, and optional aapt2 compile",
-    run: (flags, ctx) => runValidate({
+    run: (flags, _positionals, ctx) => runValidate({
       check: flags.check,
       aapt2: flags.aapt2,
       suite: flags.suite,
@@ -77,13 +84,38 @@ const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
   "emulator-e2e": {
     name: "emulator-e2e",
     summary: "Run or plan Tier-1 headless Android emulator end-to-end verification",
-    run: (flags, ctx) => runEmulatorE2e({
+    run: (flags, _positionals, ctx) => runEmulatorE2e({
       dryRun: flags["dry-run"],
       apkDir: flags["apk-dir"],
       avd: flags.avd,
       serial: flags.serial,
       timeout: flags.timeout,
     }, ctx),
+  },
+  walkthrough: {
+    name: "walkthrough",
+    summary: "Capture all 18 views & Android emulator footage and render the 1080p Alpha NEXT walkthrough video",
+    run: (flags, positionals, ctx) => {
+      const rawAction = positionals[1] ?? "all";
+      if (!isWalkthroughAction(rawAction)) {
+        return {
+          ok: false,
+          message: `Unknown walkthrough action "${rawAction}". Expected: capture-web, capture-android, render, or all.`,
+          exitCode: 2,
+        };
+      }
+      const action: WalkthroughAction = rawAction;
+      return runWalkthrough({
+        action,
+        dryRun: flags["dry-run"],
+        out: flags.out,
+        url: flags.url,
+        apkDir: flags["apk-dir"],
+        avd: flags.avd,
+        serial: flags.serial,
+        timeout: flags.timeout,
+      }, ctx);
+    },
   },
 };
 
@@ -94,8 +126,8 @@ function isAlphaNextSubcommand(value: string): value is AlphaNextSubcommand {
 /** Project CLI command group for Alpha NEXT generators and verification levers. */
 export const alphaNextCommand = defineCommand({
   name: "alpha-next",
-  summary: "Alpha NEXT Android token/font sync, manifest, validation, and emulator levers",
-  usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e> [options]",
+  summary: "Alpha NEXT Android token/font sync, manifest, validation, emulator, and walkthrough levers",
+  usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough> [options]",
   flags: {
     check: {
       kind: "boolean",
@@ -115,7 +147,7 @@ export const alphaNextCommand = defineCommand({
     },
     "dry-run": {
       kind: "boolean",
-      description: "Inspect Tier-1 emulator toolchain and plan without booting an AVD",
+      description: "Inspect toolchain and plan without booting an AVD or writing media outputs",
     },
     target: {
       kind: "string",
@@ -125,7 +157,11 @@ export const alphaNextCommand = defineCommand({
     out: {
       kind: "string",
       short: "o",
-      description: "Override root output directory for generated resources",
+      description: "Override root output directory for generated resources or walkthrough artifacts",
+    },
+    url: {
+      kind: "string",
+      description: "Existing Alpha app URL for walkthrough capture-web (skips launching Vite)",
     },
     tokens: {
       kind: "string",
@@ -137,19 +173,19 @@ export const alphaNextCommand = defineCommand({
     },
     "apk-dir": {
       kind: "string",
-      description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e",
+      description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e or walkthrough",
     },
     avd: {
       kind: "string",
-      description: "Android Virtual Device name for emulator-e2e (default: alpha_next_api35)",
+      description: "Android Virtual Device name for emulator-e2e or walkthrough (default: alpha_next_api35)",
     },
     serial: {
       kind: "string",
-      description: "Target ADB device serial for emulator-e2e",
+      description: "Target ADB device serial for emulator-e2e or walkthrough",
     },
     timeout: {
       kind: "string",
-      description: "Boot timeout in seconds for emulator-e2e (default: 180)",
+      description: "Boot timeout in seconds for emulator-e2e or walkthrough (default: 180)",
     },
   },
   run: ({ flags, positionals }, ctx) => {
@@ -169,6 +205,6 @@ export const alphaNextCommand = defineCommand({
         exitCode: 2,
       };
     }
-    return SUBCOMMANDS[subcommand].run(flags, ctx);
+    return SUBCOMMANDS[subcommand].run(flags, positionals, ctx);
   },
 });

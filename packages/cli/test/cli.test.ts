@@ -5,6 +5,10 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   REQUIRED_CORE_COMPONENTS,
+  WALKTHROUGH_VIEWS,
+  assertSafeEmulatorSerial,
+  buildStoryboardHtml,
+  buildWalkthroughStoryboard,
   commands,
   cssLengthToDp,
   defineCommand,
@@ -14,6 +18,8 @@ import {
   inspectCorePackageDump,
   inspectCrossAppIpcLog,
   inspectLauncherActivities,
+  inspectThinAppLaunchLog,
+  inspectVoiceAndOverlayDump,
   oklchToHex,
   resolveAndroidAvdHome,
   resolveInstalledBlockedGuards,
@@ -26,6 +32,7 @@ import {
   type SyncFontsReport,
   type SyncTokensReport,
   type ValidateReport,
+  type WalkthroughReport,
 } from "../src/index.ts";
 
 const templateRoot = path.resolve(import.meta.dirname, "../../..");
@@ -119,87 +126,48 @@ describe("project CLI", () => {
 
     const structured = createRecorder();
     expect(await runCli({ argv: ["help", "--json"], commands, rootDir: templateRoot, cwd: templateRoot, io: structured.io })).toBe(0);
-    expect(parseJson(structured.out())).toEqual({
-      ok: true,
-      command: "help",
+    const helpPayload = parseJson(structured.out()) as {
+      ok: boolean;
+      command: string;
       data: {
-        commands: [
-          {
-            name: "status",
-            summary: "Inspect workspace packages, specs, and generated outputs",
-            usage: "pnpm cli status [--package <name|path>] [--json]",
-            flags: {
-              package: {
-                kind: "string",
-                short: "p",
-                description: "Filter to one workspace package by name or relative path",
-              },
-            },
-          },
-          {
-            name: "alpha-next",
-            summary: "Alpha NEXT Android token/font sync, manifest, validation, and emulator levers",
-            usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e> [options]",
-            flags: {
-              check: {
-                kind: "boolean",
-                description: "Verify generated resources or validation gates without writing",
-              },
-              write: {
-                kind: "boolean",
-                description: "Write generated Android resources or fonts to target directories",
-              },
-              "with-fonts": {
-                kind: "boolean",
-                description: "Also derive Launcher3 .ttf fonts and alpha_fonts.xml during sync-tokens",
-              },
-              aapt2: {
-                kind: "boolean",
-                description: "Run Android SDK aapt2 compile on Launcher3 overlay resources during validate",
-              },
-              "dry-run": {
-                kind: "boolean",
-                description: "Inspect Tier-1 emulator toolchain and plan without booting an AVD",
-              },
-              target: {
-                kind: "string",
-                short: "t",
-                description: "Token sync target: all, launcher3, or ipc",
-              },
-              out: {
-                kind: "string",
-                short: "o",
-                description: "Override root output directory for generated resources",
-              },
-              tokens: {
-                kind: "string",
-                description: "Override path to design-system tokens.json",
-              },
-              suite: {
-                kind: "string",
-                description: "Override path to Android suite apps.json registry",
-              },
-              "apk-dir": {
-                kind: "string",
-                description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e",
-              },
-              avd: {
-                kind: "string",
-                description: "Android Virtual Device name for emulator-e2e (default: alpha_next_api35)",
-              },
-              serial: {
-                kind: "string",
-                description: "Target ADB device serial for emulator-e2e",
-              },
-              timeout: {
-                kind: "string",
-                description: "Boot timeout in seconds for emulator-e2e (default: 180)",
-              },
-            },
-          },
-        ],
+        commands: Array<{
+          name: string;
+          summary: string;
+          usage: string;
+          flags: Record<string, { kind: string; short?: string; description: string }>;
+        }>;
+      };
+    };
+    expect(helpPayload.ok).toBe(true);
+    expect(helpPayload.command).toBe("help");
+    expect(helpPayload.data.commands.map((entry) => entry.name)).toEqual(["status", "alpha-next"]);
+    expect(helpPayload.data.commands[0]).toEqual({
+      name: "status",
+      summary: "Inspect workspace packages, specs, and generated outputs",
+      usage: "pnpm cli status [--package <name|path>] [--json]",
+      flags: {
+        package: {
+          kind: "string",
+          short: "p",
+          description: "Filter to one workspace package by name or relative path",
+        },
       },
     });
+    const alphaNextHelp = helpPayload.data.commands[1];
+    expect(alphaNextHelp).toBeDefined();
+    expect(alphaNextHelp.usage).toContain("sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough");
+    expect(Object.keys(alphaNextHelp.flags).sort()).toEqual([
+      "aapt2", "apk-dir", "avd", "check", "dry-run", "out", "serial",
+      "suite", "target", "timeout", "tokens", "url", "with-fonts", "write",
+    ]);
+    expect(alphaNextHelp.flags.target?.short).toBe("t");
+    expect(alphaNextHelp.flags.out?.short).toBe("o");
+    expect(alphaNextHelp.flags.check?.kind).toBe("boolean");
+    expect(alphaNextHelp.flags.timeout?.kind).toBe("string");
+    for (const flag of Object.values(alphaNextHelp.flags)) {
+      expect(["boolean", "string"]).toContain(flag.kind);
+      expect(flag.description.length).toBeGreaterThan(0);
+    }
 
     const single = createRecorder();
     expect(await runCli({ argv: ["status", "--help", "--json"], commands, rootDir: templateRoot, cwd: templateRoot, io: single.io })).toBe(0);
@@ -568,6 +536,7 @@ describe("project CLI", () => {
       "verify-ipc-and-provider",
       "verify-voice-interaction",
       "verify-cross-app-ipc",
+      "verify-all-thin-apps",
       "verify-accessibility-and-browser-control",
       "teardown",
     ]);
@@ -700,6 +669,70 @@ describe("project CLI", () => {
       packages: ["com.android.settings", "com.android.permissioncontroller"],
     });
     expect(resolveInstalledBlockedGuards("package:com.android.settings\n").present).toBe(false);
+
+    expect(assertSafeEmulatorSerial("emulator-5554")).toBe("emulator-5554");
+    expect(() => assertSafeEmulatorSerial("67091JEA313850")).toThrow(/non-emulator device/);
+    expect(assertSafeEmulatorSerial("67091JEA313850", true)).toBe("67091JEA313850");
+    expect(() => assertSafeEmulatorSerial("   ")).toThrow(/without an explicit target serial/);
+
+    expect(inspectVoiceAndOverlayDump(
+      "ai.alphacompute.alphaphone/.overlay.AlphaVoiceInteractionService",
+      "AlphaVoiceInteractionSessionService\nAlphaOverlayIntakeActivity",
+    ).passed).toBe(true);
+    expect(inspectVoiceAndOverlayDump(
+      "ai.alphacompute.alphaphone/.overlay.AlphaVoiceInteractionService",
+      "AlphaVoiceInteractionSessionService",
+    ).passed).toBe(false);
+
+    const healthyThinLog = "11-27 15:00:01.000 500 500 I AlphaThinApp: event=launch app=notes coreSignatureMatch=true prefsConnected=true agentBrokerBound=true";
+    expect(inspectThinAppLaunchLog(healthyThinLog, "ai.alphacompute.notes", 10201, 10211).passed).toBe(true);
+    expect(inspectThinAppLaunchLog(`${healthyThinLog}\nFATAL EXCEPTION: main\nProcess: ai.alphacompute.notes, PID: 500`, "ai.alphacompute.notes", 10201, 10211).passed).toBe(false);
+    expect(inspectThinAppLaunchLog(`${healthyThinLog}\nE ActivityManager: ANR in ai.alphacompute.notes`, "ai.alphacompute.notes", 10201, 10211).passed).toBe(false);
+  });
+
+  test("alpha-next walkthrough --dry-run plans all 18 views and generates deterministic Alpha Compute storyboard HTML", async () => {
+    expect(WALKTHROUGH_VIEWS.map((entry) => entry.view).sort()).toEqual([...ALL_18_VIEWS].sort());
+
+    const dryRun = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "walkthrough", "all", "--dry-run", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: dryRun.io,
+    })).toBe(0);
+    const parsed = parseJson(dryRun.out()) as { readonly ok: boolean; readonly data: WalkthroughReport };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.mode).toBe("dry-run");
+    expect(parsed.data.action).toBe("all");
+    expect(parsed.data.plan.viewsCount).toBe(18);
+    expect(parsed.data.plan.chapterCount).toBe(8);
+    expect(parsed.data.plan.brandAssetsReady).toBe(true);
+    expect(parsed.data.plan.playwrightReady).toBe(true);
+    expect(parsed.data.plan.ffmpegPath).not.toBeNull();
+
+    const badAction = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "walkthrough", "bogus", "--dry-run", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: badAction.io,
+    })).toBe(2);
+
+    const chapters = buildWalkthroughStoryboard(path.join(os.tmpdir(), "alpha-next-walkthrough-nonexistent"));
+    expect(chapters).toHaveLength(8);
+    const introChapter = chapters[0];
+    const overlayChapter = chapters[5];
+    expect(introChapter).toBeDefined();
+    expect(overlayChapter).toBeDefined();
+    const introHtml = buildStoryboardHtml(introChapter, templateRoot);
+    expect(introHtml).toContain("Public Sans");
+    expect(introHtml).toContain("Fraunces");
+    expect(introHtml).toContain("#0000FF");
+    expect(introHtml).toContain("window.__seek");
+    const overlayHtml = buildStoryboardHtml(overlayChapter, templateRoot);
+    expect(overlayHtml).toContain("AGENT_IPC Binder");
   });
 
   test("alpha-next validate --check --aapt2 passes against the live repository artifacts", async () => {
