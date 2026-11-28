@@ -998,7 +998,7 @@ describe("Maps in a browser", () => {
     expect(document.body.textContent).not.toContain("Add Alpha Cloud credits");
   });
 
-  it(`Falls back to AlphaNetworkLocation after 4 seconds indoors and offsets the search bar by the safe top inset (spec/app/maps/connection.md, '"Use my location" gives up after 15 seconds without a fix')`, async () => {
+  it(`Falls back to AlphaNetworkLocation after 4 seconds indoors and offsets the search bar by the safe top inset (spec/app/maps/connection.md, "Story: Use my location")`, async () => {
     const world = { ...scene(), phone: true };
     world.maps.allowed = "granted";
     world.maps.precision = "precise";
