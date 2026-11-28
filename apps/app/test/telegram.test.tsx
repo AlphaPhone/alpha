@@ -23,6 +23,7 @@ import home from "../src/home/index.tsx";
 import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { toasts } from "../src/notices/toasts.vibe";
 import { browserDevice } from "../src/platform/device.vibe";
+import { browserMessagingNotices } from "../src/platform/messaging-notices.vibe";
 import { MessagingSessions, messagingSessions, secretOf } from "../src/platform/messaging.vibe";
 import { grounded } from "../src/platform/platform.vibe";
 import { browserVoiceBridge } from "../src/platform/voice.vibe";
@@ -65,6 +66,7 @@ function buildTestLayer(origin: string) {
   const base = Layer.mergeAll(
     browserDevice,
     browserVoiceBridge,
+    browserMessagingNotices,
     messagingSessions,
     Layer.provide(telegramAt(origin), NodeHttpClient.layerNodeHttp),
     Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(1_700_000_000_000)), TestClock.layer()),
@@ -561,8 +563,11 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
       text: "Live SSE ping from Maya",
     });
     await until(rt, noticeChanges, (s) => s.posts >= 1 && s.upChats.length >= 1);
-    const snap = await rt.runPromise(TelegramStore.use((s) => s.get()));
-    expect(snap.notices.some((entry) => entry.excerpt === "Live SSE ping from Maya")).toBe(true);
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Telegram notifications"]')?.textContent).toContain("Live SSE ping from Maya"));
+    await clickRowContaining("Live SSE ping from Maya");
+    await until(rt, convChanges, (state) => state.front && state.chat > 0 && state.newestLoaded);
+    const selected = await rt.runPromise(Conversation.Machine.use((machine) => machine.get()));
+    expect(await rt.runPromise(TelegramStore.use((store) => store.peerKeyOf(selected.chat)))).toBe("user:2001");
   });
 
   // spec/app/telegram/auth.md, "Remote revocation and explicit sign-out wipe local data, advance the credential revision and stop sync"
@@ -605,6 +610,7 @@ describe("Telegram user-account client over live HTTP+SSE provider", () => {
 describe("Telegram on a phone", () => {
   afterEach(closeAll);
 
+  // spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
   it('keeps a pending sign-in bound to the Cloud account that requested it (spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account")', async () => {
     const phone = { ...scene(), phone: true };
     phone.telegram.enabled = true;
@@ -634,6 +640,32 @@ describe("Telegram on a phone", () => {
     await fillField("Verification code", "22222");
     await clickButton("Verify code");
     await untilArea(alpha, alpha.runtime, Auth.Machine, (s) => s.step === "Authenticated");
+    const tray = phone.messagingNotices;
+    const incoming = (id: number) => {
+      const date = 1_700_000_000;
+      const message = { _type: "message", id, peer_id: { _type: "peerUser", user_id: 420 }, peer_key: "user:420", from_id: 420,
+        date, message: `Notice ${id}`, out: false, reactions: [], mentioned: false };
+      const update = { _type: "updateNewMessage", pts: ++phone.telegram.pts, date, message };
+      for (const send of phone.telegram.listeners) send(update);
+    };
+    await vi.waitFor(() => expect(phone.telegram.listeners.size).toBeGreaterThan(0));
+    incoming(10);
+    await vi.waitFor(async () => expect((await alpha.runtime.runPromise(TelegramStore.use((store) => store.get()))).historyByPeer.get("user:420")?.at(-1)?.id).toBe(10));
+    expect(tray.posted()).toEqual([]);
+    await clickButton("Enable Telegram notifications");
+    await untilArea(alpha, alpha.runtime, Notices.Machine, (state) => state.notifyAllowed);
+    incoming(11);
+    await vi.waitFor(() => expect(tray.posted().map((entry) => entry.body)).toEqual(["Notice 11"]));
+    const delivery = tray.posted()[0];
+    expect(delivery.target).toMatchObject({ provider: "telegram", peer: "user:420" });
+    expect(JSON.stringify(delivery)).not.toContain(phone.telegram.sessionToken);
+    expect(tray.tap(delivery.token)).toBe(true);
+    await untilArea(alpha, alpha.runtime, Conversation.Machine, (state) => state.chat > 0 && state.newestLoaded);
+    const tapped = await alpha.runtime.runPromise(Conversation.Machine.use((machine) => machine.get()));
+    expect(await alpha.runtime.runPromise(TelegramStore.use((store) => store.peerKeyOf(tapped.chat)))).toBe("user:420");
+    await vi.waitFor(() => expect(tray.pending()).toBeUndefined());
+    expect(tray.tap(delivery.token)).toBe(false);
+    await clickButton("Back to chats");
     await close();
 
     phone.voice.organizationId = "other-phone-owner";
@@ -708,11 +740,16 @@ describe("Telegram on a phone", () => {
     const oldFeed = [...phone.telegram.listeners];
 
     await seen(false);
+    await untilArea(reconnecting, rt, Notices.Machine, (state) => state.frontChat === 0);
+    incoming(12);
+    await vi.waitFor(() => expect(tray.posted().some((item) => item.body === "Notice 12")).toBe(true));
+    const oldNotice = tray.posted().find((item) => item.body === "Notice 12")!;
     phone.telegram.user.id += 1;
     phone.telegram.sessionToken = "replaced-while-telegram-backgrounded";
     expect(await rt.runPromise(MessagingSessions.use((sessions) =>
       sessions.set(TELEGRAM_SESSION_KEY, secretOf(phone.telegram.sessionToken)),
     ))).toBe(true);
+    expect(tray.tap(oldNotice.token)).toBe(true);
     for (const send of oldFeed) send({ _type: "updateSessionRevoked", pts: 2, date: 1_700_000_000 });
     expect(await rt.runPromise(telegramAmbientSnapshot)).toMatchObject({ available: false, sensitive: true });
     expect(await rt.runPromise(telegramHomeCard)).toMatchObject({ standing: "SignedOut", rows: [] });
@@ -728,6 +765,17 @@ describe("Telegram on a phone", () => {
     expect(bridge.snapshot().drafts).toEqual([]);
     expect(await rt.runPromise(executeTelegramAgentRequest({ kind: "TelegramDraftMessage", turn: 43, chat, text: "Old chat handle" }))).toEqual({ ok: false });
     expect(await rt.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
+    await vi.waitFor(() => expect(tray.pending()).toBeUndefined());
+    expect((await rt.runPromise(Conversation.Machine.use((machine) => machine.get()))).chat).toBe(0);
+    await untilArea(reconnecting, rt, Notices.Machine, (state) => state.notifyAllowed && state.since > 0);
+    await vi.waitFor(() => expect([...phone.telegram.listeners].some((listener) => !oldFeed.includes(listener))).toBe(true));
+    incoming(13);
+    await vi.waitFor(() => expect(tray.posted().some((item) => item.body === "Notice 13")).toBe(true));
+    phone.telegram.revoked = true;
+    expect(tray.tap(tray.posted().find((item) => item.body === "Notice 13")!.token)).toBe(true);
+    await untilArea(reconnecting, rt, Auth.Machine, (state) => state.step === "SessionExpired");
+    expect((await rt.runPromise(Conversation.Machine.use((machine) => machine.get()))).chat).toBe(0);
+    expect(await rt.runPromise(grants)).toEqual([]);
   });
 });
 

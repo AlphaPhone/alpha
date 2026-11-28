@@ -91,6 +91,7 @@ export interface TelegramAgentOutcome {
 
 /** Posted Telegram notification entry shown until read, tapped, or withdrawn. */
 export interface TelegramNoticeEntry {
+  readonly scope: string
   readonly chat: number
   readonly peerKey: string
   readonly message: number

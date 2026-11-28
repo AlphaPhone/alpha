@@ -42,8 +42,10 @@ import { useMachine as useComposer } from "../../gen/app__telegram__composer.rea
 import type { Machine as ConversationMachine } from "../../gen/app__telegram__conversation.effect.vibe";
 import { composable } from "../../gen/app__telegram__conversation.ts";
 import { useMachine as useConversation } from "../../gen/app__telegram__conversation.react.ts";
+import { useMachine as useNotices } from "../../gen/app__telegram__notices.react.ts";
 import type { Machine as NoticesMachine } from "../../gen/app__telegram__notices.effect.vibe";
-import { Telegram, type TelegramDialogSummary } from "../platform/index.vibe";
+import { MessagingNotices, type MessagingSessions, Telegram, type TelegramDialogSummary } from "../platform/index.vibe";
+import { openTelegramNotice } from "./notices.vibe";
 import { useTimed } from "../runtime/ui.tsx";
 import { swapComposerTarget } from "../messaging/composer.ts";
 import { untimed } from "../runtime/index.vibe";
@@ -60,7 +62,7 @@ import {
 export interface TelegramScreenProps {
   /** Runtime supplying Telegram's auth, chat list, conversation, composer, notices, store, and clock services. */
   runtime: ManagedRuntime.ManagedRuntime<
-    AuthMachine | ChatListMachine | ConversationMachine | ComposerMachine | NoticesMachine | TelegramStore | Telegram | Time,
+    AuthMachine | ChatListMachine | ConversationMachine | ComposerMachine | NoticesMachine | TelegramStore | Telegram | MessagingSessions | MessagingNotices | Time,
     unknown
   >;
   onBack?: (() => void) | undefined;
@@ -329,6 +331,7 @@ function ChatListView({
 }) {
   const list = useChatList(runtime);
   const conv = useConversation(runtime);
+  const notices = useNotices(runtime);
   const snap = useTelegramSnapshot(runtime);
   const [searchInput, setSearchInput] = useState("");
   if (!list.state) return null;
@@ -385,6 +388,22 @@ function ChatListView({
         </>
       }
     >
+      {runtime.runSync(Effect.map(MessagingNotices, (host) => host.native)) ? (
+        <Button variant="ghost" onClick={() => void runtime.runPromise(Effect.flatMap(MessagingNotices, (host) => host.configure("telegram")))}>
+          {notices.state?.notifyAllowed ? "Notification settings" : "Enable Telegram notifications"}
+        </Button>
+      ) : null}
+      {snap.notices.length > 0 ? (
+        <ul aria-label="Telegram notifications">
+          {snap.notices.map((notice) => (
+            <li key={notice.peerKey}>
+              <Button variant="ghost" onClick={() => void runtime.runPromise(openTelegramNotice(notice.scope, notice.peerKey))}>
+                {notice.title} · {notice.excerpt}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <SearchField
         aria-label="Search Telegram"
         placeholder="Search messages and chats"
