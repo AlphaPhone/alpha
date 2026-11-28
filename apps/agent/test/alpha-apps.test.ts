@@ -686,6 +686,7 @@ function createRemindersTestHarness(nowMs: number, initialTasks: Parameters<type
       { method: "POST" as const, target: "/api/views/interact-claim" },
       { method: "POST" as const, target: "/api/views/interact-result" },
       { method: "POST" as const, target: "/api/messages/reply-draft" },
+      { method: "POST" as const, target: "/api/client-devices/revoke" },
       { method: "POST" as const, target: "/api/cloud/warm" },
       { method: "GET" as const, target: "/api/lifeops/calendar/sync-control" },
       { method: "POST" as const, target: "/api/lifeops/calendar/sync-control" },

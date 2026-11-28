@@ -15,6 +15,7 @@
 { "method": "POST", "path": "/api/views/interact-result" }
 { "method": "GET", "path": "/api/client-devices/capabilities" }
 { "method": "POST", "path": "/api/client-devices/register" }
+{ "method": "POST", "path": "/api/client-devices/revoke" }
 { "method": "GET", "path": "/api/client-devices/context" }
 { "method": "GET", "path": "/api/client-devices/proposals" }
 { "method": "POST", "path": "/api/client-devices/proposals/{id}/decision" }

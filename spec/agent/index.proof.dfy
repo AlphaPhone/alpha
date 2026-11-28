@@ -24,14 +24,14 @@ lemma CoreNotNativeA(i: int)
 }
 
 lemma CoreNotNativeB(i: int)
-  requires 15 <= i < 31
+  requires 15 <= i < 32
   ensures pageRoutesCore[i] !in nativeSpeechRoutes
   ensures pageRoutesCore[i] !in nativeControlRoutes
 {
   if i == 15 { NotNativeSpeechOrControl(pageRoutesCore[15]); } else if i == 16 { NotNativeSpeechOrControl(pageRoutesCore[16]); } else if i == 17 { NotNativeSpeechOrControl(pageRoutesCore[17]); } else if i == 18 { NotNativeSpeechOrControl(pageRoutesCore[18]); } else if i == 19 { NotNativeSpeechOrControl(pageRoutesCore[19]); }
   else if i == 20 { NotNativeSpeechOrControl(pageRoutesCore[20]); } else if i == 21 { NotNativeSpeechOrControl(pageRoutesCore[21]); } else if i == 22 { NotNativeSpeechOrControl(pageRoutesCore[22]); } else if i == 23 { NotNativeSpeechOrControl(pageRoutesCore[23]); } else if i == 24 { NotNativeSpeechOrControl(pageRoutesCore[24]); }
   else if i == 25 { NotNativeSpeechOrControl(pageRoutesCore[25]); } else if i == 26 { NotNativeSpeechOrControl(pageRoutesCore[26]); } else if i == 27 { NotNativeSpeechOrControl(pageRoutesCore[27]); } else if i == 28 { NotNativeSpeechOrControl(pageRoutesCore[28]); } else if i == 29 { NotNativeSpeechOrControl(pageRoutesCore[29]); }
-  else { NotNativeSpeechOrControl(pageRoutesCore[30]); }
+  else if i == 30 { NotNativeSpeechOrControl(pageRoutesCore[30]); } else { NotNativeSpeechOrControl(pageRoutesCore[31]); }
 }
 
 lemma CoreNotNative(route: Route)
@@ -39,8 +39,8 @@ lemma CoreNotNative(route: Route)
   ensures route !in nativeSpeechRoutes
   ensures route !in nativeControlRoutes
 {
-  assert |pageRoutesCore| == 31;
-  var i :| 0 <= i < 31 && pageRoutesCore[i] == route;
+  assert |pageRoutesCore| == 32;
+  var i :| 0 <= i < 32 && pageRoutesCore[i] == route;
   if i < 15 { CoreNotNativeA(i); } else { CoreNotNativeB(i); }
 }
 
