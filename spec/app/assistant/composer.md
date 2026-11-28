@@ -440,8 +440,8 @@ pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
 Alpha settles a conflict by itself (restore saved). The editor takes the
 saved copy, followed on a new line by the current text, and that text is
 written to the slot as a new revision. Where one of the two is empty,
-equal to the other, or the other's first lines, only the longer is kept,
-so no line is written twice and nothing is dropped. Replace saved keeps the
+equal to the other, or the start of the other, only the longer is kept, so
+nothing is written twice and nothing is dropped. Replace saved keeps the
 current text over the saved copy directly. Restoring a message the slot
 marked as sending makes it an ordinary draft again, and the mark is
 written away.

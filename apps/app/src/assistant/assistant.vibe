@@ -1082,10 +1082,10 @@ effect function arrived(recorded: boolean): void!!(Composer.Machine | Talk) {
   if (recorded) board.change({ saved: "" })
 }
 
-/** The saved copy and what the owner typed, kept together: the copy first, then the typed text on a new line, unless one is empty, the same or the other's first lines, when the longer is kept alone. */
+/** The saved copy and what the owner typed, kept together: the copy first, then the typed text on a new line, unless one is empty, the same or the start of the other, when the longer is kept alone. */
 function bothTexts(saved: string, typed: string): string {
-  if (saved === "" || typed === saved || typed.startsWith(`${saved}\n`)) return typed
-  if (typed === "" || saved.startsWith(`${typed}\n`)) return saved
+  if (typed.startsWith(saved)) return typed
+  if (saved.startsWith(typed)) return saved
   return `${saved}\n${typed}`
 }
 
