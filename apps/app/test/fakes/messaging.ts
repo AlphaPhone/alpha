@@ -4,6 +4,64 @@ import { type Route, feed, readJsonBody } from "./routes.ts";
 import type { HttpOptions } from "@capacitor/core";
 import deployments from "@repo/deployment/deployments.json" with { type: "json" };
 import type { Faked } from "./phone.ts";
+import type { MessagingNoticeFilter, MessagingNoticeTarget } from "../../src/platform/messaging-notices.vibe";
+import type { ProviderName } from "../../src/platform/messaging.vibe";
+
+/** Android's private posted-notification tray, permission settings and single-use activity returns. */
+export function messagingNoticePhone() {
+  type Entry = { readonly token: string; readonly target: MessagingNoticeTarget; readonly title: string; readonly body: string };
+  const enabled = new Set<ProviderName>();
+  const entries = new Map<string, Entry>();
+  let pending: Entry | undefined;
+  let signal = () => {};
+  const matches = (target: MessagingNoticeTarget, filter: MessagingNoticeFilter) =>
+    Object.entries(filter).every(([key, value]) => Reflect.get(target, key) === value);
+  const withdraw = (filter: MessagingNoticeFilter) => {
+    for (const [token, item] of entries) if (matches(item.target, filter)) entries.delete(token);
+    if (pending !== undefined && matches(pending.target, filter)) pending = undefined;
+  };
+  const setAllowed = (provider: ProviderName, allowed: boolean) => {
+    if (allowed) enabled.add(provider);
+    else {
+      enabled.delete(provider);
+      withdraw({ provider });
+    }
+    signal();
+  };
+  const plugins: Readonly<Record<string, Faked>> = {
+    AlphaMessagingNotices: (emit, onUnplug) => {
+      signal = () => emit("messagingNoticesChanged", {});
+      onUnplug?.(() => { signal = () => {}; });
+      return {
+        status: ({ provider }: { provider: ProviderName }) => ({ allowed: enabled.has(provider) }),
+        configure: ({ provider }: { provider: ProviderName }) => setAllowed(provider, true),
+        post({ target, title, body }: Omit<Entry, "token">) {
+          if (!enabled.has(target.provider)) return { posted: false };
+          withdraw(target);
+          const token = crypto.randomUUID();
+          entries.set(token, { target, title, body, token });
+          return { posted: true };
+        },
+        withdraw,
+        pendingTap: ({ provider }: { provider: ProviderName }) => pending?.target.provider === provider ? { token: pending.token, target: pending.target } : {},
+        consumeTap({ token }: { token: string }) {
+          if (pending?.token === token) pending = undefined;
+        },
+      };
+    },
+  };
+  return {
+    plugins, setAllowed, posted: () => [...entries.values()], pending: () => pending?.token,
+    tap(token: string) {
+      const selected = entries.get(token);
+      if (selected === undefined) return false;
+      entries.delete(token);
+      pending = selected;
+      signal();
+      return true;
+    },
+  };
+}
 
 /** Android's browser and HTTP transport talking to the local Slack provider, with the phone's registered return address. */
 export function slackPhone(origin: string, options: { readonly beforeReturn?: () => void; readonly initialExpirySeconds?: number; readonly beforeReply?: (path: string, body: string) => Promise<void> } = {}): Readonly<Record<string, Faked>> {

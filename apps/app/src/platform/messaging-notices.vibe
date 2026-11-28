@@ -10,7 +10,7 @@ const noticeTarget = Schema.Union([
   Schema.Struct({ provider: Schema.Literal("telegram"), scope, peer: identifier }),
 ])
 export type MessagingNoticeTarget = typeof noticeTarget.Type
-type NoticeFilter = { readonly provider: "slack"; readonly scope?: string; readonly workspace?: string; readonly channel?: string; readonly thread?: string }
+export type MessagingNoticeFilter = { readonly provider: "slack"; readonly scope?: string; readonly workspace?: string; readonly channel?: string; readonly thread?: string }
   | { readonly provider: "telegram"; readonly scope?: string; readonly peer?: string }
 const tapped = Schema.Struct({ token: identifier, target: noticeTarget })
 const permission = Schema.Struct({ allowed: Schema.Boolean })
@@ -20,7 +20,7 @@ interface NativeMessagingNotices {
   status(input: { provider: ProviderName }): Promise<unknown>
   configure(input: { provider: ProviderName }): Promise<void>
   post(input: { target: MessagingNoticeTarget; title: string; body: string }): Promise<unknown>
-  withdraw(filter: NoticeFilter): Promise<void>
+  withdraw(filter: MessagingNoticeFilter): Promise<void>
   pendingTap(input: { provider: ProviderName }): Promise<unknown>
   consumeTap(input: { token: string }): Promise<void>
   addListener(event: "messagingNoticesChanged", listener: () => void): Promise<{ remove(): Promise<void> }>
@@ -33,7 +33,7 @@ export service MessagingNotices {
   allowed(provider: ProviderName): boolean!!
   configure(provider: ProviderName): void!!
   post(target: MessagingNoticeTarget, title: string, body: string): boolean!!
-  withdraw(filter: NoticeFilter): void!!
+  withdraw(filter: MessagingNoticeFilter): void!!
   pending(provider: ProviderName): (typeof tapped.Type | undefined)!!
   consume(token: string): void!!
 }
