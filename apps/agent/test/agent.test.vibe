@@ -133,6 +133,13 @@ describe("Build the pack only from the pinned eliza", () => {
     expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
     expect(Object.values(actions.refused).every((reason) => reason.trim() !== "")).toBe(true)
     expect(workerAdmitted(packagedWorkflowWorker().sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
+    const gate = defineRoutes(listed())
+    const admitted = (target: string) => gate.admit({ method: "GET", target, streamed: false, body: undefined }).tag === "Admitted"
+    expect([
+      "/api/notifications?nativeTransport=true",
+      "/api/notifications?nativeTransport=true&nativeEpoch=00000000-0000-0000-0000-000000000000&afterSequence=1&throughSequence=5",
+      "/api/notifications?category=workflow&limit=50",
+    ].map(admitted)).toEqual([true, true, false])
   })
 })
 
