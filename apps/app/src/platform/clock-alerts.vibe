@@ -1,5 +1,5 @@
 // spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts"
-import { registered } from "./device.vibe"
+import { pluginChanges, registered } from "./device.vibe"
 import { plugin } from "./capacitor.ts"
 
 module identifiers {
@@ -60,10 +60,7 @@ export const phoneClockAlerts = Layer.effect(PhoneClockAlerts, effect {
   const present = registered("AlphaClockAlerts")
   const host = () => plugin<ClockPlugin>("AlphaClockAlerts")
   const permission = try PubSub.unbounded<void>()
-  const tapped = Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(tryPromise(() => host().addListener("clockAlertOpen", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
-    (handle) => handle === undefined ? Effect.void : ignore(tryPromise(() => handle.remove())),
-  )))
+  const tapped = pluginChanges((notify) => host().addListener("clockAlertOpen", notify))
   return {
     present,
     changed: Stream.merge(Stream.fromPubSub(permission), tapped),

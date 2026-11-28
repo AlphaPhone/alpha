@@ -1,6 +1,6 @@
 // spec/app/slack/notices.md, "Story: Hear about Slack DMs, mentions and thread replies per workspace"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise"
 import { plugin } from "./capacitor.ts"
-import { registered } from "./device.vibe"
+import { pluginChanges, registered } from "./device.vibe"
 import type { ProviderName } from "./messaging.vibe"
 
 const scope = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/))
@@ -44,10 +44,7 @@ const name = "AlphaMessagingNotices"
 export const phoneMessagingNotices = Layer.sync(MessagingNotices, () => {
   const available = registered(name)
   const host = () => plugin<NativeMessagingNotices>(name)
-  const changed = available ? Stream.callback<void>((queue) => Effect.asVoid(acquireRelease(
-    Effect.orElseSucceed(tryPromise(() => host().addListener("messagingNoticesChanged", () => { Queue.offerUnsafe(queue, undefined) })), () => undefined),
-    (listener) => listener === undefined ? Effect.void : ignore(tryPromise(() => listener.remove())),
-  ))) : Stream.empty
+  const changed = available ? pluginChanges((notify) => host().addListener("messagingNoticesChanged", notify)) : Stream.empty
   return {
     native: true,
     changed,

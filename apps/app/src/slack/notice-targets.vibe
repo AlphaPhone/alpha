@@ -1,10 +1,10 @@
 // spec/app/slack/notices.md, "Visible read withdraws matching target notices, and tapping a posted notice deep-links to its workspace, channel and thread"
 import * as Shell from "../../gen/app__shell.effect.vibe"
 import * as Workspaces from "../../gen/app__slack.effect.vibe"
-import * as Auth from "../../gen/app__slack__auth.effect.vibe"
+import { Machine as SlackAuth } from "../../gen/app__slack__auth.effect.vibe"
 import * as Composer from "../../gen/app__slack__composer.effect.vibe"
 import * as Conversation from "../../gen/app__slack__conversation.effect.vibe"
-import * as Notices from "../../gen/app__slack__notices.effect.vibe"
+import { Machine as NoticeTray, canNotifyPermissionChanged, type Target } from "../../gen/app__slack__notices.effect.vibe"
 import { Device, MessagingNotices, MessagingSessions, noticeScope, type MessagingNoticeTarget } from "../platform/index.vibe"
 import { currentSurface } from "../surface.ts"
 import { contained, started } from "../runtime/index.vibe"
@@ -16,7 +16,7 @@ export function slackNoticeScope(meta: Pick<WorkspaceMeta, "owner" | "teamId" | 
   return noticeScope([meta.owner, "slack", meta.teamId, meta.ownerUserId, meta.authorizationId])
 }
 
-export effect function slackNoticeTarget(target: Notices.Target) {
+export effect function slackNoticeTarget(target: Target) {
   const ledger = try SlackLedger
   const meta = ledger.workspaceMeta(target.workspace)
   const channel = ledger.channelId(target.workspace, target.channel)
@@ -28,7 +28,7 @@ export effect function slackNoticeTarget(target: Notices.Target) {
 export effect function openSlackNotice(target: SlackTarget) {
   const ledger = try SlackLedger
   const ws = try Workspaces.Machine
-  const auth = try Auth.Machine
+  const auth = try SlackAuth
   const meta = ledger.workspaceByTeamId(target.workspace)
   const retired = effect {
     const old = ledger.noticesList().find(({ destination }) => destination.scope === target.scope && destination.workspace === target.workspace && destination.channel === target.channel && destination.thread === target.thread)
@@ -95,8 +95,8 @@ export const configureSlackNotices = effect {
 
 const refreshSlackPermission = effect {
   const allowed = try (try MessagingNotices).allowed("slack")
-  const notices = try Notices.Machine
-  if (Notices.canNotifyPermissionChanged(try notices.get(), allowed)) {
+  const notices = try NoticeTray
+  if (canNotifyPermissionChanged(try notices.get(), allowed)) {
     try contained(notices.send({ type: "notifyPermissionChanged", notifyAllowed: allowed }), "checking Slack notification permission")
   }
 }
@@ -107,7 +107,7 @@ export const slackNoticeDelivery = started(effect {
   const host = try MessagingNotices
   const device = try Device
   const conv = try Conversation.Machine
-  const auth = try Auth.Machine
+  const auth = try SlackAuth
   const workspaces = try Workspaces.Machine
   const resume = Stream.map(Stream.filter(device.visible, (visible) => visible), () => undefined)
   const changes = Stream.mergeAll([host.changed, resume], { concurrency: "unbounded" })
