@@ -215,9 +215,17 @@ async function captureWebViews(
     });
 
     let firstLoad = true;
-    const shoot = async (name: string, query: string, afterLoad?: () => Promise<void>) => {
-      await page.goto(`${baseUrl}/${query}`, { waitUntil: "commit", timeout: 60_000 });
-      await page.waitForFunction(
+    const shoot = async (
+      targetPage: typeof page,
+      name: string,
+      query: string,
+      options?: {
+        readonly omitBackground?: boolean;
+        readonly afterLoad?: () => Promise<void>;
+      },
+    ) => {
+      await targetPage.goto(`${baseUrl}/${query}`, { waitUntil: "commit", timeout: 60_000 });
+      await targetPage.waitForFunction(
         () => {
           const root = document.getElementById("root");
           if (!root) return false;
@@ -229,15 +237,22 @@ async function captureWebViews(
       );
       firstLoad = false;
       await timersPromises.scheduler.wait(1500);
-      if (afterLoad) {
-        await afterLoad();
+      if (options?.omitBackground) {
+        await targetPage.addStyleTag({ content: "html, body { background: transparent !important; }" });
+      }
+      if (options?.afterLoad) {
+        await options.afterLoad();
       } else {
-        await page.evaluate(() => {
+        await targetPage.evaluate(() => {
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         });
       }
       const outPath = path.join(webDir, `${name}.png`);
-      await page.screenshot({ path: outPath, fullPage: false });
+      await targetPage.screenshot({
+        path: outPath,
+        fullPage: false,
+        ...(options?.omitBackground ? { omitBackground: true } : {}),
+      });
       captures.push({
         name,
         kind: "screenshot",
@@ -247,10 +262,11 @@ async function captureWebViews(
     };
 
     for (const descriptor of WALKTHROUGH_VIEWS) {
-      await shoot(`app-${descriptor.id}`, `?surface=app&view=${encodeURIComponent(descriptor.view)}`);
+      await shoot(page, `app-${descriptor.id}`, `?surface=app&view=${encodeURIComponent(descriptor.view)}`);
     }
 
     for (const scene of OVERLAY_SCENES) {
+      const transparentOverlay = scene.detent !== "full";
       if (scene.detent === "control") {
         await page.route("**/api/alpha/control/state", async (route) => {
           const now = Date.now();
@@ -293,74 +309,90 @@ async function captureWebViews(
           });
         });
       }
-      await shoot(scene.id, scene.query, async () => {
-        if (scene.detent === "typing") {
-          const typeButton = page.getByRole("button", { name: /type|keyboard|message|write/i }).first();
-          if (await typeButton.count() > 0) {
-            await typeButton.click({ timeout: 2000 }).catch(() => undefined);
-          } else {
-            await page.locator("button").nth(1).click({ timeout: 2000 }).catch(() => undefined);
+      await shoot(page, scene.id, scene.query, {
+        omitBackground: transparentOverlay,
+        afterLoad: async () => {
+          if (scene.detent === "typing") {
+            const typeButton = page.getByRole("button", { name: /type|keyboard|message|write/i }).first();
+            if (await typeButton.count() > 0) {
+              await typeButton.click({ timeout: 2000 }).catch(() => undefined);
+            } else {
+              await page.locator("button").nth(1).click({ timeout: 2000 }).catch(() => undefined);
+            }
+            await timersPromises.scheduler.wait(400);
+            const input = page.locator("textarea, input[type='text'], [contenteditable='true']").first();
+            if (await input.count() > 0) {
+              await input.click({ timeout: 2000 }).catch(() => undefined);
+              await input.fill("Summarize my unread messages and draft a reply").catch(() => undefined);
+            }
+          } else if (scene.detent === "sheet" || scene.detent === "full") {
+            const openButton = page.getByRole("button", { name: /ask|open|expand|alpha/i }).first();
+            if (await openButton.count() > 0) {
+              await openButton.click({ timeout: 2000 }).catch(() => undefined);
+            }
+            await timersPromises.scheduler.wait(500);
+            const input = page.locator("textarea, input[type='text']").first();
+            if (await input.count() > 0) {
+              await input.fill("What is on my calendar today?").catch(() => undefined);
+              await timersPromises.scheduler.wait(300);
+              const sendButton = page.getByRole("button", { name: /send/i }).first();
+              if (await sendButton.count() > 0) {
+                await sendButton.click({ timeout: 2000 }).catch(() => undefined);
+              } else {
+                await input.press("Enter").catch(() => undefined);
+              }
+              await timersPromises.scheduler.wait(2000);
+            }
+            if (scene.detent === "full") {
+              const expandButton = page.getByRole("button", { name: /full|expand|maximize|bigger/i }).first();
+              if (await expandButton.count() > 0) {
+                await expandButton.click({ timeout: 2000 }).catch(() => undefined);
+                await timersPromises.scheduler.wait(600);
+              }
+            }
+          } else if (scene.detent === "voice") {
+            const talkButton = page.getByRole("button", { name: /talk|voice|mic|speak/i }).first();
+            if (await talkButton.count() > 0) {
+              await talkButton.click({ timeout: 2000 }).catch(() => undefined);
+            }
+            await timersPromises.scheduler.wait(700);
+          } else if (scene.detent === "control") {
+            await timersPromises.scheduler.wait(2200);
           }
           await timersPromises.scheduler.wait(400);
-          const input = page.locator("textarea, input[type='text'], [contenteditable='true']").first();
-          if (await input.count() > 0) {
-            await input.click({ timeout: 2000 }).catch(() => undefined);
-            await input.fill("Summarize my unread messages and draft a reply").catch(() => undefined);
-          }
-        } else if (scene.detent === "sheet" || scene.detent === "full") {
-          const openButton = page.getByRole("button", { name: /ask|open|expand|alpha/i }).first();
-          if (await openButton.count() > 0) {
-            await openButton.click({ timeout: 2000 }).catch(() => undefined);
-          }
-          await timersPromises.scheduler.wait(500);
-          const input = page.locator("textarea, input[type='text']").first();
-          if (await input.count() > 0) {
-            await input.fill("What is on my calendar today?").catch(() => undefined);
-            await timersPromises.scheduler.wait(300);
-            const sendButton = page.getByRole("button", { name: /send/i }).first();
-            if (await sendButton.count() > 0) {
-              await sendButton.click({ timeout: 2000 }).catch(() => undefined);
-            } else {
-              await input.press("Enter").catch(() => undefined);
-            }
-            await timersPromises.scheduler.wait(2000);
-          }
-          if (scene.detent === "full") {
-            const expandButton = page.getByRole("button", { name: /full|expand|maximize|bigger/i }).first();
-            if (await expandButton.count() > 0) {
-              await expandButton.click({ timeout: 2000 }).catch(() => undefined);
-              await timersPromises.scheduler.wait(600);
-            }
-          }
-        } else if (scene.detent === "voice") {
-          const talkButton = page.getByRole("button", { name: /talk|voice|mic|speak/i }).first();
-          if (await talkButton.count() > 0) {
-            await talkButton.click({ timeout: 2000 }).catch(() => undefined);
-          }
-          await timersPromises.scheduler.wait(700);
-        } else if (scene.detent === "control") {
-          await timersPromises.scheduler.wait(2200);
-        }
-        await timersPromises.scheduler.wait(400);
+        },
       });
       if (scene.detent === "control") {
         await page.unroute("**/api/alpha/control/state");
       }
     }
 
-    await shoot("monolith-home", "?surface=monolith", async () => {
-      for (let step = 0; step < 8; step++) {
-        const skipButton = page.getByRole("button", { name: /^skip$/i }).first();
-        if (await skipButton.count() === 0) break;
-        await skipButton.click({ timeout: 1500 }).catch(() => undefined);
-        await timersPromises.scheduler.wait(300);
-      }
-      await timersPromises.scheduler.wait(1000);
-      await page.evaluate(() => {
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-      });
-    });
     await context.close();
+
+    const monolithContext = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      deviceScaleFactor: 2,
+      colorScheme: "light",
+    });
+    const monolithPage = await monolithContext.newPage();
+    monolithPage.on("pageerror", (err) => {
+      pageErrors.push(err.message);
+    });
+    await shoot(monolithPage, "monolith-home", "?surface=monolith", {
+      afterLoad: async () => {
+        for (let step = 0; step < 10; step++) {
+          const skipButton = monolithPage.getByRole("button", { name: /^skip$/i }).first();
+          if (await skipButton.count() === 0) break;
+          await skipButton.click({ timeout: 1500 }).catch(() => undefined);
+          await timersPromises.scheduler.wait(350);
+        }
+        await timersPromises.scheduler.wait(1200);
+        await monolithPage.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        });
+      },
+    });
+    await monolithContext.close();
   } catch (error: unknown) {
     const baseMsg = error instanceof Error ? error.message : String(error);
     throw new Error(viteLogs ? `${baseMsg}\nVite output:\n${viteLogs.slice(-1200)}` : baseMsg, { cause: error });
@@ -456,7 +488,7 @@ async function captureAndroidSuite(
       const pkg = activity.split("/")[0] ?? "";
       const appId = pkg.replace(/^ai\.alphacompute\./, "");
       shell(["am", "start", "-W", "-n", activity]);
-      await timersPromises.scheduler.wait(1800);
+      await timersPromises.scheduler.wait(3000);
       captures.push(
         captureEmulatorPng(emulatorPlan.adbPath, activeSerial, path.join(androidDir, `app-${appId}.png`), allowExplicitNonEmulator),
       );
@@ -508,7 +540,7 @@ async function captureAndroidSuite(
       shell(["rm", "-f", recordRemote]);
     }
   } finally {
-    stopBootedEmulator(emulatorPlan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
+    await stopBootedEmulator(emulatorPlan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
   }
 
   fs.writeFileSync(

@@ -43,7 +43,12 @@ export interface WalkthroughChapterSpec {
   readonly theme: "dark" | "light";
   readonly kind: "intro" | "launcher" | "gallery" | "overlay" | "control" | "outro";
   readonly badges: readonly string[];
-  readonly screens: readonly { readonly label: string; readonly source: string; readonly imagePath: string | null }[];
+  readonly screens: readonly {
+    readonly label: string;
+    readonly source: string;
+    readonly imagePath: string | null;
+    readonly backdropPath?: string | null;
+  }[];
 }
 
 /** Video stream metadata verified via `ffprobe`. */
@@ -99,6 +104,8 @@ export function buildWalkthroughStoryboard(outDir: string): readonly Walkthrough
   const overlayBar = resolveCaptureImage(outDir, ["captures/web/overlay-bar.png"]);
   const overlaySheet = resolveCaptureImage(outDir, ["captures/web/overlay-sheet.png", "captures/web/overlay-full.png"]);
   const overlayVoice = resolveCaptureImage(outDir, ["captures/web/overlay-voice.png", "captures/web/overlay-typing.png"]);
+  const notesBackdrop = resolveCaptureImage(outDir, ["captures/android/app-notes.png", "captures/web/app-notes.png"]);
+  const calendarBackdrop = resolveCaptureImage(outDir, ["captures/android/app-calendar.png", "captures/web/app-calendar.png"]);
 
   const chromeControl = resolveCaptureImage(outDir, ["captures/android/third-party-browser.png", "captures/web/app-browser.png"]);
   const controlBanner = resolveCaptureImage(outDir, ["captures/web/overlay-control-banner.png"]);
@@ -179,9 +186,9 @@ export function buildWalkthroughStoryboard(outDir: string): readonly Walkthrough
       kind: "overlay",
       badges: ["AlphaVoiceInteractionService", "Bidirectional VIEWS Handoff", "Streaming LLM + Voice", "Signed ACTION_AGENT_OPEN"],
       screens: [
-        { label: "Overlay Bar", source: overlayBar.source, imagePath: overlayBar.path },
-        { label: "Ask Alpha Sheet", source: overlaySheet.source, imagePath: overlaySheet.path },
-        { label: "Voice Session", source: overlayVoice.source, imagePath: overlayVoice.path },
+        { label: "Overlay on Launcher3", source: overlayBar.source, imagePath: overlayBar.path, backdropPath: launcherHome.path },
+        { label: "Ask Alpha over Notes", source: overlaySheet.source, imagePath: overlaySheet.path, backdropPath: notesBackdrop.path },
+        { label: "Voice over Calendar", source: overlayVoice.source, imagePath: overlayVoice.path, backdropPath: calendarBackdrop.path },
       ],
     },
     {
@@ -196,7 +203,7 @@ export function buildWalkthroughStoryboard(outDir: string): readonly Walkthrough
       badges: ["Chrome Observed (nodes > 0)", "One-Tap Stop Kill-Switch", "Settings Hard Refused", "CAPTURE_SECURE_LAYERS = false"],
       screens: [
         { label: "3rd-Party Browser", source: chromeControl.source, imagePath: chromeControl.path },
-        { label: "Lease & Stop Banner", source: controlBanner.source, imagePath: controlBanner.path },
+        { label: "Kill-Switch on Chrome", source: controlBanner.source, imagePath: controlBanner.path, backdropPath: chromeControl.path },
         { label: "Settings Refused", source: blockedSettings.source, imagePath: blockedSettings.path },
       ],
     },
@@ -370,6 +377,7 @@ function buildStoryboardCss(
     z-index: 3;
   }
   .phone-screen {
+    position: relative;
     width: 100%;
     height: 100%;
     border-radius: ${galleryDense ? "19px" : "26px"};
@@ -380,6 +388,7 @@ function buildStoryboardCss(
     justify-content: center;
   }
   .phone-screen img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .phone-screen img.overlay-layer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
   .placeholder {
     width: 100%;
     height: 100%;
@@ -547,9 +556,15 @@ export function buildStoryboardHtml(
 
   const cardsHtml = chapter.screens.map((screen, idx) => {
     const imgUri = screen.imagePath ? fileToDataUri(screen.imagePath, "image/png") : "";
-    const mediaHtml = imgUri
-      ? `<img src="${imgUri}" alt="${escapeHtml(screen.label)}" />`
-      : `<div class="placeholder"><span>${escapeHtml(screen.label)}</span></div>`;
+    const backdropUri = screen.backdropPath ? fileToDataUri(screen.backdropPath, "image/png") : "";
+    let mediaHtml: string;
+    if (imgUri && backdropUri) {
+      mediaHtml = `<img src="${backdropUri}" alt="${escapeHtml(screen.label)} backdrop" /><img class="overlay-layer" src="${imgUri}" alt="${escapeHtml(screen.label)}" />`;
+    } else if (imgUri) {
+      mediaHtml = `<img src="${imgUri}" alt="${escapeHtml(screen.label)}" />`;
+    } else {
+      mediaHtml = `<div class="placeholder"><span>${escapeHtml(screen.label)}</span></div>`;
+    }
     return `
       <div class="phone-card" data-idx="${String(idx)}">
         <div class="phone-frame">

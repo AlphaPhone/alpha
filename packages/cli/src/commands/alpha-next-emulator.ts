@@ -714,27 +714,40 @@ export async function ensureAndBootEmulator(
   return { serial, ...(bootedProcess !== undefined ? { bootedProcess } : {}), avdDetail };
 }
 
-/** Cleanly shut down a booted emulator process via `adb -s <serial> emu kill` with SIGTERM fallback. */
-export function stopBootedEmulator(
+/** Cleanly shut down a booted emulator process via `adb -s <serial> emu kill` and wait up to 15s for exit. */
+export async function stopBootedEmulator(
   adbPath: string,
   serial: string | undefined,
   bootedProcess: ChildProcess | undefined,
   allowExplicitNonEmulator = false,
-): string | null {
-  const processStillRunning = bootedProcess !== undefined
+): Promise<string | null> {
+  const isRunning = () => bootedProcess !== undefined
     && bootedProcess.exitCode === null
     && bootedProcess.signalCode === null;
   if (bootedProcess && serial) {
+    let label = `Stopped ${serial}`;
     try {
       adbWithSerial(adbPath, serial, ["emu", "kill"], allowExplicitNonEmulator);
-      return `Stopped ${serial}`;
     } catch {
-      if (processStillRunning) bootedProcess.kill("SIGTERM");
-      return `Terminated emulator process for ${serial}`;
+      if (isRunning()) bootedProcess.kill("SIGTERM");
+      label = `Terminated emulator process for ${serial}`;
     }
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const listed = listConnectedEmulators(adbPath).includes(serial);
+      if (!listed && !isRunning()) break;
+      if (Date.now() > deadline - 5_000 && isRunning()) {
+        bootedProcess.kill("SIGTERM");
+      }
+      await timersPromises.scheduler.wait(500);
+    }
+    if (isRunning()) bootedProcess.kill("SIGKILL");
+    return label;
   }
-  if (bootedProcess && processStillRunning) {
+  if (bootedProcess && isRunning()) {
     bootedProcess.kill("SIGTERM");
+    await timersPromises.scheduler.wait(500);
+    if (isRunning()) bootedProcess.kill("SIGKILL");
     return "Terminated emulator process before serial attached";
   }
   return null;
@@ -1035,7 +1048,7 @@ export async function runEmulatorE2e(flags: EmulatorE2eFlags, ctx: CliContext): 
     stages.push({ stage: "boot-emulator", status: "passed", detail: `Booted ${activeSerial}` });
     stages.push(...await verifyDeviceSuite(plan.adbPath, activeSerial, plan, ctx.rootDir, allowExplicitNonEmulator));
   } finally {
-    const teardownDetail = stopBootedEmulator(plan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
+    const teardownDetail = await stopBootedEmulator(plan.adbPath, activeSerial, bootedProcess, allowExplicitNonEmulator);
     if (teardownDetail) {
       stages.push({ stage: "teardown", status: "passed", detail: teardownDetail });
     }
