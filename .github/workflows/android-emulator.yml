@@ -54,6 +54,13 @@ jobs:
         run: |
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install speech model converter dependencies
+        run: |
+          python3 -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0+cpu'
+          python3 -m pip install 'numpy==2.2.6' 'zstandard==0.23.0' 'librosa==0.11.0' 'onnx==1.21.0' 'PyYAML==6.0.2' 'tqdm==4.67.1' 'requests==2.34.2'
       - name: Prepare pinned Eliza checkout and verify Android inputs
         run: |
           pnpm eliza
