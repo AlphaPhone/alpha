@@ -193,8 +193,9 @@ describe.concurrent("Studio through its server, its files and a browser", () => 
       {
         signed: [signed, green.jobs.accept!.status, green.session.verdict, green.review, ledger],
         touched: [touched.session.verdict, rechecked.session.verdict, rechecked.check!.finished! > green.check!.finished!],
+        postSignoffCheckLog: green.session.verdict === "Green" ? [] : green.jobs.check?.log,
       },
-      { signed: [200, "passed", "Green", [], true], touched: ["Unknown", "Green", true] },
+      { signed: [200, "passed", "Green", [], true], touched: ["Unknown", "Green", true], postSignoffCheckLog: [] },
     ))
   }) } })
 
