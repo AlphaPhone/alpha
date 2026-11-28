@@ -193,6 +193,7 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
 }
 
 export interface TelegramScene {
+  beforeMeReply?: () => Promise<void>;
   enabled: boolean;
   sessionToken: string;
   revoked: boolean;
@@ -220,7 +221,7 @@ export function telegramScene(): TelegramScene {
 export function telegramRoutes(scene: TelegramScene, now: () => number): Route[] {
   const authed = (request: Request) => {
     const header = request.headers.get("authorization") ?? "";
-    if (scene.revoked || !header.startsWith("Bearer ")) return Response.json({ ok: false, error: "AUTH_KEY_UNREGISTERED" }, { status: 401 });
+    if (scene.revoked || header !== `Bearer ${scene.sessionToken}`) return Response.json({ ok: false, error: "AUTH_KEY_UNREGISTERED" }, { status: 401 });
     return undefined;
   };
   const selfUser = () => ({ _type: "user" as const, id: scene.user.id, first_name: scene.user.first_name, username: scene.user.username, self: true, online: true });
@@ -259,11 +260,13 @@ export function telegramRoutes(scene: TelegramScene, now: () => number): Route[]
         return Response.json({ ok: true, _type: "auth.loginToken", token: "fake-qr-token", expires: Math.floor(now() / 1000) + 60, login_url: "tg://login?token=fake-qr-token" });
       }
       const denied = authed(request);
+      if (url.pathname === "/rpc/users.getMe") {
+        const reply = denied ?? Response.json({ ok: true, user: selfUser() });
+        return scene.beforeMeReply ? scene.beforeMeReply().then(() => reply) : reply;
+      }
       if (denied !== undefined) return denied;
       return readJsonBody(request).then((body) => {
         switch (url.pathname) {
-          case "/rpc/users.getMe":
-            return Response.json({ ok: true, user: selfUser() });
           case "/rpc/auth.logOut":
             scene.revoked = true;
             return Response.json({ ok: true, _type: "auth.loggedOut" });

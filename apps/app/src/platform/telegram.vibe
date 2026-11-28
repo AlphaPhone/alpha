@@ -428,7 +428,7 @@ export const unavailableTelegram = Layer.succeed(Telegram, (() => {
 
 const TELEGRAM_BOT_TOKEN_PATTERN = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
 const FLOOD_WAIT_PATTERN = /^FLOOD_WAIT_(\d+)$/
-const TELEGRAM_AUTH_ERRORS = ["AUTH_KEY_UNREGISTERED", "SESSION_REVOKED"]
+const TELEGRAM_AUTH_ERRORS = ["AUTH_KEY_UNREGISTERED", "AUTH_KEY_DUPLICATED", "SESSION_REVOKED"]
 const TELEGRAM_FORBIDDEN_ERRORS = ["CHAT_WRITE_FORBIDDEN", "MESSAGE_AUTHOR_REQUIRED"]
 
 /** Reject Telegram bot tokens at the client boundary; only user-account session tokens are permitted. */

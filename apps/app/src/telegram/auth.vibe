@@ -13,6 +13,7 @@ import {
   ProviderError,
   RateLimited,
   secretOf,
+  sameCredential,
 } from "../platform/index.vibe"
 import { Unreachable, Unsent } from "../platform/index.vibe"
 import { Telegram, type TelegramClient, type TelegramUser, assertTelegramUserToken } from "../platform/index.vibe"
@@ -326,17 +327,25 @@ const restoredOwner = started(effect {
     const initial = try auth.get()
     if (owner === undefined || initial.step !== "SignedOut" || initial.work !== "Idle") return
     try store.update((s) => s.auth.owner === owner ? s : { ...s, auth: { ...s.auth, owner } })
-    const grant = Option.getOrUndefined(try sessions.get(TELEGRAM_SESSION_KEY, owner))
-    if (grant === undefined || client.accountAccess !== "connectedClient") return
-    const result = client.getMe(tokenValue(grant)) catch (failure) => failure
-    if (!("user" in result)) {
-      if (isRevokedFailure(result)) try sessions.delete(TELEGRAM_SESSION_KEY, owner)
-      return
+    if (client.accountAccess !== "connectedClient") return
+    let grant = Option.getOrUndefined(try sessions.get(TELEGRAM_SESSION_KEY, owner))
+    while (grant !== undefined) {
+      const checked = grant
+      const result = client.getMe(tokenValue(checked)) catch (failure) => failure
+      if (!("user" in result) && isRevokedFailure(result) && (try sessions.exchange(TELEGRAM_SESSION_KEY, checked, undefined, owner))) return
+      const current = try auth.get()
+      if (current.step !== "SignedOut" || current.work !== "Idle" || current.ticket !== initial.ticket) return
+      const saved = Option.getOrUndefined(try sessions.get(TELEGRAM_SESSION_KEY, owner))
+      if (saved === undefined) return
+      if (sameCredential(checked, saved)) {
+        if ("user" in result && Auth.canRestoreSession(current, result.user.id, initial.ticket)) {
+          try store.update((s) => ({ ...s, auth: { ...s.auth, owner, user: result.user } }))
+          try contained(auth.send({ type: "restoreSession", ticket: initial.ticket, account: result.user.id }), "restoring Telegram user")
+        }
+        return
+      }
+      grant = saved
     }
-    const current = try auth.get()
-    if (owner !== (try sessions.owner()) || current.step !== "SignedOut" || !Auth.canRestoreSession(current, result.user.id, initial.ticket)) return
-    try store.update((s) => ({ ...s, auth: { ...s.auth, owner, user: result.user } }))
-    try contained(auth.send({ type: "restoreSession", ticket: initial.ticket, account: result.user.id }), "restoring Telegram user")
   })
 }, "following the signed-in Telegram owner")
 

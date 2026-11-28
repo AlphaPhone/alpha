@@ -22,7 +22,7 @@ import * as Notices from "../gen/app__telegram__notices.effect.vibe";
 import home from "../src/home/index.tsx";
 import { toasts } from "../src/notices/toasts.vibe";
 import { browserDevice } from "../src/platform/device.vibe";
-import { MessagingSessions, messagingSessions } from "../src/platform/messaging.vibe";
+import { MessagingSessions, messagingSessions, secretOf } from "../src/platform/messaging.vibe";
 import { grounded } from "../src/platform/platform.vibe";
 import { browserVoiceBridge } from "../src/platform/voice.vibe";
 import { telegramMessages } from "../src/platform/telegram-messages.vibe";
@@ -39,7 +39,7 @@ import {
 } from "../src/telegram/resident.vibe";
 import { TELEGRAM_SESSION_KEY, TelegramStore } from "../src/telegram/store.vibe";
 
-import { closeAll, only, open, press, until as untilArea } from "./alpha.tsx";
+import { closeAll, only, open, press, seen, until as untilArea } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 
 const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -649,6 +649,49 @@ describe("Telegram on a phone", () => {
     const reopened = await open(phone, mounts);
     await untilArea(reopened.alpha, reopened.alpha.runtime, Auth.Machine, (s) => s.step === "Authenticated" && s.account === phone.telegram.user.id);
     expect(await reopened.alpha.runtime.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
+    await reopened.close();
+
+    // spec/app/telegram/auth.md, "A restart drops in-flight authentication work and restores only a previously authenticated user account"
+    for (const revoked of [false, true]) {
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      phone.telegram.revoked = revoked;
+      phone.telegram.beforeMeReply = () => {
+        phone.telegram.beforeMeReply = undefined;
+        started.resolve();
+        return release.promise;
+      };
+      const { alpha: restoring, close: stop } = await open(phone, mounts);
+      await started.promise;
+      phone.telegram.revoked = false;
+      phone.telegram.user.id += 1;
+      phone.telegram.sessionToken = `replacement-session-${phone.telegram.user.id}`;
+      try {
+        expect(await restoring.runtime.runPromise(Effect.flatMap(MessagingSessions, (sessions) =>
+          sessions.set(TELEGRAM_SESSION_KEY, secretOf(phone.telegram.sessionToken)),
+        ))).toBe(true);
+      } finally {
+        release.resolve();
+      }
+      await untilArea(restoring, restoring.runtime, Auth.Machine, (state) => state.step === "Authenticated");
+      expect((await restoring.runtime.runPromise(Effect.flatMap(Auth.Machine, (machine) => machine.get()))).account).toBe(phone.telegram.user.id);
+      expect(await restoring.runtime.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
+      await stop();
+    }
+
+    const offline = Promise.withResolvers<void>();
+    phone.telegram.beforeMeReply = () => {
+      offline.resolve();
+      return Promise.reject(new Error("Telegram is offline"));
+    };
+    const { alpha: reconnecting } = await open(phone, mounts);
+    await offline.promise;
+    expect(await reconnecting.runtime.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
+    expect((await reconnecting.runtime.runPromise(Auth.Machine.use((machine) => machine.get()))).step).toBe("SignedOut");
+    phone.telegram.beforeMeReply = undefined;
+    await seen(false);
+    await seen(true);
+    await untilArea(reconnecting, reconnecting.runtime, Auth.Machine, (state) => state.step === "Authenticated" && state.account === phone.telegram.user.id);
   });
 });
 
@@ -671,6 +714,7 @@ it('reports sign-in flood waits, reads, replies and reconnects through Telegram 
           loginRequests++;
           if (loginRequests === 1) return { _: "mt_rpc_error", errorCode: 420, errorMessage: "FLOOD_WAIT_2" };
           return { _: "auth.sentCode", type: { _: "auth.sentCodeTypeApp", length: 5 }, phoneCodeHash: "local-retry" };
+        case "users.getUsers": return { _: "mt_rpc_error", errorCode: 406, errorMessage: "AUTH_KEY_DUPLICATED" };
         case "updates.getState": return state;
         case "messages.getDialogs": return { _: "messages.dialogs", dialogs: request.offsetId ? [] : [dialog], messages: [line(2, "Meet at ten")], users: [sender], chats: [chat] };
         case "messages.getDialogFilters": return { _: "messages.dialogFilters", filters: [] };
@@ -709,6 +753,9 @@ it('reports sign-in flood waits, reads, replies and reconnects through Telegram 
     const baseline = await Effect.runPromise(telegram.getDifference("local-owner", 0));
     const gap = await Effect.runPromise(telegram.getDifference("local-owner", baseline.state.pts));
     expect([gap.state.pts, gap.new_messages[0]?.message]).toEqual([7, "Change of plan"]);
+    expect(await Effect.runPromise(Effect.flip(mtprotoRequest(() => client.getMe())))).toMatchObject({
+      _tag: "AuthRevoked", code: "AUTH_KEY_DUPLICATED",
+    });
   } finally {
     await client.destroy();
   }
