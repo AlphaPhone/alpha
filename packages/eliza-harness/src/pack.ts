@@ -65,10 +65,11 @@ function workspace(root: string): Map<string, string> {
 }
 
 function install(root: string) {
+  const args = ["install", "--frozen-lockfile", "--package-import-method=copy"];
   try {
-    run(root, "pnpm", "install", "--frozen-lockfile", "--offline");
+    run(root, "pnpm", ...args, "--offline");
   } catch {
-    run(root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
+    run(root, "pnpm", ...args, "--prefer-offline");
   }
 }
 
