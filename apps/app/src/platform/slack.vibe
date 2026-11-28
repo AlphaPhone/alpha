@@ -512,7 +512,10 @@ effect function callSlackAuthed<A>(
   schema: Schema.Decoder<A>,
 ): A!MessagingFailure {
   const validToken = try assertSlackUserToken(token)
-  return try callSlack(wired, build(validToken), schema)
+  return callSlack(wired, build(validToken), schema) catch effect (failure) => {
+    if (failure instanceof AuthRevoked) throw new AuthRevoked({ provider: "slack", code: failure.code, rejected: Redacted.make(validToken) })
+    throw failure
+  }
 }
 
 function oauthRequest(path: string, fields: Readonly<Record<string, string | undefined>>) {

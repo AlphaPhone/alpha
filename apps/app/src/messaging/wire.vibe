@@ -9,12 +9,12 @@ import * as TelegramList from "../../gen/app__telegram.effect.vibe"
 import * as TelegramAgent from "../../gen/app__telegram__agent.effect.vibe"
 import * as TelegramAuth from "../../gen/app__telegram__auth.effect.vibe"
 import * as TelegramConversation from "../../gen/app__telegram__conversation.effect.vibe"
-import { type MessagingFailure, MessagingSessions, tokenValue } from "../platform/index.vibe"
+import { type MessagingFailure, MessagingSessions } from "../platform/index.vibe"
 import { Unreachable, Unsent } from "../platform/index.vibe"
 import { Slack } from "../platform/index.vibe"
 import { Telegram } from "../platform/index.vibe"
 import { contained, started, together } from "../runtime/index.vibe"
-import { SlackLedger, handleSlackFailure, slackSessionKey } from "../slack/ledger.vibe"
+import { SlackLedger, handleSlackFailure, withWorkspaceToken } from "../slack/ledger.vibe"
 import { slackAmbientSnapshot, slackHomeCard } from "../slack/resident.vibe"
 import { reportSessionRevoked } from "../telegram/auth.vibe"
 import { telegramAmbientSnapshot, telegramHomeCard } from "../telegram/resident.vibe"
@@ -337,21 +337,21 @@ const messagingHandlers = started(effect {
     if (meta === undefined || !(try slackAuth.get()).connected.some((item) => item.workspace === meta.num)) {
       return { status: "failed" as const, error: "Connect a Slack workspace first" }
     }
-    const tokenOpt = try sessions.get(slackSessionKey(meta.teamId))
-    if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Reconnect your Slack workspace" }
-    const res = slack.postMessage(
-      tokenValue(tokenOpt.value),
+    const res = withWorkspaceToken(meta.num, (token) => slack.postMessage(
+      token,
       {
         channel: draft.targetId,
         text: draft.body,
         ...(draft.threadTs ? { thread_ts: draft.threadTs } : {}),
       },
       `alpha-card-${draft.id}-r${draft.revision}`,
-    ) catch (failure) => ({ failed: failure })
+    )).pipe(Effect.provideService(Slack, slack), Effect.provideService(SlackLedger, slackLedger), Effect.provideService(MessagingSessions, sessions)) catch (failure) => ({ failed: failure })
+    if (res === undefined) return { status: "failed" as const, error: "Reconnect your Slack workspace" }
     if ("failed" in res) {
       try handleSlackFailure(meta.num, res.failed).pipe(
         Effect.provideService(SlackAuth.Machine, slackAuth),
         Effect.provideService(SlackLedger, slackLedger),
+        Effect.provideService(MessagingSessions, sessions),
       )
       return sendFailureOutcome("Slack", res.failed)
     }

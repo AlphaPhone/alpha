@@ -2,7 +2,7 @@
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, say } from "../notices/index.vibe"
 import type { MessagingSessions } from "../platform/index.vibe"
-import { type SlackEventEnvelope, type SlackMessage, AuthRevoked, RateLimited, Slack } from "../platform/index.vibe"
+import { type SlackEventEnvelope, type SlackMessage, RateLimited, Slack } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, stop } from "../runtime/index.vibe"
 import {
   SlackLedger,
@@ -10,7 +10,7 @@ import {
   convKindOf,
   handleSlackFailure,
   targetId,
-  tokenForWorkspace,
+  withWorkspaceToken,
   messageSenderName,
 } from "./ledger.vibe"
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
@@ -120,15 +120,7 @@ effect function handleLiveEnvelope(
 
 effect function readWorkspaceEvents(workspace: number, cursor: number | undefined) {
   const slack = try Slack
-  const token = try tokenForWorkspace(workspace)
-  if (token === undefined) return undefined
-  return slack.readEvents(token, cursor) catch effect (failure) => {
-    if (!(failure instanceof AuthRevoked)) throw failure
-    const current = try tokenForWorkspace(workspace, failure.code === "token_expired" ? token : undefined)
-    if (current === undefined) return undefined
-    if (current === token) throw failure
-    return try slack.readEvents(current, cursor)
-  }
+  return try withWorkspaceToken(workspace, (token) => slack.readEvents(token, cursor))
 }
 
 effect function watchWorkspace(
@@ -142,8 +134,8 @@ effect function watchWorkspace(
     const page = readWorkspaceEvents(workspace, cursor) catch (failure) => failure
     if (page === undefined || ledger.workspaceMeta(workspace) !== grant) return
     if (!("events" in page)) {
-      try handleSlackFailure(workspace, page)
-      if (page instanceof AuthRevoked) return
+      const disposition = try handleSlackFailure(workspace, page)
+      if (disposition === "Revoked") return
       const seconds = page instanceof RateLimited ? Math.max(1, page.retryAfter ?? 5) : 5
       try sleep(seconds * 1000)
       continue

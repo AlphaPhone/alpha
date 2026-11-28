@@ -164,12 +164,10 @@ effect function wipeWorkspace(
   const sessions = try MessagingSessions
   const slack = try Slack
   const meta = ledger.workspaceMeta(workspace)
-  if (meta) {
-    if (revokeRemote) {
-      const token = tokenForWorkspace(workspace) catch () => undefined
-      if (token !== undefined) try ignore(slack.revoke(token))
-    }
+  if (meta && revokeRemote) {
+    const token = tokenForWorkspace(workspace) catch () => undefined
     try sessions.delete(slackSessionKey(meta.teamId), meta.owner)
+    if (token !== undefined) try ignore(slack.revoke(token))
   }
   try detachWorkspace(workspace)
 }

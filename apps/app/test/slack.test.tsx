@@ -26,7 +26,7 @@ import { pagePlatform, phonePlatform } from "../src/platform/platform.vibe";
 import { type Slack, assertSlackUserToken } from "../src/platform/slack.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 import { SlackScreen } from "../src/slack/Slack.tsx";
-import { type PendingOAuth, SlackLedger, slackSessionKey } from "../src/slack/ledger.vibe";
+import { type PendingOAuth, SlackLedger, runWorkspaceCall, slackSessionKey, tokenForWorkspace } from "../src/slack/ledger.vibe";
 import { executeSlackAgentRequest, slackAmbientSnapshot, slackBack, slackHomeCard, slackResident } from "../src/slack/resident.vibe";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -314,7 +314,9 @@ describe("Slack user-account client over live HTTP provider", () => {
     const direct = await other.runtime.runPromise(MessagingSessions.use((s) => s.get(key)));
     expect(Option.map(direct, (grant) => grant.workspace?.brokered)).toEqual(Option.some(false));
     const directGrants = (await controlRequests("/api/oauth.v2.access")).map((request) => request.body);
-    expect(directGrants).toEqual([expect.objectContaining({ code_verifier: expect.any(String) }), expect.objectContaining({ grant_type: "refresh_token" })]);
+    expect(directGrants).toHaveLength(2);
+    expect(directGrants[0]).toHaveProperty("code_verifier");
+    expect(directGrants[1]).toMatchObject({ grant_type: "refresh_token" });
     await other.close();
 
     phone.voice.organizationId = ownerOrganization;
@@ -334,6 +336,62 @@ describe("Slack user-account client over live HTTP provider", () => {
     expect(refused.connected).toEqual([]);
     expect(await switched.runtime.runPromise(MessagingSessions.use((s) => s.keys()))).toEqual([]);
     expect((await controlRequests("/api/slack/oauth")).length).toBe(grants.length);
+  });
+
+  it('keeps a workspace connected across two phone runtimes when an old grant is refused during renewal (spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only")', async () => {
+    const phone = { ...scene(), phone: true };
+    const first = await mountSlack(provider.origin, phone);
+    await underAct(() => findButton(first.host, "Connect workspace").click());
+    await underAct(() => findButton(first.host, "Approve & connect").click());
+    await waitFor(first.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    const delayed = Promise.withResolvers<void>();
+    const deliver = Promise.withResolvers<void>();
+    const rotating = Promise.withResolvers<void>();
+    const rotated = Promise.withResolvers<void>();
+    const second = await mountSlack(provider.origin, phone, { beforeReply: async (path, body) => {
+      if (path === "/api/auth.test" && body.includes("token_revoked")) {
+        delayed.resolve();
+        await deliver.promise;
+      }
+      if (path === "/api/slack/oauth" && body.includes("access_token")) {
+        rotating.resolve();
+        await rotated.promise;
+      }
+    } });
+    try {
+      const state = await waitFor(second.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+      const workspace = state.selected.workspace;
+      const key = slackSessionKey("T01ALPHA");
+      const grant = await first.runtime.runPromise(MessagingSessions.use((sessions) => sessions.get(key)));
+      if (Option.isNone(grant)) throw new Error("No Slack user grant");
+      const old = tokenValue(grant.value);
+      await controlPost("/__control/fault", { path: "/api/auth.test", status: 401, remaining: 1, body: { ok: false, error: "token_revoked" } });
+      const stale = first.runtime.runPromise(runWorkspaceCall(workspace, (client, token) => client.authTest(token)));
+      await delayed.promise;
+      const renewal = first.runtime.runPromise(tokenForWorkspace(workspace, old));
+      await rotating.promise;
+      const concurrent = second.runtime.runPromise(tokenForWorkspace(workspace, old));
+      rotated.resolve();
+      const [one, two] = await Promise.all([renewal, concurrent]);
+      deliver.resolve();
+      expect(one).toBeTruthy();
+      expect(one).toEqual(two);
+      expect(one).not.toBe(old);
+      expect(await stale).toMatchObject({ ok: false, failure: "Unreachable" });
+      const grants = await controlRequests("/api/slack/oauth");
+      expect(grants.filter((request) => request.body !== null && typeof request.body === "object" && "grant_type" in request.body && request.body.grant_type === "refresh_token")).toHaveLength(1);
+      const current = await first.runtime.runPromise(MessagingSessions.use((sessions) => sessions.get(key)));
+      expect(Option.map(current, tokenValue)).toEqual(Option.some(one));
+      await controlPost("/__control/fault", { path: "/api/auth.test", status: 401, remaining: 1, body: { ok: false, error: "token_expired" } });
+      const accessible = await second.runtime.runPromise(runWorkspaceCall(workspace, (client, token) => client.authTest(token)));
+      expect(accessible).toMatchObject({ ok: true, value: { team_id: "T01ALPHA" } });
+      expect((await controlRequests("/api/slack/oauth")).length).toBe(grants.length + 1);
+      expect((await first.runtime.runPromise(AuthMachine.use((m) => m.get()))).connected).toHaveLength(1);
+    } finally {
+      rotated.resolve();
+      deliver.resolve();
+      await second.close();
+    }
   });
 
   // spec/app/slack/index.md, "Switching workspace, choosing a section, searching or refreshing reads the first page under a new ticket"; spec/app/slack/conversation.md, "Opening a channel reads its newest history; opening a thread drawer pins its parent and reads thread replies independently"; spec/app/slack/conversation.md, "Edit, reviewed delete and emoji reactions execute one attempt at a time with honest outcomes"; spec/app/slack/composer.md, "Only the owner's tap sends; Unknown outcomes reconcile via read-back only"

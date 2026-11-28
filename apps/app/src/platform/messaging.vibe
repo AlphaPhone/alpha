@@ -102,7 +102,7 @@ export type ProviderName = "slack" | "telegram"
 export error RateLimited { provider: ProviderName; retryAfter?: number; code: string }
 
 /** User session or OAuth token is missing, invalid, expired, or revoked (`401` / `token_revoked` / `AUTH_KEY_UNREGISTERED`). */
-export error AuthRevoked { provider: ProviderName; code: string }
+export error AuthRevoked { provider: ProviderName; code: string; rejected?: Redacted.Redacted<string> }
 
 /** Authenticated user lacks permission for the requested action (`403` / `CHAT_WRITE_FORBIDDEN` / `cant_update_message`). */
 export error Forbidden { provider: ProviderName; code: string }
@@ -122,6 +122,7 @@ export interface StoredSecret {
   readonly refreshToken?: Redacted.Redacted<string>
   readonly expiresAt?: number
   readonly clientId?: string
+  readonly rotation?: { readonly id: string; readonly until: number }
   readonly workspace?: { readonly teamId: string; readonly name: string; readonly ownerUserId: string; readonly brokered?: boolean }
 }
 
@@ -130,7 +131,7 @@ export interface SessionStore {
   owner(): (string | undefined)!!
   get(key: string, expectedOwner?: string): Option.Option<StoredSecret>!!
   set(key: string, secret: StoredSecret, expectedOwner?: string): boolean!!
-  rotate(key: string, expectedAccessToken: string, secret: StoredSecret, expectedOwner?: string): boolean!!
+  exchange(key: string, expected: StoredSecret, next: StoredSecret | undefined, expectedOwner?: string): boolean!!
   delete(key: string, expectedOwner?: string): boolean!!
   keys(): ReadonlyArray<string>!!
 }
@@ -157,6 +158,12 @@ export function refreshTokenValue(secret: StoredSecret): string | undefined {
   return secret.refreshToken === undefined ? undefined : Redacted.value(secret.refreshToken)
 }
 
+/** Both a renewed grant and a new refresh reservation invalidate an earlier comparison. */
+export function sameCredential(left: StoredSecret, right: StoredSecret): boolean {
+  return tokenValue(left) === tokenValue(right) && refreshTokenValue(left) === refreshTokenValue(right)
+    && left.rotation?.id === right.rotation?.id
+}
+
 /** Isolated in-memory `SessionStore` whose contents never enter `KeyValueStore` or serialized machine state. */
 export function createSessionStore(): SessionStore {
   const entries = new Map<string, StoredSecret>()
@@ -172,11 +179,12 @@ export function createSessionStore(): SessionStore {
       entries.set(key, secret)
       return true
     }),
-    rotate: (key: string, expected: string, secret: StoredSecret, expectedOwner?: string) => sync(() => {
+    exchange: (key: string, expected: StoredSecret, next: StoredSecret | undefined, expectedOwner?: string) => sync(() => {
       if (expectedOwner !== undefined && expectedOwner !== owner) return false
       const previous = entries.get(key)
-      if (!previous || tokenValue(previous) !== expected) return false
-      entries.set(key, secret)
+      if (!previous || !sameCredential(previous, expected)) return false
+      if (next === undefined) entries.delete(key)
+      else entries.set(key, next)
       return true
     }),
     delete: (key: string, expectedOwner?: string) => sync(() => {

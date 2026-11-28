@@ -6,7 +6,7 @@ import deployments from "@repo/deployment/deployments.json" with { type: "json" 
 import type { Faked } from "./phone.ts";
 
 /** Android's browser and HTTP transport talking to the local Slack provider, with the phone's registered return address. */
-export function slackPhone(origin: string, options: { readonly beforeReturn?: () => void; readonly initialExpirySeconds?: number } = {}): Readonly<Record<string, Faked>> {
+export function slackPhone(origin: string, options: { readonly beforeReturn?: () => void; readonly initialExpirySeconds?: number; readonly beforeReply?: (path: string, body: string) => Promise<void> } = {}): Readonly<Record<string, Faked>> {
   return {
     AlphaSlackOAuth: () => ({
       async authorize({ url }: { url: string }) {
@@ -33,6 +33,7 @@ export function slackPhone(origin: string, options: { readonly beforeReturn?: ()
           method: request.method, headers: request.headers, body: request.data,
         });
         let data = await answer.text();
+        await options.beforeReply?.(url.pathname, data);
         if (options.initialExpirySeconds !== undefined && ["/api/oauth.v2.access", "/api/slack/oauth"].includes(url.pathname) && new URLSearchParams(request.data).has("code")) {
           const grant: unknown = JSON.parse(data);
           if (grant && typeof grant === "object" && "authed_user" in grant && grant.authed_user && typeof grant.authed_user === "object")

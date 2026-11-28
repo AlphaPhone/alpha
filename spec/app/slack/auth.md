@@ -123,6 +123,12 @@ pure def approveConsent(s: Auth, online: bool): Moved =
 
 ### OAuth callback verifies the state nonce and exchanges the secret code and PKCE verifier; only user tokens (`UserToken`) are admitted
 
+The launcher and standalone Slack package receive separate registered callbacks. The
+phone keeps each workspace grant under its Alpha owner in encrypted storage. Two
+open surfaces reserve the same workspace refresh atomically before requesting a
+replacement. An old response cannot revoke a renewed grant, and an expired access
+token can be renewed before retrying an operation Slack refused.
+
 ```quint
 pure def canCallbackReceived(s: Auth, nonce: int): bool = s.step == BrowserOAuth and nonce >= 0
 
