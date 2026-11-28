@@ -373,6 +373,7 @@ pure val pageRoutesCore: List[Route] = List(
   { method: Post, path: "/api/views/interact-result", stream: false },
   { method: Get, path: "/api/client-devices/capabilities", stream: false },
   { method: Post, path: "/api/client-devices/register", stream: false },
+  { method: Post, path: "/api/client-devices/revoke", stream: false },
   { method: Get, path: "/api/client-devices/context", stream: false },
   { method: Get, path: "/api/client-devices/proposals", stream: false },
   { method: Post, path: "/api/client-devices/proposals/{id}/decision", stream: false },
