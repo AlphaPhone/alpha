@@ -252,17 +252,20 @@ describe("Messaging E2E", () => {
     expect(((slackPosts.requests ?? []) as ReadonlyArray<unknown>).length).toBeGreaterThanOrEqual(1);
 
     await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goHome" })));
-    await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => Object.keys(s.watermarks).length > 0);
+    await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => (s.watermarks[alphaWs] ?? 0) > 0 && (s.watermarks[designWs] ?? 0) > 0);
     await controlJson(slackOrigin, "/__control/inject", {
       kind: "message",
       team_id: "T01ALPHA",
       channel: "C02ENG",
       user: "U02MAYA",
-      text: "Hey <@U01OWNER> check the Chromium Slack SSE test",
+      text: "Hey <@U01OWNER> check the Chromium Slack mention",
     });
+    await later(alpha, 5_000);
     await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => s.posts > 0);
+    await expect.element(page.getByText(/Alpha Team · engineering.*Maya Chen:.*Chromium Slack mention/)).toBeVisible();
 
     await controlJson(slackOrigin, "/__control/revoke", { team_id: "T02DESIGN" });
+    await later(alpha, 5_000);
     await until(
       alpha,
       alpha.runtime,
