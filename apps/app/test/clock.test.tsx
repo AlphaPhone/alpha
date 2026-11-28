@@ -309,10 +309,13 @@ describe("Clock journeys", () => {
     await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "goHome" }))));
     await until(alpha, alpha.runtime, Shell.Machine, (s) => !Shell.showing(s, "Clock"));
     host.installStandalone();
-    await drawn(() => host.tap({ kind: "timer", id: 3, token: "third-countdown" }));
+    const thirdTimer = host.alerts().find((item) => item.kind === "timer" && item.id === 3);
+    if (!thirdTimer) throw new Error("Third countdown was not scheduled");
+    const tap = { kind: "timer" as const, remoteId: thirdTimer.remoteId, token: "third-countdown" };
+    await drawn(() => host.tap(tap));
     await until(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Clock"));
     expect(document.querySelector("[role=alertdialog]")?.textContent).toContain("Breakfast");
-    expect(host.pending()?.id).toBe(3);
+    expect(host.pending()).toEqual(tap);
     await press("Dismiss");
     await waitFor(ClockView.Machine, (s) => s.tab === "Timers" && s.ringingTimer === 3);
     await expect.poll(() => host.pending()).toBeUndefined();
@@ -326,6 +329,34 @@ describe("Clock journeys", () => {
     await press("Clock");
     await expect.poll(() => host.foreground()).toBe("Clock");
     await until(alpha, alpha.runtime, Shell.Machine, (s) => !Shell.showing(s, "Clock"));
+  });
+
+  it('Opens the tapped timer after Clock restores its alerts (spec/app/clock/index.md, "Story: Hear and prioritize ringing alerts")', async () => {
+    const startMs = new Date(2026, 10, 24, 9, 0, 0, 0).getTime();
+    const remote = emptyRemote(startMs);
+    remote.snapshot = {
+      ...remote.snapshot,
+      version: 1,
+      timers: Object.entries({ "timer-1": "First countdown", "agent-countdown": "Tapped countdown" }).map(([id, label]): ClockSnapshot["timers"][number] => ({
+        id, label, durationMs: 60_000, remainingMs: 0, status: "ringing",
+        startedAtMs: null, endAtMs: null, ringStartedAtMs: startMs - 1_000, revision: 1, updatedAtMs: startMs,
+      })),
+    };
+    remote.offline = true;
+    const host = installClockScheduler();
+    scheduler = host;
+    const tap = { kind: "timer" as const, remoteId: "agent-countdown", token: "cold-countdown" };
+    host.tap(tap);
+
+    const { runtime, advance } = await mountClock(startMs, remote, true);
+    await advance(1_000);
+    expect(host.pending()).toEqual(tap);
+    remote.offline = false;
+    await drawn(async () => {
+      await runtime.runPromise(syncClockNow());
+      await expect.poll(() => host.pending()).toBeUndefined();
+    });
+    await expect.poll(() => document.querySelector("[role=alertdialog][aria-label='Ringing timer']")?.textContent ?? "").toContain("Tapped countdown");
   });
 
   it("Stopwatch laps, fastest/slowest highlight, pause, resume, reset, and visibility ticker gating (spec/app/clock/stopwatch.md, \"Story: Time laps with the stopwatch\")", async () => {

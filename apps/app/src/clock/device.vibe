@@ -59,6 +59,8 @@ export const deviceClock = started(effect {
     if (!(try device.showing())) return
     const tap = try host.pendingTap()
     if (tap === undefined) return
+    const target = desired.find((item) => item.kind === tap.kind && item.remoteId === tap.remoteId)
+    if (target === undefined && !snapshot.ready) return
     if (surface.mode === "monolith" && Option.isSome(shell)) {
       const current = try shell.value.get()
       const opening = current.trail.at(-1) !== "Clock"
@@ -75,12 +77,11 @@ export const deviceClock = started(effect {
       if (!(try contained(view.send({ type: "closeSheet" }), "opening the notification over the Clock editor"))) return
     }
     if (selected.tab !== tab && !(try contained(view.send({ type: "selectTab", tab }), "opening the Clock notification tab"))) return
-    const target = desired.find((item) => item.kind === tap.kind && item.id === tap.id)
     if (target !== undefined && !target.ringing && target.at <= (try Clock.currentTimeMillis)) return
     if (target?.ringing === true) {
       const ringing = try view.get()
-      const alarmId = tap.kind === "alarm" ? tap.id : ringing.ringingAlarm
-      const timerId = tap.kind === "timer" ? tap.id : ringing.ringingTimer
+      const alarmId = target.kind === "alarm" ? target.id : ringing.ringingAlarm
+      const timerId = target.kind === "timer" ? target.id : ringing.ringingTimer
       if (ClockView.canSyncAlerts(ringing, alarmId, timerId)) {
         if (!(try contained(view.send({ type: "syncAlerts", alarmId, timerId }), "showing controls for the tapped Clock alert"))) return
       }

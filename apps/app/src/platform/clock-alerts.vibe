@@ -33,7 +33,7 @@ export interface ClockProjection {
 
 const permissions = Schema.Struct({ notificationsEnabled: Schema.Boolean, exact: Schema.Boolean })
 const permissionState = Schema.Struct({ notifications: Schema.Literals(["granted", "denied", "prompt", "prompt-with-rationale"]) })
-const tap = Schema.Struct({ token: Schema.NonEmptyString, kind: Schema.Literals(["alarm", "timer"]), id: Schema.Int })
+const tap = Schema.Struct({ token: Schema.NonEmptyString, kind: Schema.Literals(["alarm", "timer"]), remoteId: Schema.NonEmptyString })
 export type ClockTap = typeof tap.Type
 
 interface ClockPlugin {
