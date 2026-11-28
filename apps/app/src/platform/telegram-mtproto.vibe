@@ -4,8 +4,7 @@ import { telegramRegistration } from "./build.ts"
 import { telegramMessages } from "./telegram-messages.vibe"
 
 module mtproto {
-  import deployments from "@repo/deployment/deployments.json" with { type: "json" }
-  import { appVersion } from "./build.ts"
+  import { appVersion, cloudApiOrigin } from "./build.ts"
   import type { TelegramClient as SdkClient, User, tl as TelegramTypes } from "@mtcute/web"
   import { telegramUser, type TelegramSignInResult, type TelegramExportLoginTokenResult } from "./telegram.vibe"
 
@@ -31,7 +30,7 @@ module mtproto {
       const stopped = cancel()
       const ticket = generation
       await stopped
-      const response = await fetch(new URL("/.well-known/alpha-telegram", deployments.production.cloud), {
+      const response = await fetch(new URL("/.well-known/alpha-telegram", cloudApiOrigin), {
         credentials: "omit", redirect: "error", cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
       })
       const registration: unknown = response.ok ? await response.json() : undefined

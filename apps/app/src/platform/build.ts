@@ -1,4 +1,8 @@
 import { isTelegramApplicationId } from "@repo/deployment";
+
+/** The API origin selected for the packaged phone by its build configuration. */
+export const cloudApiOrigin: string = import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN;
+
 /** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). @throws {never} */
 export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
 

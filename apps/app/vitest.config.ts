@@ -6,6 +6,7 @@ import type {} from "@vitest/browser-playwright";
 import type { BrowserCommandContext } from "vitest/node";
 import { project } from "vibestack/testing/vitest";
 import { defineConfig, mergeConfig } from "vitest/config";
+import { production } from "./capacitor.config.ts";
 
 const base = project({ root: import.meta.dirname, plugins: [tailwindcss()] });
 /** Where the linked eliza packages really are: Vitest runs their files as this package's own, and not as a dependency Node loads. */
@@ -20,6 +21,7 @@ const eliza = new RegExp(`^${fs.realpathSync.native(path.join(import.meta.dirnam
  * 45913123689), so the browser journeys wait up to three minutes for it.
  */
 export default defineConfig(async (env) => mergeConfig(typeof base === "function" ? await base(env) : await base, {
+  define: { "import.meta.env.VITE_ALPHA_CLOUD_API_ORIGIN": JSON.stringify(production.cloud) },
   optimizeDeps: { include: ["@mtcute/web", "@mtcute/web/utils.js"] },
   resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
   test: {

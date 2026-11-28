@@ -3,13 +3,12 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Install, install, type Time, timeOver } from "../runtime/index.vibe"
 import { type Agent, agentAt, relayedAgent } from "./agent.vibe"
 import { type Cloud, cloudAt, relayedCloud } from "./cloud.vibe"
-import { allowsTestOrigin } from "./build.ts"
+import { allowsTestOrigin, cloudApiOrigin } from "./build.ts"
 import { Device, browserDevice, phoneDevice } from "./device.vibe"
 import { phoneMessagingSessions } from "./messaging-sessions.vibe"
 import { type MessagingSessions, messagingSessions } from "./messaging.vibe"
 import { type Plugins, browserPlugins, phonePlugins } from "./plugins.vibe"
 import { sharedStore } from "./sharedStore.vibe"
-import deployments from "@repo/deployment/deployments.json" with { type: "json" }
 import { nativeSlackHttp } from "./slack-oauth.vibe"
 import { type Slack, slackAt } from "./slack.vibe"
 import { personalTelegram } from "./telegram-mtproto.vibe"
@@ -52,7 +51,7 @@ const store = Layer.unwrap(sync(() => {
 function messagingLayers(overrides?: MessagingLayers) {
   return Layer.mergeAll(
     overrides?.sessions ?? messagingSessions,
-    overrides?.slack ?? Layer.provide(slackAt("https://slack.com", deployments.production.cloud), nativeSlackHttp),
+    overrides?.slack ?? Layer.provide(slackAt("https://slack.com", cloudApiOrigin), nativeSlackHttp),
     overrides?.telegram ?? personalTelegram,
   )
 }
@@ -73,7 +72,7 @@ export function browserPlatform(origin: string): Layer.Layer<Platform> {
     Layer.provide(agentAt(`${origin}/agent`), FetchHttpClient.layer),
     Layer.provide(cloudAt(`${origin}/cloud`), FetchHttpClient.layer),
     {
-      slack: Layer.provide(allowsTestOrigin() ? slackAt(`${origin}/slack`) : slackAt("https://slack.com", deployments.production.cloud), FetchHttpClient.layer),
+      slack: Layer.provide(allowsTestOrigin() ? slackAt(`${origin}/slack`) : slackAt("https://slack.com", cloudApiOrigin), FetchHttpClient.layer),
       telegram: allowsTestOrigin() ? Layer.provide(telegramAt(`${origin}/telegram`), FetchHttpClient.layer) : personalTelegram,
     },
   )
