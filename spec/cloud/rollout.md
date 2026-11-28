@@ -199,7 +199,20 @@ The signed-in Alpha owner’s exported MTProto session stays in the phone’s se
 With a verified profile, `GET /.well-known/alpha-slack` publishes the deployment's
 registered public Slack client ID. Its operator supplies `SLACK_CLIENT_ID`
 from the Alpha Slack app with PKCE enabled and `alphaphone://slack/oauth/callback`
-registered. An absent or malformed ID yields a retryable 503.
+registered. An absent or malformed ID yields a retryable 503. For live workspace
+notices, the operator enables token rotation and the Slack Events API, subscribes
+on behalf of users to `message.channels`, `message.groups`, `message.im` and
+`message.mpim`, and registers the API host's `/api/slack/events` as the request
+URL. The operator supplies `SLACK_SIGNING_SECRET`, `SLACK_APP_ID` and an
+app-level `SLACK_APP_TOKEN` with `authorizations:read`. The API advertises
+`notifications: true` when those bindings are present. Alpha's PKCE exchange
+then passes through the Worker, which retains credential digests for the
+authorized human installation. The Worker validates Slack's signature and
+timestamp, resolves the individual installations entitled to the event, and
+queues up to 128 message references per recipient for an hour. A connected phone
+uses its own enrolled grant. The Worker rereads each message at Slack with that
+grant before returning it. A phone can connect directly to Slack when live
+notices have not been configured.
 
 ### The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry
 

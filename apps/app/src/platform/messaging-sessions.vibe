@@ -1,0 +1,87 @@
+// spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only"; spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"
+import { MessagingSessions, type StoredSecret, refreshTokenValue, secretOf, tokenValue } from "./messaging.vibe"
+import { CLOUD_ENVIRONMENT, signInAccounts } from "./voice.vibe"
+import { Vault } from "./vault.vibe"
+
+schema SavedGrant {
+  readonly owner: string
+  readonly key: string
+  readonly access: string
+  readonly refresh?: string
+  readonly expiresAt?: number
+  readonly clientId?: string
+  readonly workspace?: { readonly teamId: string; readonly name: string; readonly ownerUserId: string; readonly brokered?: boolean }
+}
+
+const stored = Schema.fromJsonString(Schema.Array(SavedGrant))
+const slot = "messaging-sessions:v1"
+
+function pack(owner: string, key: string, grant: StoredSecret): SavedGrant {
+  const refresh = refreshTokenValue(grant)
+  return { owner, key, access: tokenValue(grant),
+    ...(refresh === undefined ? {} : { refresh }),
+    ...(grant.expiresAt === undefined ? {} : { expiresAt: grant.expiresAt }),
+    ...(grant.clientId === undefined ? {} : { clientId: grant.clientId }),
+    ...(grant.workspace === undefined ? {} : { workspace: grant.workspace }),
+  }
+}
+
+function unpack(grant: SavedGrant): StoredSecret {
+  return { ...secretOf(grant.access, grant.refresh, grant.expiresAt),
+    ...(grant.clientId === undefined ? {} : { clientId: grant.clientId }),
+    ...(grant.workspace === undefined ? {} : { workspace: grant.workspace }),
+  }
+}
+
+/** The signed-in owner's messaging grants, replaced against the exact encrypted record read by each operation. */
+export const phoneMessagingSessions = Layer.effect(MessagingSessions, effect {
+  const vault = try Vault
+  const owner = effect () => {
+    const status = timeout(tryPromise(() => signInAccounts().status({ environment: CLOUD_ENVIRONMENT })), "5 seconds") catch () => undefined
+    const account = status?.account
+    return account?.kind === "signedIn" && account.keyExpiresAt > (try Clock.currentTimeMillis)
+      ? JSON.stringify([CLOUD_ENVIRONMENT, account.organizationId, account.userId]) : undefined
+  }
+  const read = effect () => {
+    const found = vault.read(slot) catch () => undefined
+    if (found === undefined) return undefined
+    const before = Option.getOrNull(found)
+    const grants = before === null ? [] : Option.getOrUndefined(Schema.decodeUnknownOption(stored)(Redacted.value(before)))
+    return grants === undefined ? undefined : { before, grants }
+  }
+  const update = effect (key: string, expected: string | undefined, next: StoredSecret | undefined, expectedOwner?: string): boolean!! => {
+    const binding = try owner()
+    if (binding === undefined || (expectedOwner !== undefined && expectedOwner !== binding)) return false
+    for (;;) {
+      const record = try read()
+      if (record === undefined) return false
+      const prior = record.grants.find((entry) => entry.owner === binding && entry.key === key)
+      if (expected !== undefined && prior?.access !== expected) return false
+      if (next === undefined && prior === undefined) return true
+      const kept = record.grants.filter((entry) => entry.owner !== binding || entry.key !== key)
+      if (next !== undefined) kept.push(pack(binding, key, next))
+      const replacement = kept.length === 0 ? null : Redacted.make(JSON.stringify(kept))
+      const result = vault.compareAndExchange(slot, record.before, replacement) catch () => undefined
+      if (result !== "conflict") return result === "saved" && binding === (try owner())
+      if (binding !== (try owner())) return false
+    }
+  }
+  return {
+    owner,
+    effect get(key: string, expectedOwner?: string) {
+      const binding = try owner()
+      if (binding === undefined || (expectedOwner !== undefined && expectedOwner !== binding)) return Option.none()
+      const entry = (try read())?.grants.find((grant) => grant.owner === binding && grant.key === key)
+      return entry === undefined || binding !== (try owner()) ? Option.none() : Option.some(unpack(entry))
+    },
+    set: (key: string, grant: StoredSecret, expectedOwner?: string) => update(key, undefined, grant, expectedOwner),
+    rotate: (key: string, expected: string, grant: StoredSecret, expectedOwner?: string) => update(key, expected, grant, expectedOwner),
+    delete: (key: string, expectedOwner?: string) => update(key, undefined, undefined, expectedOwner),
+    effect keys() {
+      const binding = try owner()
+      if (binding === undefined) return []
+      const record = try read()
+      return record === undefined || binding !== (try owner()) ? [] : record.grants.filter((grant) => grant.owner === binding).map((grant) => grant.key)
+    },
+  }
+})

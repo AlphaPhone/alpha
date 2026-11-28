@@ -104,6 +104,9 @@
   <activity android:name="ai.eliza.plugins.signin.SignInCallbackActivity" android:exported="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" android:host="${appLinkHost}" android:path="${signInCallbackPath}" /></intent-filter>
   </activity>
+  <activity-alias android:name=".AlphaSlackReturn" android:targetActivity=".MainActivity" android:exported="true">
+   <intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="alphaphone" android:host="slack" android:path="/oauth/callback" /></intent-filter>
+  </activity-alias>
   <activity-alias android:name=".AlphaCloudBillingReturn" android:targetActivity=".AlphaBillingReturnActivity" android:exported="true">
    <intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" android:host="${appLinkHost}" android:path="/alphaphone/billing/return" /></intent-filter>
   </activity-alias>

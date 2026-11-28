@@ -1,11 +1,16 @@
 # Slack authentication
 
 Signing in to one or more Slack workspaces as the owner's own user account via
-scope consent and OAuth2 PKCE user tokens (`xoxp-`). Bot tokens (`xoxb-`) and
+scope consent and OAuth2 PKCE user tokens, including rotating user tokens. Bot tokens (`xoxb-`) and
 non-user tokens are strictly rejected. OAuth authorization codes, PKCE
 verifiers, user tokens and refresh tokens are typed as Quint secrets so they can
 never enter public state or Ask Alpha context. Every auth or consent screen, and
 every unauthenticated state, is marked sensitive.
+
+A deployment that offers a Slack Events receiver exchanges the PKCE code via
+Alpha Cloud and renews that grant at the same cloud endpoint. Direct Slack
+grants continue to renew at Slack, including grants saved before a receiver
+was offered.
 
 ## Story: Connect and manage my Slack workspaces with user tokens only
 
@@ -46,6 +51,8 @@ type Effect =
   | OpenOAuthBrowser({ ticket: int, nonce: int })
   | ExchangeOAuthCode({ ticket: int, nonce: int, code: SecretOAuthCode, verifier: SecretPkceVerifier })
   | StoreWorkspaceToken({ workspace: int, credentialRev: int, token: SecretUserToken, refresh: SecretRefreshToken })
+  | ActivateWorkspace({ workspace: int, credentialRev: int })
+  | DetachWorkspace({ workspace: int })
   | WipeWorkspace({ workspace: int, credentialRev: int })
   | StopWorkspaceSync({ workspace: int })
 type Moved = { state: Auth, out: List[Effect] }
@@ -88,6 +95,11 @@ pure def alwaysAuthScreensAreSensitive(s: Auth): bool =
 ```
 
 ### Adding a workspace presents scope consent first, then opens PKCE OAuth with a fresh state nonce
+
+Alpha Cloud publishes the public client ID for this deployment. The phone opens
+Slack in a browser with a fresh verifier and the registered return address.
+If the registration or browser is unavailable, or the owner declines in Slack,
+only that attempt ends and existing workspaces remain connected.
 
 ```quint
 pure def canStartConnect(s: Auth): bool = s.step == Idle
@@ -148,6 +160,11 @@ pure def exchanged(
         }
       else { state: { ...s, step: Idle, trouble: ExchangeFailed }, out: List() }
   }
+
+pure def canBrowserFailed(s: Auth, nonce: int): bool = s.step == BrowserOAuth and nonce == s.nonce
+
+pure def browserFailed(s: Auth, nonce: int, denied: bool): Auth =
+  { ...s, step: Idle, trouble: if (denied) ConsentDeclined else ExchangeFailed }
 
 pure def canCancelOAuth(s: Auth): bool = s.step == BrowserOAuth
 
@@ -219,4 +236,26 @@ pure def sometimesMultipleWorkspacesConnected(s: Auth): bool = s.connected.lengt
 pure def sometimesBotTokenRejected(s: Auth): bool = s.trouble == BotTokenRejected
 pure def sometimesStateMismatchRefused(s: Auth): bool = s.trouble == StateMismatch
 pure def sometimesWorkspaceRevoked(s: Auth): bool = s.trouble == WorkspaceRevoked and s.revokedWorkspace > 0
+```
+
+### Reopening restores only the user workspaces whose grants the phone kept
+
+The first read after launch restores the signed-in owner’s workspaces. When the Alpha account changes, its previous workspace views close and their cached messages and drafts are cleared. The new owner’s stored workspaces open under fresh workspace identifiers. Each owner keeps their encrypted grants.
+
+```quint
+pure def recovered(entries: List[WorkspaceAuth]): Auth =
+  { ...initial, connected: entries, nextRev: entries.foldl(0, (n, w) => if (n > w.credentialRev) n else w.credentialRev) }
+
+pure def canRestoreConnections(s: Auth, entries: List[WorkspaceAuth]): bool =
+  (s == initial or s.connected != entries or s.step != Idle) and alwaysBotTokensRejected(recovered(entries))
+
+pure def restoreConnections(s: Auth, entries: List[WorkspaceAuth]): Moved =
+  val restored = recovered(entries)
+  val removed = s.connected.foldl(List(), (items, w) => items.append(DetachWorkspace({ workspace: w.workspace })))
+  {
+    state: { ...restored, ticket: s.ticket, nonce: s.nonce, nextRev: if (restored.nextRev > s.nextRev) restored.nextRev else s.nextRev },
+    out: entries.foldl(removed, (items, w) => items.append(ActivateWorkspace({ workspace: w.workspace, credentialRev: w.credentialRev }))),
+  }
+
+pure val entriesValues = Set(List(), List({ workspace: 1, userId: 1, credentialRev: 1, tokenKind: UserToken }))
 ```

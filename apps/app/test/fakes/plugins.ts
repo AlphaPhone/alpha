@@ -32,7 +32,7 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     }, () => world.voice.billingVerified === world.voice.credentialId, () => world.inbox.consent?.reauthRequired !== true),
     AlphaAssistantDraft: alphaAssistantDraft(world.ask, () => ({ owner: world.notes.ownerIdentity, agent: world.notes.owner, epoch: 1 })),
     ElizaSecureStore: elizaSecureStore(world.secrets, (key) => world.slots.has(key) || /^notes-(?:draft|folders):[1-9][0-9]*$/.test(key)
-      || /^sms-draft:v2:(?:new|thread:[1-9][0-9]{0,18}|recipients:[0-9a-f]{64})$/.test(key) || key === "sms-outgoing:v2:device"),
+      || /^sms-draft:v2:(?:new|thread:[1-9][0-9]{0,18}|recipients:[0-9a-f]{64})$/.test(key) || key === "messaging-sessions:v1" || key === "sms-outgoing:v2:device"),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaReminders: elizaReminders(world.reminders, () => world.now),
     ElizaCamera: elizaCamera(world.camera),
