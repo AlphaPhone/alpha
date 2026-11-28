@@ -20,6 +20,7 @@ import * as Composer from "../gen/app__telegram__composer.effect.vibe";
 import * as Conversation from "../gen/app__telegram__conversation.effect.vibe";
 import * as Notices from "../gen/app__telegram__notices.effect.vibe";
 import home from "../src/home/index.tsx";
+import { MessagingBridge } from "../src/messaging/bridge.vibe";
 import { toasts } from "../src/notices/toasts.vibe";
 import { browserDevice } from "../src/platform/device.vibe";
 import { MessagingSessions, messagingSessions, secretOf } from "../src/platform/messaging.vibe";
@@ -692,6 +693,41 @@ describe("Telegram on a phone", () => {
     await seen(false);
     await seen(true);
     await untilArea(reconnecting, reconnecting.runtime, Auth.Machine, (state) => state.step === "Authenticated" && state.account === phone.telegram.user.id);
+    const rt = reconnecting.runtime;
+    const bridge = await rt.runPromise(MessagingBridge);
+    bridge.stageDraft({ id: "old-draft", platform: "Telegram", target: "Prior chat", targetId: "user:420", body: "Old account draft", revision: 1, status: "draft" });
+    await drawn(() => rt.runPromise(bridge.openDraftInApp("old-draft")));
+    await untilArea(reconnecting, rt, Conversation.Machine, (state) => state.chat > 0 && state.newestLoaded);
+    await untilArea(reconnecting, rt, Composer.Machine, (state) => state.chat > 0 && state.canPost);
+    await fillField("Message", "Private unsent text");
+    const chat = (await rt.runPromise(Conversation.Machine.use((machine) => machine.get()))).chat;
+    const proposal = await rt.runPromise(executeTelegramAgentRequest({ kind: "ProposeMutation", tool: "TelegramMuteChat", turn: 42, chat, message: 0 }));
+    expect(proposal.ok).toBe(true);
+    await untilArea(reconnecting, rt, AgentTelegram.Machine, (state) => state.review.showing);
+    await vi.waitFor(() => expect(phone.telegram.listeners.size).toBeGreaterThan(0));
+    const oldFeed = [...phone.telegram.listeners];
+
+    await seen(false);
+    phone.telegram.user.id += 1;
+    phone.telegram.sessionToken = "replaced-while-telegram-backgrounded";
+    expect(await rt.runPromise(MessagingSessions.use((sessions) =>
+      sessions.set(TELEGRAM_SESSION_KEY, secretOf(phone.telegram.sessionToken)),
+    ))).toBe(true);
+    for (const send of oldFeed) send({ _type: "updateSessionRevoked", pts: 2, date: 1_700_000_000 });
+    expect(await rt.runPromise(telegramAmbientSnapshot)).toMatchObject({ available: false, sensitive: true });
+    expect(await rt.runPromise(telegramHomeCard)).toMatchObject({ standing: "SignedOut", rows: [] });
+    expect(await rt.runPromise(executeTelegramAgentRequest({ kind: "ApproveMutation", turn: 42, revision: proposal.revision! }))).toEqual({ ok: false });
+    await rt.runPromise(bridge.sendDraft("old-draft"));
+    expect(bridge.snapshot().drafts.find((draft) => draft.id === "old-draft")?.status).toBe("failed");
+    expect(phone.telegram.messages).toEqual([]);
+
+    await seen(true);
+    await untilArea(reconnecting, rt, Auth.Machine, (state) => state.step === "Authenticated" && state.account === phone.telegram.user.id);
+    await untilArea(reconnecting, rt, AgentTelegram.Machine, (state) => state.authenticated && !state.review.showing);
+    expect(await rt.runPromise(TelegramStore.use((store) => Effect.map(store.get(), (snapshot) => snapshot.drafts.size)))).toBe(0);
+    expect(bridge.snapshot().drafts).toEqual([]);
+    expect(await rt.runPromise(executeTelegramAgentRequest({ kind: "TelegramDraftMessage", turn: 43, chat, text: "Old chat handle" }))).toEqual({ ok: false });
+    expect(await rt.runPromise(grants)).toEqual([TELEGRAM_SESSION_KEY]);
   });
 });
 

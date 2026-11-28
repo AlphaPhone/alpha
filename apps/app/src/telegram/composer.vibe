@@ -56,7 +56,7 @@ effect function dispatchSend(
     pending.idempotencyKey,
   )) catch (failure) => ({ failed: failure })
   if ("failed" in res) {
-    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked(token.value)
     const outcome = messagingOutcomeOf(res.failed)
     if (outcome.known) try store.update((snap) => ({ ...snap, pendingSend: undefined }))
     return { type: "sendAnswered", id, confirmed: outcome.confirmed, known: outcome.known }
@@ -97,7 +97,7 @@ effect function readBackSend(
   const pending = (try store.get()).pendingSend
   const res = acceptedReply(token, (try Telegram).getHistory(token, peerKey, { limit: 20 })) catch (failure) => ({ failed: failure })
   if ("failed" in res) {
-    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked(token)
     return { type: "readBackAnswered", ticket, ok: false, wasSent: false }
   }
   const wasSent = pending !== undefined && pending.id === id

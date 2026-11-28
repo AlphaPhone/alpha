@@ -10,6 +10,8 @@ import {
   MessagingSessions,
   ProviderError,
   RateLimited,
+  type StoredSecret,
+  sameCredential,
   tokenValue,
 } from "../platform/index.vibe"
 import { Garbled, type Outcome, Refused, Unreachable, Unsent, outcomeOf } from "../platform/index.vibe"
@@ -30,6 +32,7 @@ const BOT_TOKEN_INPUT = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
 
 /** Ephemeral sign-in fields kept only in memory during authentication; never persisted to KeyValueStore. */
 export interface TelegramAuthCache {
+  readonly grant?: StoredSecret
   readonly owner: string | undefined
   readonly phone: string
   readonly phoneCodeHash: string
@@ -215,6 +218,8 @@ export const telegramStore = Layer.sync(TelegramStore, () => {
     }),
     cursorValue: (id: number) => sync(() => (id === 0 ? undefined : cursors.get(id))),
     wipe: () => sync(() => {
+      peerToId.clear()
+      idToPeer.clear()
       cursors.clear()
       current = blankSnapshot(current.version + 1)
       notify()
@@ -229,16 +234,19 @@ export function isBotTokenInput(value: string): boolean {
 
 /** Read the raw Telegram user-session token from `MessagingSessions` at the outbound HTTP boundary only. */
 export effect function currentSessionToken(): Option.Option<string>!!(MessagingSessions | TelegramStore) {
-  const { owner } = (try (try TelegramStore).get()).auth
-  if (owner === undefined) return Option.none()
-  const secret = try (try MessagingSessions).get(TELEGRAM_SESSION_KEY, owner)
-  return Option.map(secret, tokenValue)
+  const { grant, owner } = (try (try TelegramStore).get()).auth
+  if (owner === undefined || grant === undefined) return Option.none()
+  const saved = Option.getOrUndefined(try (try MessagingSessions).get(TELEGRAM_SESSION_KEY, owner))
+  return saved !== undefined && sameCredential(grant, saved) ? Option.some(tokenValue(grant)) : Option.none()
 }
 
 /** Deliver each authenticated reply only while the phone still holds the grant that requested it. */
 export effect function acceptedReply<A>(token: string, request: A!MessagingFailure): A!MessagingFailure!(MessagingSessions | TelegramStore) {
+  const store = try TelegramStore
+  const grant = store.snapshot().auth.grant
+  if (grant === undefined || tokenValue(grant) !== token) throw new Unreachable({ cause: "Telegram owner changed" })
   const reply = try Effect.result(request)
-  if (!Option.contains(try currentSessionToken(), token)) throw new Unreachable({ cause: "Telegram owner changed" })
+  if (store.snapshot().auth.grant !== grant || !Option.contains(try currentSessionToken(), token)) throw new Unreachable({ cause: "Telegram owner changed" })
   if (Result.isFailure(reply)) throw reply.failure
   return reply.success
 }

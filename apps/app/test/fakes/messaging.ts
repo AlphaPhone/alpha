@@ -311,7 +311,7 @@ export function telegramRoutes(scene: TelegramScene, now: () => number): Route[]
           case "/rpc/account.updateNotifySettings":
             return Response.json({ ok: true, mute_until: typeof body.mute_until === "number" ? body.mute_until : 0 });
           case "/rpc/updates.getDifference":
-            return Response.json({ ok: true, updates: [], pts: scene.pts, has_more: false });
+            return Response.json({ ok: true, _type: "updates.difference", new_messages: [], other_updates: [], state: { pts: scene.pts, date: Math.floor(now() / 1000) } });
           default:
             return Response.json({ ok: false, error: "METHOD_INVALID" }, { status: 404 });
         }

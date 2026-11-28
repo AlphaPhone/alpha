@@ -74,13 +74,15 @@ effect function persistUserSession(
 ): AuthOutcome!!(MessagingSessions | TelegramStore) {
   const valid = Option.getOrUndefined(try Effect.option(assertTelegramUserToken(sessionToken)))
   if (valid === undefined) return { tag: "AuthBot" }
-  if (!(try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid), owner))) {
+  const grant = secretOf(valid)
+  if (!(try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, grant, owner))) {
     return { tag: "AuthFailed", trouble: "Unreachable", wait: 0 }
   }
   try (try TelegramStore).update((snap) => ({
     ...snap,
     auth: {
       ...snap.auth,
+      grant,
       user,
       phoneCodeHash: "",
       pendingAuthId: "",
@@ -180,23 +182,17 @@ effect function readQrLogin(ticket: number, resume: boolean): Event!!(Telegram |
 
 // spec/app/telegram/auth.md, "Remote revocation and explicit sign-out wipe local data, advance the credential revision and stop sync"
 effect function logOutRemote(ticket: number): Event!!(Telegram | MessagingSessions | TelegramStore) {
-  const token = try currentSessionToken()
   const store = try TelegramStore
-  const { owner } = (try store.get()).auth
-  if (owner !== undefined) try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY, owner)
+  const { owner, grant } = (try store.get()).auth
+  const removed = owner !== undefined && grant !== undefined && (try (try MessagingSessions).exchange(TELEGRAM_SESSION_KEY, grant, undefined, owner))
   try store.wipe()
-  if (Option.isSome(token)) {
-    try ignore((try Telegram).logOut(token.value))
-  }
+  if (removed && grant !== undefined) try ignore((try Telegram).logOut(tokenValue(grant)))
   return { type: "loggedOut", ticket }
 }
 
-effect function wipeLocal(): void!!(MessagingSessions | TelegramStore | Auth.Machine) {
-  if ((try (try Auth.Machine).get()).work === "LoggingOut") return
-  const store = try TelegramStore
-  const { owner } = (try store.get()).auth
-  if (owner !== undefined) try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY, owner)
-  try store.wipe()
+effect function wipeLocal(credentialRev: number): void!!(TelegramStore | Auth.Machine) {
+  const state = try (try Auth.Machine).get()
+  if (state.work !== "LoggingOut" && state.credentialRev === credentialRev) try (try TelegramStore).wipe()
 }
 
 function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore | Auth.Machine, []> {
@@ -226,32 +222,39 @@ function carry(fx: Out): Job<Event, Telegram | MessagingSessions | TelegramStore
       try (try TelegramStore).update((snap) => ({ ...snap, auth: { ...snap.auth, qrToken: "", qrLoginUrl: "" } }))
     });
     when { tag: "SaveQrSession", let ticket, let account, let session }: answer("auth", effect {
-      const { owner } = (try (try TelegramStore).get()).auth
-      const ok = owner !== undefined && (try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(session), owner))
+      const store = try TelegramStore
+      const { owner } = (try store.get()).auth
+      const grant = secretOf(session)
+      const ok = owner !== undefined && (try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, grant, owner))
+      if (ok) try store.update((s) => ({ ...s, auth: { ...s.auth, grant } }))
       return { type: "qrSaved", ticket, account, ok } as const
     }, { type: "qrSaved", ticket, account, ok: false });
     when { tag: "StoreSession", let credentialRev, let session }: run("store-session", effect {
       const valid = Option.getOrUndefined(try Effect.option(assertTelegramUserToken(session)))
-      const { owner } = (try (try TelegramStore).get()).auth
+      const { owner, grant } = (try (try TelegramStore).get()).auth
       const state = try (try Auth.Machine).get()
-      if (valid !== undefined && owner !== undefined && state.step === "Authenticated" && state.credentialRev === credentialRev) {
-        try (try MessagingSessions).set(TELEGRAM_SESSION_KEY, secretOf(valid), owner)
+      if (valid !== undefined && owner !== undefined && grant !== undefined && tokenValue(grant) === valid && state.step === "Authenticated" && state.credentialRev === credentialRev) {
+        try (try MessagingSessions).exchange(TELEGRAM_SESSION_KEY, grant, grant, owner)
       }
     });
     when { tag: "LogOutRemote", let ticket }: answer("logout", logOutRemote(ticket), { type: "loggedOut", ticket });
-    when { tag: "WipeLocal" }: run("wipe-local", wipeLocal());
+    when { tag: "WipeLocal", let credentialRev }: run("wipe-local", wipeLocal(credentialRev));
     when { tag: "StopSync" }: run("stop-sync", Effect.void);
   }
 }
 
 /** Notify the Telegram auth machine that the user session was revoked remotely. */
-export effect function reportSessionRevoked(): void!!(Auth.Machine | MessagingSessions | TelegramStore) {
+export effect function reportSessionRevoked(rejected?: string): void!!(Auth.Machine | MessagingSessions | TelegramStore) {
   const auth = try Auth.Machine
   const store = try TelegramStore
-  const { owner } = (try store.get()).auth
-  if (owner !== undefined) try (try MessagingSessions).delete(TELEGRAM_SESSION_KEY, owner)
-  try store.wipe()
-  if (Auth.canRevoked(try auth.get())) {
+  const { owner, grant } = (try store.get()).auth
+  if (owner === undefined || grant === undefined || (rejected !== undefined && tokenValue(grant) !== rejected)) return
+  const sessions = try MessagingSessions
+  if (owner !== (try sessions.owner())) return
+  if (rejected === undefined) {
+    if (Option.isSome(try sessions.get(TELEGRAM_SESSION_KEY, owner))) return
+  } else if (!(try sessions.exchange(TELEGRAM_SESSION_KEY, grant, undefined, owner))) return
+  if ((try store.get()).auth.grant === grant && Auth.canRevoked(try auth.get())) {
     try contained(auth.send({ type: "revoked" }), "telegram session revoked")
   }
 }
@@ -281,7 +284,7 @@ export effect function runPeerMutation<A>(
   const { token, peerKey } = target.value
   const res = acceptedReply(token, invoke(try Telegram, token, peerKey)) catch (failure) => ({ failed: failure })
   if (typeof res === "object" && res !== null && "failed" in res) {
-    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked(token)
     return messagingOutcomeOf(res.failed)
   }
   try onSuccess(res, peerKey)
@@ -317,18 +320,20 @@ const restoredOwner = started(effect {
   const changes = Stream.merge(Stream.as(shown, true), Stream.merge(Stream.as((try VoiceBridge).signIns, true), Stream.filter((try Device).visible, (visible) => visible)))
   try Stream.runForEach(Stream.concat(Stream.make(true), changes), effect () => {
     const owner = try sessions.owner()
-    const prior = (try store.get()).auth.owner
-    if (prior !== undefined && owner !== prior) {
-      try client.forgetSession()
-      const state = try auth.get()
+    const prior = (try store.get()).auth
+    let initial = try auth.get()
+    let grant = owner === undefined ? undefined : Option.getOrUndefined(try sessions.get(TELEGRAM_SESSION_KEY, owner))
+    const changed = initial.step === "Authenticated" && (grant === undefined || prior.grant === undefined || !sameCredential(prior.grant, grant))
+    if ((prior.owner !== undefined && owner !== prior.owner) || changed || (initial.step === "SessionExpired" && grant !== undefined)) {
+      if ((try store.get()).auth.grant !== prior.grant) return
+      if (!(try contained(auth.send({ type: "restoreSession", ticket: initial.ticket, account: 0 }), "switching Telegram session"))) return
       try store.wipe()
-      try contained(auth.send({ type: "restoreSession", ticket: state.ticket, account: 0 }), "switching Telegram owner")
+      try client.forgetSession()
+      initial = try auth.get()
     }
-    const initial = try auth.get()
     if (owner === undefined || initial.step !== "SignedOut" || initial.work !== "Idle") return
     try store.update((s) => s.auth.owner === owner ? s : { ...s, auth: { ...s.auth, owner } })
     if (client.accountAccess !== "connectedClient") return
-    let grant = Option.getOrUndefined(try sessions.get(TELEGRAM_SESSION_KEY, owner))
     while (grant !== undefined) {
       const checked = grant
       const result = client.getMe(tokenValue(checked)) catch (failure) => failure
@@ -339,7 +344,7 @@ const restoredOwner = started(effect {
       if (saved === undefined) return
       if (sameCredential(checked, saved)) {
         if ("user" in result && Auth.canRestoreSession(current, result.user.id, initial.ticket)) {
-          try store.update((s) => ({ ...s, auth: { ...s.auth, owner, user: result.user } }))
+          try store.update((s) => ({ ...s, auth: { ...s.auth, owner, grant: checked, user: result.user } }))
           try contained(auth.send({ type: "restoreSession", ticket: initial.ticket, account: result.user.id }), "restoring Telegram user")
         }
         return

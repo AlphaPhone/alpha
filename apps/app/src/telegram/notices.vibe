@@ -50,23 +50,21 @@ effect function reloadSnapshot(): void!!(Telegram | MessagingSessions | Telegram
   const peer = try store.peerKeyOf(conversation.chat)
   const token = try currentSessionToken()
   if (peer === undefined || Option.isNone(token)) return
-  const page = (try Telegram).getHistory(token.value, peer) catch () => undefined
-  if (page === undefined || !Option.contains(try currentSessionToken(), token.value)) return
+  const page = acceptedReply(token.value, (try Telegram).getHistory(token.value, peer)) catch () => undefined
+  if (page === undefined) return
   try store.update((s) => ({ ...s, historyByPeer: new Map(s.historyByPeer).set(peer, mergeTimeline([], page.messages)), pts: Math.max(s.pts, page.pts) }))
 }
 
 effect function applyLiveUpdate(
   update: TelegramUpdate,
+  token: string,
 ): void!!(Telegram | TelegramStore | Auth.Machine | MessagingSessions | ChatList.Machine | Conversation.Machine | Notices.Machine) {
   if (update._type === "updateSnapshotRequired") {
     try reloadSnapshot()
     return
   }
   if (update._type === "updateSessionRevoked") {
-    const activeToken = try currentSessionToken()
-    if (update.session_token === undefined || (Option.isSome(activeToken) && activeToken.value === update.session_token)) {
-      try reportSessionRevoked()
-    }
+    if (update.session_token === undefined || update.session_token === token) try reportSessionRevoked(token)
     return
   }
   const store = try TelegramStore
@@ -151,7 +149,7 @@ effect function pollUpdates(
   }
   const diff = acceptedReply(token.value, (try Telegram).getDifference(token.value, since)) catch (failure) => failure
   if (!("ok" in diff)) {
-    if (isRevokedFailure(diff)) try reportSessionRevoked()
+    if (isRevokedFailure(diff)) try reportSessionRevoked(token.value)
     return { type: "polled", ticket, ok: false, point: since, incoming: emptyIncoming }
   }
   try store.update((current) => {
@@ -162,7 +160,7 @@ effect function pollUpdates(
     return { ...current, historyByPeer: nextHistory, pts: Math.max(current.pts, diff.state.pts) }
   })
   if (diff.reset_snapshot) try reloadSnapshot()
-  for (const update of diff.other_updates) try applyLiveUpdate(update)
+  for (const update of diff.other_updates) try applyLiveUpdate(update, token.value)
   const point = Math.max(since, diff.state.pts, 1)
   if (since === 0 || diff.new_messages.length === 0) {
     return { type: "polled", ticket, ok: true, point, incoming: emptyIncoming }
@@ -183,12 +181,12 @@ effect function startLiveSync(): void!!(Telegram | MessagingSessions | TelegramS
   if (Option.isNone(token)) return
   const stream = (try Telegram).updatesStream(token.value, baselined.value.since)
   const ended = try exit(Stream.runForEach(stream, effect (update) => {
-    if (Option.contains(try currentSessionToken(), token.value)) try applyLiveUpdate(update)
+    if (Option.contains(try currentSessionToken(), token.value)) try applyLiveUpdate(update, token.value)
   }))
   if (Exit.isFailure(ended) && !Cause.hasInterruptsOnly(ended.cause)) {
     const err = Cause.squash(ended.cause)
     if (typeof err === "object" && err !== null && "_tag" in err && (err as { readonly _tag: string })._tag === "AuthRevoked") {
-      try reportSessionRevoked()
+      try reportSessionRevoked(token.value)
     }
   }
 }

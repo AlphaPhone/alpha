@@ -31,7 +31,7 @@ effect function readHistory(
   const cursorStr = try store.cursorValue(cursor)
   const res = acceptedReply(token, (try Telegram).getHistory(token, peerKey, { cursor: cursorStr })) catch (failure) => ({ failed: failure })
   if ("failed" in res) {
-    if (isRevokedFailure(res.failed)) try reportSessionRevoked()
+    if (isRevokedFailure(res.failed)) try reportSessionRevoked(token)
     return { type: "pageRead", ticket, ok: false, following: 0, unread: 0, upTo: 0 }
   }
   const followingId = res.has_more && res.next_cursor !== "" ? try store.nextCursorId(res.next_cursor) : 0

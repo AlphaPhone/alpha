@@ -38,7 +38,7 @@ effect function readChats(
   if (query !== "") {
     const found = acceptedReply(token.value, client.searchGlobal(token.value, query, { cursor: cursorStr })) catch (failure) => failure
     if (!("ok" in found)) {
-      if (isRevokedFailure(found)) try reportSessionRevoked()
+      if (isRevokedFailure(found)) try reportSessionRevoked(token.value)
       return { type: "listed", ticket, answer: { tag: "ListErr", failure: listFailureOf(found) } }
     }
     for (const msg of found.messages) try store.chatIdOf(msg.peer_key)
@@ -65,7 +65,7 @@ effect function readChats(
     cursor: cursorStr,
   })) catch (failure) => failure
   if (!("ok" in res)) {
-    if (isRevokedFailure(res)) try reportSessionRevoked()
+    if (isRevokedFailure(res)) try reportSessionRevoked(token.value)
     return { type: "listed", ticket, answer: { tag: "ListErr", failure: listFailureOf(res) } }
   }
   const notices = try Notices.Machine

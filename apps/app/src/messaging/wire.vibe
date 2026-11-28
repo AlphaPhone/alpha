@@ -82,7 +82,7 @@ const syncTelegramContext = effect {
   const bridge = try MessagingBridge
   const auth = try (try TelegramAuth.Machine).get()
   const snap = try telegramAmbientSnapshot
-  if (auth.step !== "Authenticated") {
+  if (auth.step !== "Authenticated" || (!snap.available && snap.sensitive)) {
     bridge.publishContext("Telegram", {
       platform: "telegram",
       authenticated: false,
@@ -199,9 +199,16 @@ const telegramBridgeSync = started(effect {
   const agent = try TelegramAgent.Machine
   const conv = try TelegramConversation.Machine
   const store = try TelegramStore
+  const bridge = try MessagingBridge
+  let priorGrant = store.snapshot().auth.grant
   const storeChanges = Stream.callback<number>((queue) => effect {
     Queue.offerUnsafe(queue, store.snapshot().version)
-    const stop = store.subscribe(() => { Queue.offerUnsafe(queue, store.snapshot().version) })
+    const stop = store.subscribe(() => {
+      const snapshot = store.snapshot()
+      if (priorGrant !== undefined && priorGrant !== snapshot.auth.grant) bridge.clearDrafts("Telegram")
+      priorGrant = snapshot.auth.grant
+      Queue.offerUnsafe(queue, snapshot.version)
+    })
     try Effect.addFinalizer(() => Effect.sync(stop))
   })
   const signals = Stream.mergeAll([
@@ -266,6 +273,7 @@ const messagingHandlers = started(effect {
   const sessions = try MessagingSessions
   const tgAuth = try TelegramAuth.Machine
   const tgStore = try TelegramStore
+  const boundTelegramToken = currentSessionToken().pipe(Effect.provideService(TelegramStore, tgStore), Effect.provideService(MessagingSessions, sessions))
   const tgConv = try TelegramConversation.Machine
   const slackAuth = try SlackAuth.Machine
   const slackLedger = try SlackLedger
@@ -285,8 +293,8 @@ const messagingHandlers = started(effect {
     if (dialog !== undefined && !dialog.can_post) {
       return { status: "failed" as const, error: "This Telegram channel is read-only" }
     }
-    const tokenOpt = try currentSessionToken().pipe(Effect.provideService(TelegramStore, tgStore), Effect.provideService(MessagingSessions, sessions))
-    if (Option.isNone(tokenOpt)) return { status: "failed" as const, error: "Sign in to Telegram first" }
+    const tokenOpt = try boundTelegramToken
+    if (Option.isNone(tokenOpt) || snap.auth.grant !== tgStore.snapshot().auth.grant || !bridge.snapshot().drafts.includes(draft)) return { status: "failed" as const, error: "Sign in to Telegram first" }
     const replyTo = draft.replyToMessageId ? Number(draft.replyToMessageId) : undefined
     const payload = {
       peer: draft.targetId,
@@ -296,7 +304,7 @@ const messagingHandlers = started(effect {
     const res = acceptedReply(tokenOpt.value, telegram.sendMessage(tokenOpt.value, payload, `alpha-card-${draft.id}-r${draft.revision}`)).pipe(Effect.provideService(TelegramStore, tgStore), Effect.provideService(MessagingSessions, sessions)) catch (failure) => ({ failed: failure })
     if ("failed" in res) {
       if (isRevokedFailure(res.failed)) {
-        try reportSessionRevoked().pipe(
+        try reportSessionRevoked(tokenOpt.value).pipe(
           Effect.provideService(TelegramAuth.Machine, tgAuth),
           Effect.provideService(MessagingSessions, sessions),
           Effect.provideService(TelegramStore, tgStore),
@@ -309,6 +317,7 @@ const messagingHandlers = started(effect {
   }
 
   const openTelegramTarget = (draft: MessagingDraftProposal) => effect {
+    if (Option.isNone(try boundTelegramToken) || !bridge.snapshot().drafts.includes(draft)) return
     if (draft.targetId !== "") {
       const chatId = try tgStore.chatIdOf(draft.targetId)
       const snap = try tgStore.get()
