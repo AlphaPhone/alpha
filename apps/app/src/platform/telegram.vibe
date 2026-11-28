@@ -439,7 +439,7 @@ export effect function assertTelegramUserToken(token: string): string!Msg.BotTok
   return token
 }
 
-export function telegramErrorFromCode(code: string, status: number, retryAfter: string | undefined): Msg.MessagingFailure {
+function telegramErrorFromCode(code: string, status: number, retryAfter: string | undefined): Msg.MessagingFailure {
   const floodMatch = FLOOD_WAIT_PATTERN.exec(code)
   if (floodMatch !== null || status === 429) {
     const floodSeconds = floodMatch !== null ? Msg.boundWaitSeconds(Number(floodMatch[1])) : Msg.parseRetryAfter(retryAfter)
@@ -649,7 +649,7 @@ export function telegramUser(user: SdkUser): TelegramUser {
 }
 
 /** A Telegram refusal carries its RPC code. Transport failures carry no session or authentication data. */
-export function mtprotoFailure(cause: unknown): Msg.MessagingFailure {
+function mtprotoFailure(cause: unknown): Msg.MessagingFailure {
   if (typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "number" && "text" in cause && typeof cause.text === "string") {
     const code = cause.text === "FLOOD_WAIT_%d" && "seconds" in cause ? `FLOOD_WAIT_${cause.seconds}` : cause.text
     return telegramErrorFromCode(code, cause.code, undefined)

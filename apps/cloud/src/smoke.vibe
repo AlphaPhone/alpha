@@ -1,4 +1,5 @@
 // spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready"; spec/cloud/rollout.md, "Alpha's own cloud is ready only when each public gate passes: the provisioning smoke reads, then the entitlement keys, Alpha's sign-in configuration, the plans and the sign-in return page on the App Link host"
+import { isTelegramApplicationId } from "@repo/deployment"
 import type { CloudEnvironment } from "@elizaos/cloud"
 import { alphaPackage, assetLinksNameAlpha, type Environment } from "../gen/cloud.effect.vibe"
 import { smokeGates, type Gate } from "../gen/cloud__rollout.effect.vibe"
@@ -6,7 +7,7 @@ import { entryOf, registrationAt, statementsIn } from "./alpha.vibe"
 import { jsonOf } from "./json.ts"
 import { publicP256 } from "./keys.ts"
 
-const messagingGates = ["SlackRegistration", "TelegramRegistration"] as const
+const messagingGates = ["SlackRegistration", "SlackMailbox", "TelegramRegistration"] as const
 type PublicGate = Gate | typeof messagingGates[number]
 
 /** One gate's outcome: passed, or why not. */
@@ -24,9 +25,9 @@ export interface Origins {
 
 interface Answer { readonly status: number; readonly type: string; readonly cache: string; readonly text: string }
 
-effect function fetched(url: string): (Answer | string)!!HttpClient.HttpClient {
+effect function fetched(request: HttpClientRequest.HttpClientRequest): (Answer | string)!!HttpClient.HttpClient {
   return effect {
-    const response = try timeout(Effect.provideService(HttpClient.execute(HttpClientRequest.setHeader(HttpClientRequest.get(url), "cache-control", "no-cache")), FetchHttpClient.RequestInit, { redirect: "manual" }), "15 seconds")
+    const response = try timeout(Effect.provideService(HttpClient.execute(HttpClientRequest.setHeader(request, "cache-control", "no-cache")), FetchHttpClient.RequestInit, { redirect: "manual" }), "15 seconds")
     return { status: response.status, type: response.headers["content-type"] ?? "", cache: response.headers["cache-control"] ?? "", text: try response.text }
   } catch (failure) => `unreachable (${failure._tag})`
 }
@@ -50,11 +51,12 @@ effect function assetLinksFit(text: string, environment: Environment) {
 effect function judged(gate: PublicGate, answer: Answer, at: { readonly name: string; readonly environment: Environment; readonly signInReturn: string }) {
   const body = parsed(answer.text)
   switch (gate) {
+    case "SlackMailbox": return body.ok === false && body.error === "invalid_auth" && /^application\/json\b/i.test(answer.type) ? undefined : "expected the Slack mailbox to require an enrolled grant"
     case "SlackRegistration": case "TelegramRegistration": {
       if (!/^application\/json\b/i.test(answer.type) || !answer.cache.split(",").some(value => value.trim().toLowerCase() === "no-store"))
         return "expected a JSON registration with Cache-Control no-store"
       if (gate === "TelegramRegistration")
-        return typeof body.apiId === "number" && Number.isSafeInteger(body.apiId) && body.apiId > 0 ? undefined : "expected a positive Telegram application ID"
+        return isTelegramApplicationId(body.apiId) ? undefined : "expected a positive 32-bit Telegram application ID"
       if (typeof body.clientId !== "string" || !/^\d+\.\d+$/.test(body.clientId)) return "expected a Slack OAuth client ID"
       return body.notifications === true ? undefined : "Slack OAuth is registered but cloud notifications are unconfigured"
     }
@@ -81,6 +83,7 @@ effect function judged(gate: PublicGate, answer: Answer, at: { readonly name: st
 
 function addressOf(gate: PublicGate, origins: Origins, environment: CloudEnvironment, signInReturn: string): string {
   switch (gate) {
+    case "SlackMailbox": return `${origins.api}/api/slack/events/read`
     case "SlackRegistration": return `${origins.api}/.well-known/alpha-slack`
     case "TelegramRegistration": return `${origins.api}/.well-known/alpha-telegram`
     case "ApiHealth": return `${origins.api}/api/health`
@@ -100,9 +103,11 @@ export effect function smoke(environment: CloudEnvironment, origins: Origins, na
   const signInReturn = entryOf(registrationAt(which, new URL(origins.web).host)).signInReturn
   const results: GateResult[] = []
   for (const gate of group === "messaging" ? messagingGates : smokeGates) {
-    const answer = try fetched(addressOf(gate, origins, environment, signInReturn))
-    const problem = typeof answer === "string" ? answer : answer.status !== 200 ? `HTTP ${answer.status}` : try judged(gate, answer, { name, environment: which, signInReturn })
-    results.push({ gate, passed: problem === undefined, detail: problem ?? "HTTP 200" })
+    const address = addressOf(gate, origins, environment, signInReturn)
+    const answer = try fetched(gate === "SlackMailbox" ? HttpClientRequest.post(address) : HttpClientRequest.get(address))
+    const expected = gate === "SlackMailbox" ? 401 : 200
+    const problem = typeof answer === "string" ? answer : answer.status !== expected ? `HTTP ${answer.status}` : try judged(gate, answer, { name, environment: which, signInReturn })
+    results.push({ gate, passed: problem === undefined, detail: problem ?? `HTTP ${expected}` })
   }
   return results
 }

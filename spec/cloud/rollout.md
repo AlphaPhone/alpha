@@ -190,7 +190,7 @@ pure def renderAccepted(problems: List[RenderProblem], namesElizaCloud: bool): b
 > another.
 
 A phone built with Alpha’s own Telegram application registration verifies its numeric
-API ID at `GET /.well-known/alpha-telegram` before starting an MTProto sign-in.
+API ID (1 through 2,147,483,647) at `GET /.well-known/alpha-telegram` before starting an MTProto sign-in.
 The Android build takes `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from its release
 configuration. The Cloud deployment takes only `TELEGRAM_API_ID` and returns 503
 until it is configured. The phone sends login codes and two-factor proofs directly to Telegram.
@@ -198,9 +198,12 @@ The signed-in Alpha owner’s exported MTProto session stays in the phone’s se
 
 With a verified profile, `GET /.well-known/alpha-slack` publishes the deployment's
 registered public Slack client ID. Its operator supplies `SLACK_CLIENT_ID`
-from the Alpha Slack app with PKCE enabled. The registered redirects are
+from the Alpha Slack app with PKCE enabled. Register
 `alphaphone://slack/oauth/callback` for the launcher and
-`alphaphone://slack/oauth/standalone` for the standalone Slack app. An absent or malformed ID yields a retryable 503. For live workspace
+`alphaphone://slack/oauth/standalone` for the standalone Slack app. For browser
+access, also register `/alpha-slack-return` on the deployment’s `WEB_ORIGIN`,
+for example `https://cloud.alphaphone.dev/alpha-slack-return` in production.
+An absent or malformed ID yields a retryable 503. For live workspace
 notices, the operator enables token rotation and the Slack Events API, subscribes
 on behalf of users to `message.channels`, `message.groups`, `message.im` and
 `message.mpim`, and registers the API host's `/api/slack/events` as the request
@@ -307,7 +310,9 @@ Before connecting a workspace or a Telegram account, the operator runs
 `pnpm cloud smoke --environment staging --messaging` (or selects production).
 It reads both of the phone's public registration endpoints and checks for
 uncached JSON, Slack's OAuth client ID and live event configuration, and
-Telegram's numeric application ID. It reports each provider independently.
+Telegram's numeric application ID. It also asks the Slack mailbox for events
+without a credential and verifies that the running relay requires a grant.
+It reports each result independently.
 Account consent is checked on the phone.
 
 ### Alpha's own cloud is ready only when each public gate passes: the provisioning smoke reads, then the entitlement keys, Alpha's sign-in configuration, the plans and the sign-in return page on the App Link host

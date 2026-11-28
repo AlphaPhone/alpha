@@ -7,7 +7,7 @@ export interface SlackOwner {
   readonly user: string
 }
 
-export interface SlackCoordinates {
+interface SlackCoordinates {
   readonly id: string
   readonly time: number
   readonly channel: string

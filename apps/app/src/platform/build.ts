@@ -1,3 +1,4 @@
+import { isTelegramApplicationId } from "@repo/deployment";
 /** Whether this build was made with `ELIZA_DEV_ALLOW_TEST_MOCKS=1` (vite.config.ts exposes it to the page). @throws {never} */
 export const allowsTestMocks = (): boolean => import.meta.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
 
@@ -17,5 +18,5 @@ export function appVersion(): string {
 export function telegramRegistration(): { id: number; hash: string } | undefined {
   const id = Number(import.meta.env.VITE_TELEGRAM_API_ID);
   const hash: unknown = import.meta.env.VITE_TELEGRAM_API_HASH;
-  return Number.isSafeInteger(id) && id > 0 && typeof hash === "string" && /^[0-9a-f]{32}$/i.test(hash) ? { id, hash } : undefined;
+  return isTelegramApplicationId(id) && typeof hash === "string" && /^[0-9a-f]{32}$/i.test(hash) ? { id, hash } : undefined;
 }
