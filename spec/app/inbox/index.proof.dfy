@@ -70,12 +70,19 @@ lemma AccountsAnsweredAlways1C(s: Mailbox, ticket: int, ok: bool, connected: seq
   SoleReadableIsConnected(connected);
 }
 
-lemma AccountsAnsweredAlways2(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+lemma AccountsAnsweredKeepsChosenMessagesFresh(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
   requires inv(s) && canAccountsAnswered(s, ticket)
   ensures alwaysChosenMessagesBelongToAFreshList(accountsAnswered(s, ticket, ok, connected).state)
-  ensures alwaysAccountsAreKnownOnlyFromAnAnswer(accountsAnswered(s, ticket, ok, connected).state)
 {
   SoleReadableIsConnected(connected);
+}
+
+lemma AccountsAnsweredKeepsAccountsKnownFromAnAnswer(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
+  requires inv(s) && canAccountsAnswered(s, ticket)
+  ensures alwaysAccountsAreKnownOnlyFromAnAnswer(accountsAnswered(s, ticket, ok, connected).state)
+{
+  hide *;
+  reveal inv, canAccountsAnswered, alwaysAccountsAreKnownOnlyFromAnAnswer, accountsAnswered, dropOutlivedKept, emptied, turned, asking, kit__read_answer, kit__read_canAnswer;
 }
 
 lemma AccountsAnsweredAlways3(s: Mailbox, ticket: int, ok: bool, connected: seq<Linked>)
@@ -145,7 +152,8 @@ lemma accountsAnswered_ensures(s: Mailbox, ticket: int, ok: bool, connected: seq
     AccountsAnsweredAlways1A(s, ticket, ok, connected);
     AccountsAnsweredAlways1B(s, ticket, ok, connected);
     AccountsAnsweredAlways1C(s, ticket, ok, connected);
-    AccountsAnsweredAlways2(s, ticket, ok, connected);
+    AccountsAnsweredKeepsChosenMessagesFresh(s, ticket, ok, connected);
+    AccountsAnsweredKeepsAccountsKnownFromAnAnswer(s, ticket, ok, connected);
     AccountsAnsweredAlways3(s, ticket, ok, connected);
     AccountsAnsweredAlways4A(s, ticket, ok, connected);
     AccountsAnsweredAlways4B(s, ticket, ok, connected);

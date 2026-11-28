@@ -11,6 +11,34 @@ lemma EventReadFilter(s: Editor, id: int, revision: int, whole: bool)
 {
 }
 
+lemma EventReadKeepsWriteShape(s: Editor, id: int, revision: int, whole: bool)
+  ensures eventRead(s, id, revision, whole).write == s.write
+  ensures eventRead(s, id, revision, whole).kind == s.kind
+  ensures eventRead(s, id, revision, whole).writing == s.writing
+{
+  hide *;
+  reveal eventRead;
+}
+
+lemma EventReadKeepsWriteClear(s: Editor, id: int, revision: int, whole: bool)
+  requires alwaysNothingIsSentOverAChangeInDoubt(s)
+  ensures alwaysNothingIsSentOverAChangeInDoubt(eventRead(s, id, revision, whole))
+{
+  hide *;
+  var after := eventRead(s, id, revision, whole);
+  EventReadKeepsWriteShape(s, id, revision, whole);
+  EventReadFilter(s, id, revision, whole);
+  assert inFlight(after) == inFlight(s) by {
+    reveal inFlight;
+  }
+  assert after.writing in after.latched ==> s.writing in s.latched by {
+    if whole {
+      ProofLib.FilterMember((set_x: int) => !((set_x in [id])), s.latched, s.writing);
+    }
+  }
+  reveal alwaysNothingIsSentOverAChangeInDoubt;
+}
+
 lemma EventMissingFilter(s: Editor, id: int, whole: bool)
   ensures eventMissing(s, id, whole).latched == ProofLib.Filter((set_x: int) => !((set_x in [id])), s.latched)
 {
@@ -63,7 +91,7 @@ lemma eventRead_ensures(s: Editor, id: int, revision: int, whole: bool)
   if inv(s) && canEventRead(s, id, revision, whole) {
     EventReadFilter(s, id, revision, whole);
     ProofLib.FilterMember((set_x: int) => !((set_x in [id])), s.latched, s.target);
-    ProofLib.FilterMember((set_x: int) => !((set_x in [id])), s.latched, s.writing);
+    EventReadKeepsWriteClear(s, id, revision, whole);
   }
 }
 

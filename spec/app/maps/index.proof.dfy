@@ -3658,20 +3658,53 @@ lemma AnswerCoverageAlwaysB2(m: Maps, ticket: int, ok: bool, covered: bool, goog
 {
 }
 
-lemma AnswerCoverageAlwaysC(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+lemma AnswerCoverageLocationFrame(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
+  requires res == answerCoverage(m, ticket, ok, covered, google, offer)
+  ensures res.state.trip == m.trip
+  ensures res.state.link.locator == m.link.locator
+  ensures res.state.link.location == m.link.location
+  ensures res.state.link.disclosed == m.link.disclosed
+  ensures res.state.link.prompting == m.link.prompting
+  ensures res.state.explaining == m.explaining
+  ensures res.state.quiet == m.quiet && res.state.quietDone == m.quietDone
+  ensures res.state.owedLocate == m.owedLocate
+{
+  var link := app__maps__connection_answerCoverage(m.link, ticket, ok, covered, google, offer);
+  assert res.state.link == link;
+}
+
+lemma AnswerCoverageKeepsLocation(m: Maps, after: Maps)
+  requires alwaysFindingWaitsForGuidance(m)
+  requires alwaysExplainingOnlyBeforeTheDisclosure(m)
+  requires alwaysExplainingOnlyWhileLocationIsNotAllowed(m)
+  requires alwaysTheQuietFixIsTheFinders(m)
+  requires alwaysALocateOwedWasAsked(m)
+  requires after.trip == m.trip
+  requires after.link.locator == m.link.locator
+  requires after.link.location == m.link.location
+  requires after.link.disclosed == m.link.disclosed
+  requires after.link.prompting == m.link.prompting
+  requires after.explaining == m.explaining
+  requires after.quiet == m.quiet && after.quietDone == m.quietDone
+  requires after.owedLocate == m.owedLocate
+  ensures alwaysFindingWaitsForGuidance(after)
+  ensures alwaysExplainingOnlyBeforeTheDisclosure(after)
+  ensures alwaysExplainingOnlyWhileLocationIsNotAllowed(after)
+  ensures alwaysTheQuietFixIsTheFinders(after)
+  ensures alwaysALocateOwedWasAsked(after)
+{
+}
+
+lemma AnswerCoverageKeepsQuestionAndRules(m: Maps, ticket: int, ok: bool, covered: bool, google: bool, offer: app__maps__navigation_Offer, res: Stepped)
   requires inv(m) && canAnswerCoverage(m, ticket, ok, covered, google, offer)
   requires res == answerCoverage(m, ticket, ok, covered, google, offer)
-  ensures alwaysFindingWaitsForGuidance(res.state)
-  ensures alwaysExplainingOnlyBeforeTheDisclosure(res.state)
-  ensures alwaysExplainingOnlyWhileLocationIsNotAllowed(res.state)
-  ensures alwaysTheQuietFixIsTheFinders(res.state)
-  ensures alwaysALocateOwedWasAsked(res.state)
   ensures alwaysOnlyAPlaceOrRouteIsReadable(res.state)
   ensures alwaysAReadAnswersAQuestion(res.state)
   ensures alwaysAQuestionIsAboutWhatIsShown(res.state)
   ensures alwaysTheTripKeepsItsRules(res.state)
   ensures alwaysTheConnectionKeepsItsRules(res.state)
 {
+  assert res.state.trip == m.trip;
   app__maps__connection_answerCoverage_ensures(m.link, ticket, ok, covered, google, offer);
 }
 
@@ -3832,7 +3865,9 @@ lemma answerCoverage_ensures(m: Maps, ticket: int, ok: bool, covered: bool, goog
     AnswerCoverageAlwaysA2(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageAlwaysB1(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageAlwaysB2(m, ticket, ok, covered, google, offer, res);
-    AnswerCoverageAlwaysC(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageLocationFrame(m, ticket, ok, covered, google, offer, res);
+    AnswerCoverageKeepsLocation(m, res.state);
+    AnswerCoverageKeepsQuestionAndRules(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageStepsA(m, ticket, ok, covered, google, offer, res);
     AnswerCoverageStepsB(m, ticket, ok, covered, google, offer, res);
   }
