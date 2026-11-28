@@ -41,6 +41,8 @@ export interface NotesScene {
   /** The note a claim of a prepared saved-note editor names, as eliza's view host hands it to the renderer it is bound to. */
   target?: string;
   interactGate?: Promise<void>;
+  /** Holds each command Android's recorder is given until it settles, as a phone that has not yet carried it out. */
+  commandGate?: Promise<void>;
   /** Holds each deletion sent to the store, in place of `interactGate`, until it settles. */
   discardGate?: Promise<void>;
   /** Holds each read of the store until it settles. */
@@ -123,22 +125,32 @@ export function notesScene(now = Date.now()): NotesScene {
   };
 }
 
-/** The retained Notes recordings as the Android host reports them. */
+/**
+ * The retained Notes recordings as the Android host reports them. As `AlphaNoteRecorder.java` does, it refuses a Start
+ * while a recording is open, until that one is discarded (line 136), and reports each change it makes to the tape before
+ * answering (`publish()` at lines 146, 221, 231, 237 and 268, sent on by `AlphaNotesPlugin.java` line 84); it discards
+ * only the recording it holds (`AlphaNotesPlugin.java` line 165).
+ */
 export function alphaNotes(scene: NotesScene): Faked {
   return (emit, onUnplug) => {
     let finish: ((result: { ok: boolean }) => void) | undefined;
     const reading = () => scene.tape.state === "idle" ? { state: "idle" } : structuredClone(scene.tape);
+    const changed = () => emit("recordingChanged", reading());
     const written = () => {
       const heard = scene.tape.durationMs - scene.tape.segments.reduce((sum, one) => sum + one.durationMs, 0);
       if (heard > 0) scene.tape.segments.push({ segmentId: `${scene.tape.recordingId}-${scene.tape.segments.length + 1}`, durationMs: heard });
     };
     const told = (recordingId: string, command: string, change: () => void) => {
-      if (recordingId !== scene.tape.recordingId || scene.tape.state === "idle") return Promise.reject(rejection("No such recording"));
-      scene.told.push(command);
-      change();
-      return Promise.resolve(reading());
+      const carry = () => {
+        if (recordingId !== scene.tape.recordingId || scene.tape.state === "idle") return Promise.reject(rejection("No such recording"));
+        scene.told.push(command);
+        const before = scene.tape.state;
+        change();
+        if (command === "End" || scene.tape.state !== before) changed();
+        return Promise.resolve(reading());
+      };
+      return scene.commandGate === undefined ? carry() : scene.commandGate.then(carry);
     };
-    const changed = () => emit("recordingChanged", reading());
     scene.tapeChanged = changed;
     onUnplug?.(() => { if (scene.tapeChanged === changed) scene.tapeChanged = () => {}; });
     return {
@@ -149,6 +161,7 @@ export function alphaNotes(scene: NotesScene): Faked {
         if (scene.tape.state !== "idle") return Promise.reject(rejection("A recording is already open"));
         scene.told.push("Start");
         scene.tape = { state: "recording", recordingId: `recording-${scene.told.length}`, binding: { ownerDigest, folderId: folderId ?? null }, durationMs: 0, segments: [] };
+        changed();
         return Promise.resolve(reading());
       },
       command: ({ recordingId, command }: { recordingId: string; command: "Pause" | "Resume" | "End" }) => told(recordingId, command, () => {
@@ -162,7 +175,9 @@ export function alphaNotes(scene: NotesScene): Faked {
         return Promise.resolve({ audioId: recordingId, noteId, durationMs: scene.tape.durationMs });
       },
       discard: ({ recordingId }: { recordingId: string }) => {
-        if (recordingId === scene.tape.recordingId) scene.tape = { state: "idle", durationMs: 0, segments: [] };
+        if (recordingId !== scene.tape.recordingId) return Promise.reject(rejection("The recording changed"));
+        scene.tape = { state: "idle", durationMs: 0, segments: [] };
+        changed();
         return Promise.resolve();
       },
       consumeOpen: () => Promise.resolve({ open: false }),
