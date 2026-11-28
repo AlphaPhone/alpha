@@ -186,8 +186,10 @@ async function captureWebViews(
     viteProcess = spawn(viteBin, ["--host", "127.0.0.1", "--port", String(DEFAULT_WALKTHROUGH_PORT), "--strictPort"], {
       cwd: path.join(rootDir, "apps/app"),
       env: { ...process.env, ALPHA_FAKES: "phone" },
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    viteProcess.unref();
     viteProcess.stdout?.on("data", (chunk: Buffer) => {
       viteLogs = `${viteLogs}${chunk.toString("utf8")}`.slice(-4000);
     });
@@ -220,14 +222,20 @@ async function captureWebViews(
           const root = document.getElementById("root");
           if (!root) return false;
           const text = root.textContent?.trim() ?? "";
-          return text.length > 0 || root.querySelectorAll("button, input, textarea, main, section").length > 0;
+          return text.length > 10 || root.querySelectorAll("button, input, textarea").length >= 2;
         },
         undefined,
         { timeout: firstLoad ? 240_000 : 120_000 },
       );
       firstLoad = false;
-      await timersPromises.scheduler.wait(1200);
-      if (afterLoad) await afterLoad();
+      await timersPromises.scheduler.wait(1500);
+      if (afterLoad) {
+        await afterLoad();
+      } else {
+        await page.evaluate(() => {
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        });
+      }
       const outPath = path.join(webDir, `${name}.png`);
       await page.screenshot({ path: outPath, fullPage: false });
       captures.push({
@@ -245,6 +253,7 @@ async function captureWebViews(
     for (const scene of OVERLAY_SCENES) {
       if (scene.detent === "control") {
         await page.route("**/api/alpha/control/state", async (route) => {
+          const now = Date.now();
           await route.fulfill({
             status: 200,
             contentType: "application/json",
@@ -259,18 +268,25 @@ async function captureWebViews(
                 targetKind: "AllowedApp",
                 protection: "ScreenClear",
                 windowCount: 1,
-                observedAtMs: Date.now(),
+                observedAtMs: now,
               },
               lease: {
                 leaseId: 1,
                 packageName: "org.mozilla.firefox",
                 maxOps: 12,
                 usedOps: 3,
-                expiresAtMs: Date.now() + 55_000,
+                expiresAtMs: now + 55_000,
                 status: "LeaseActive",
               },
               leaseRequest: null,
-              pending: { active: true, opId: 4, type: "ui_scroll" },
+              pending: {
+                opId: 4,
+                leaseId: 1,
+                boundSnapId: 7,
+                expectedPackage: "org.mozilla.firefox",
+                op: { type: "ui_scroll" },
+                createdAtMs: now,
+              },
               lastResult: "done",
               killed: false,
             }),
@@ -279,40 +295,83 @@ async function captureWebViews(
       }
       await shoot(scene.id, scene.query, async () => {
         if (scene.detent === "typing") {
+          const typeButton = page.getByRole("button", { name: /type|keyboard|message|write/i }).first();
+          if (await typeButton.count() > 0) {
+            await typeButton.click({ timeout: 2000 }).catch(() => undefined);
+          } else {
+            await page.locator("button").nth(1).click({ timeout: 2000 }).catch(() => undefined);
+          }
+          await timersPromises.scheduler.wait(400);
           const input = page.locator("textarea, input[type='text'], [contenteditable='true']").first();
           if (await input.count() > 0) {
             await input.click({ timeout: 2000 }).catch(() => undefined);
             await input.fill("Summarize my unread messages and draft a reply").catch(() => undefined);
           }
         } else if (scene.detent === "sheet" || scene.detent === "full") {
-          const askButton = page.getByRole("button", { name: /ask|send|expand|open/i }).first();
-          if (await askButton.count() > 0) {
-            await askButton.click({ timeout: 2000 }).catch(() => undefined);
+          const openButton = page.getByRole("button", { name: /ask|open|expand|alpha/i }).first();
+          if (await openButton.count() > 0) {
+            await openButton.click({ timeout: 2000 }).catch(() => undefined);
+          }
+          await timersPromises.scheduler.wait(500);
+          const input = page.locator("textarea, input[type='text']").first();
+          if (await input.count() > 0) {
+            await input.fill("What is on my calendar today?").catch(() => undefined);
+            await timersPromises.scheduler.wait(300);
+            const sendButton = page.getByRole("button", { name: /send/i }).first();
+            if (await sendButton.count() > 0) {
+              await sendButton.click({ timeout: 2000 }).catch(() => undefined);
+            } else {
+              await input.press("Enter").catch(() => undefined);
+            }
+            await timersPromises.scheduler.wait(2000);
+          }
+          if (scene.detent === "full") {
+            const expandButton = page.getByRole("button", { name: /full|expand|maximize|bigger/i }).first();
+            if (await expandButton.count() > 0) {
+              await expandButton.click({ timeout: 2000 }).catch(() => undefined);
+              await timersPromises.scheduler.wait(600);
+            }
           }
         } else if (scene.detent === "voice") {
-          const talkButton = page.getByRole("button", { name: /talk|voice|mic/i }).first();
+          const talkButton = page.getByRole("button", { name: /talk|voice|mic|speak/i }).first();
           if (await talkButton.count() > 0) {
             await talkButton.click({ timeout: 2000 }).catch(() => undefined);
           }
+          await timersPromises.scheduler.wait(700);
         } else if (scene.detent === "control") {
-          await timersPromises.scheduler.wait(1800);
+          await timersPromises.scheduler.wait(2200);
         }
-        await timersPromises.scheduler.wait(500);
+        await timersPromises.scheduler.wait(400);
       });
       if (scene.detent === "control") {
         await page.unroute("**/api/alpha/control/state");
       }
     }
 
-    await shoot("monolith-home", "?surface=monolith");
+    await shoot("monolith-home", "?surface=monolith", async () => {
+      for (let step = 0; step < 8; step++) {
+        const skipButton = page.getByRole("button", { name: /^skip$/i }).first();
+        if (await skipButton.count() === 0) break;
+        await skipButton.click({ timeout: 1500 }).catch(() => undefined);
+        await timersPromises.scheduler.wait(300);
+      }
+      await timersPromises.scheduler.wait(1000);
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+    });
     await context.close();
   } catch (error: unknown) {
     const baseMsg = error instanceof Error ? error.message : String(error);
     throw new Error(viteLogs ? `${baseMsg}\nVite output:\n${viteLogs.slice(-1200)}` : baseMsg, { cause: error });
   } finally {
     await browser.close();
-    if (viteProcess && viteProcess.exitCode === null) {
-      viteProcess.kill("SIGTERM");
+    if (viteProcess?.pid) {
+      try {
+        process.kill(-viteProcess.pid, "SIGKILL");
+      } catch {
+        viteProcess.kill("SIGKILL");
+      }
     }
   }
 
