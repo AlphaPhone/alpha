@@ -1414,7 +1414,7 @@ function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Mac
   }
 }
 
-type SlotReading = { found: Composer.Found; revision: number; text: string; raw?: string; lastSentId?: string; lastSentWire?: string }
+type SlotReading = { found: Composer.Found; revision: number; text: string; raw?: string; lastSentId?: string }
 
 function emptySlot(found: Composer.Found): SlotReading {
   return { found, revision: 0, text: "" }
@@ -1455,7 +1455,6 @@ effect function slotOf(board: Board, slot: DraftSlot | undefined): SlotReading!!
       text: saved.text,
       raw,
       ...(saved.lastSentId === undefined ? {} : { lastSentId: saved.lastSentId }),
-      ...(saved.lastSentWire === undefined ? {} : { lastSentWire: saved.lastSentWire }),
     }
   } catch () => emptySlot("Failure")
 }
@@ -1598,10 +1597,7 @@ effect function slotRead(ticket: number, binding: Composer.Binding, recover: boo
   if (!sameBinding(now.binding, binding) || !Composer.canSlotRead(now, ticket, revision) || slot?.key !== draftSlot(board, binding)?.key) {
     return { type: "slotRead", ticket, found: "Failure", revision: 0 }
   }
-  if (found === "Sending") {
-    board.lastSentId = held.lastSentId ?? ""
-    board.lastSentWire = held.lastSentWire ?? text
-  }
+  if (found === "Sending") board.lastSentId = held.lastSentId ?? ""
   board.change(found === "Saved" ? { typed: text, saved: "" } : found === "Sending" ? { typed: "", saved: text } : { typed: "", saved: "" })
   return { type: "slotRead", ticket, found, revision }
 }
@@ -1635,7 +1631,7 @@ effect function wrote(ticket: number, binding: Composer.Binding, sending: boolea
   }
   const text = sending ? board.outgoing : board.snapshot().typed
   const payload = sending
-    ? { revision: base + 1, text, sending, ...(board.lastSentId === "" ? {} : { lastSentId: board.lastSentId }), lastSentWire: board.lastSentWire || text }
+    ? { revision: base + 1, text, sending, ...(board.lastSentId === "" ? {} : { lastSentId: board.lastSentId }) }
     : { revision: base + 1, text, sending }
   const landed = try putSlot(board, slot, held.raw, JSON.stringify(payload))
   if (landed && !sending && held.found === "Sending") try forgetSendKey(slot)
@@ -1991,7 +1987,7 @@ const bound = started(effect {
     const posting = board.postingRequest
     if (posting?.request.contact !== undefined && (turn.send.id > posting.ticket
       || (turn.send.id === posting.ticket && !Conversation.inFlight(turn)))) board.postingRequest = undefined
-    if (board.sendWhenMade > 0 && !Chats.making(live) && live.chosen === 0 && live.make.id >= board.sendWhenMade) board.sendWhenMade = 0
+    if (board.sendWhenMade > 0 && ((!Chats.making(live) && live.chosen === 0 && live.make.id >= board.sendWhenMade) || writing.unsettled)) board.sendWhenMade = 0
     const request = board.waitingRequest
     if (request !== undefined && !Chats.making(live) && ((live.chosen === 0 && live.make.id >= request.ticket) || (live.chosen !== 0 && live.chosen === leftAt))) {
       board.waitingRequest = undefined
