@@ -289,8 +289,10 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     write("Hello ");
     await press("Send");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
+    expect(loadingRows()).toBeNull();
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 1);
-    expect([loadingRows(), document.querySelector("section[aria-label='Ask Alpha'] [role=log]")?.textContent?.includes("Hello")]).toEqual([null, true]);
+    await settled(alpha, () => world.ask.heldPages.length > 0 && lines()[0] === "Hello", lines);
+    expect(loadingRows()).toBeNull();
     world.ask.holdPages = false;
     for (const release of world.ask.heldPages.splice(0)) release();
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
