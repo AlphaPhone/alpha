@@ -38,8 +38,10 @@ public final class AlphaClockAlertsPlugin extends Plugin {
             try {
                 var context = getContext();
                 var store = new ClockAlerts(context);
-                var known = Boolean.TRUE.equals(call.getBoolean("ready")) ? call.getArray("known") : null;
-                store.reconcile(alerts, known == null ? new JSONArray() : known);
+                boolean ready = Boolean.TRUE.equals(call.getBoolean("ready"));
+                var known = call.getArray("known");
+                if (!ready && alerts.length() == 0 && (known == null || known.length() == 0)) store.restore(null);
+                else store.reconcile(alerts, ready && known != null ? known : new JSONArray());
                 call.resolve(new JSObject().put("notificationsEnabled", store.notificationsEnabled(alerts)).put("exact", store.exact()));
             } catch (Exception failure) { call.reject("Could not schedule Clock alerts", failure); }
         });
