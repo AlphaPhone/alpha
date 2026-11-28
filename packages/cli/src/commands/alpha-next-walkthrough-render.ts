@@ -87,16 +87,17 @@ function resolveCaptureImage(outDir: string, preferredPaths: readonly string[]):
   return { path: null, source: "Synthetic Placeholder" };
 }
 
-/** Assemble the deterministic 6-chapter Alpha NEXT storyboard from available Android and Web captures. */
+/** Assemble the deterministic 8-chapter Alpha NEXT storyboard from available Android and Web captures. */
 export function buildWalkthroughStoryboard(outDir: string): readonly WalkthroughChapterSpec[] {
   const launcherHome = resolveCaptureImage(outDir, ["captures/android/launcher3-home.png", "captures/web/monolith-home.png"]);
   const launcherDrawer = resolveCaptureImage(outDir, ["captures/android/launcher3-drawer.png", "captures/web/monolith-home.png"]);
+  const androidThinApp = resolveCaptureImage(outDir, ["captures/android/app-notes.png", "captures/android/app-browser.png", "captures/web/app-notes.png"]);
 
   const groupScreens = (group: WalkthroughViewDescriptor["group"]) =>
     WALKTHROUGH_VIEWS.filter((entry) => entry.group === group).map((entry) => {
       const found = resolveCaptureImage(outDir, [
-        `captures/android/app-${entry.id}.png`,
         `captures/web/app-${entry.id}.png`,
+        `captures/android/app-${entry.id}.png`,
       ]);
       return { label: entry.view, source: found.source, imagePath: found.path };
     });
@@ -104,8 +105,8 @@ export function buildWalkthroughStoryboard(outDir: string): readonly Walkthrough
   const overlayBar = resolveCaptureImage(outDir, ["captures/web/overlay-bar.png"]);
   const overlaySheet = resolveCaptureImage(outDir, ["captures/web/overlay-sheet.png", "captures/web/overlay-full.png"]);
   const overlayVoice = resolveCaptureImage(outDir, ["captures/web/overlay-voice.png", "captures/web/overlay-typing.png"]);
-  const notesBackdrop = resolveCaptureImage(outDir, ["captures/android/app-notes.png", "captures/web/app-notes.png"]);
-  const calendarBackdrop = resolveCaptureImage(outDir, ["captures/android/app-calendar.png", "captures/web/app-calendar.png"]);
+  const notesBackdrop = resolveCaptureImage(outDir, ["captures/web/app-notes.png", "captures/android/app-notes.png"]);
+  const calendarBackdrop = resolveCaptureImage(outDir, ["captures/web/app-calendar.png", "captures/android/app-calendar.png"]);
 
   const chromeControl = resolveCaptureImage(outDir, ["captures/android/third-party-browser.png", "captures/web/app-browser.png"]);
   const controlBanner = resolveCaptureImage(outDir, ["captures/web/overlay-control-banner.png"]);
@@ -128,15 +129,16 @@ export function buildWalkthroughStoryboard(outDir: string): readonly Walkthrough
       id: "02-launcher3",
       index: 2,
       eyebrow: "CHAPTER 01 • NATIVE LAUNCHER3",
-      title: "Stock AOSP Launcher3, Themed for Alpha",
-      subtitle: "Runtime Resource Overlay tokens, native third-party app discovery, and live AlphaDay & Search widgets",
+      title: "Stock AOSP Launcher3, Branded for Alpha",
+      subtitle: "All 18 standalone Alpha apps with custom adaptive icons alongside native third-party apps on Android 35",
       durationSec: 8,
       theme: "light",
       kind: "launcher",
-      badges: ["AlphaLauncher3Overlay RRO", "Public Sans + Fraunces", "Native 3rd-Party Apps", "AlphaDay & Search Widgets"],
+      badges: ["AlphaLauncher3Overlay RRO", "18 Adaptive Vector Icons", "Native 3rd-Party Apps", "19 Signed APKs (1 Cert)"],
       screens: [
-        { label: "Home & Widgets", source: launcherHome.source, imagePath: launcherHome.path },
+        { label: "Android 35 Home", source: launcherHome.source, imagePath: launcherHome.path },
         { label: "App Drawer (18+ Apps)", source: launcherDrawer.source, imagePath: launcherDrawer.path },
+        { label: "Standalone Notes APK", source: androidThinApp.source, imagePath: androidThinApp.path },
       ],
     },
     {
@@ -821,8 +823,8 @@ function buildQaContactSheets(
   const viewInputs: string[] = [];
   for (const descriptor of WALKTHROUGH_VIEWS) {
     const found = resolveCaptureImage(outDir, [
-      `captures/android/app-${descriptor.id}.png`,
       `captures/web/app-${descriptor.id}.png`,
+      `captures/android/app-${descriptor.id}.png`,
     ]);
     if (found.path) {
       viewInputs.push("-label", descriptor.view, found.path);

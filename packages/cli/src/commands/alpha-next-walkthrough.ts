@@ -2,6 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import timersPromises from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import type { CliContext, CommandResult } from "../runner.ts";
 import {
   adbShell,
@@ -169,6 +170,55 @@ async function waitForHttpReady(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`Timed out waiting for Vite server at ${url}`);
 }
 
+interface ViteDevServerLike {
+  readonly listen: () => Promise<unknown>;
+  readonly close: () => Promise<void>;
+}
+
+async function startInProcessVite(
+  rootDir: string,
+  port: number,
+): Promise<{ readonly server: ViteDevServerLike; readonly restore: () => void }> {
+  const appDir = path.join(rootDir, "apps/app");
+  const appViteEntry = path.join(appDir, "node_modules/vite/dist/node/index.js");
+  const rootViteEntry = path.join(rootDir, "node_modules/vite/dist/node/index.js");
+  const viteEntry = fs.existsSync(appViteEntry) ? appViteEntry : rootViteEntry;
+  const previousCwd = process.cwd();
+  const previousFakes = process.env.ALPHA_FAKES;
+  process.env.ALPHA_FAKES = "phone";
+  process.chdir(appDir);
+  const restore = () => {
+    process.chdir(previousCwd);
+    if (previousFakes === undefined) {
+      delete process.env.ALPHA_FAKES;
+    } else {
+      process.env.ALPHA_FAKES = previousFakes;
+    }
+  };
+  try {
+    const viteMod = (await import(pathToFileURL(viteEntry).href)) as {
+      readonly createServer: (opts: Record<string, unknown>) => Promise<ViteDevServerLike>;
+    };
+    const server = await viteMod.createServer({
+      root: appDir,
+      configFile: path.join(appDir, "vite.config.ts"),
+      logLevel: "error",
+      server: {
+        host: "127.0.0.1",
+        port,
+        strictPort: true,
+        watch: null,
+        hmr: false,
+      },
+    });
+    await server.listen();
+    return { server, restore };
+  } catch (error: unknown) {
+    restore();
+    throw error;
+  }
+}
+
 async function captureWebViews(
   plan: WalkthroughPlan,
   rootDir: string,
@@ -176,26 +226,10 @@ async function captureWebViews(
   const webDir = path.join(plan.outDir, "captures/web");
   fs.mkdirSync(webDir, { recursive: true });
 
-  let viteProcess: ChildProcess | undefined;
-  let viteLogs = "";
+  let inProcessVite: { readonly server: ViteDevServerLike; readonly restore: () => void } | undefined;
   const baseUrl = plan.url ?? `http://127.0.0.1:${String(DEFAULT_WALKTHROUGH_PORT)}`;
   if (!plan.url) {
-    const appVite = path.join(rootDir, "apps/app/node_modules/.bin/vite");
-    const rootVite = path.join(rootDir, "node_modules/.bin/vite");
-    const viteBin = fs.existsSync(appVite) ? appVite : rootVite;
-    viteProcess = spawn(viteBin, ["--host", "127.0.0.1", "--port", String(DEFAULT_WALKTHROUGH_PORT), "--strictPort"], {
-      cwd: path.join(rootDir, "apps/app"),
-      env: { ...process.env, ALPHA_FAKES: "phone" },
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    viteProcess.unref();
-    viteProcess.stdout?.on("data", (chunk: Buffer) => {
-      viteLogs = `${viteLogs}${chunk.toString("utf8")}`.slice(-4000);
-    });
-    viteProcess.stderr?.on("data", (chunk: Buffer) => {
-      viteLogs = `${viteLogs}${chunk.toString("utf8")}`.slice(-4000);
-    });
+    inProcessVite = await startInProcessVite(rootDir, DEFAULT_WALKTHROUGH_PORT);
     await waitForHttpReady(baseUrl, 90_000);
   }
 
@@ -393,17 +427,11 @@ async function captureWebViews(
       },
     });
     await monolithContext.close();
-  } catch (error: unknown) {
-    const baseMsg = error instanceof Error ? error.message : String(error);
-    throw new Error(viteLogs ? `${baseMsg}\nVite output:\n${viteLogs.slice(-1200)}` : baseMsg, { cause: error });
   } finally {
     await browser.close();
-    if (viteProcess?.pid) {
-      try {
-        process.kill(-viteProcess.pid, "SIGKILL");
-      } catch {
-        viteProcess.kill("SIGKILL");
-      }
+    if (inProcessVite) {
+      await inProcessVite.server.close().catch(() => undefined);
+      inProcessVite.restore();
     }
   }
 
