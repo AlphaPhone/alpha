@@ -469,6 +469,232 @@ function renderFlavorPluginsJava(app: SuiteAppEntry): string {
   ].join("\n");
 }
 
+interface AppIconSpec {
+  readonly strokes: readonly string[];
+  readonly accentFills?: readonly string[];
+}
+
+const APP_ICON_SPECS: Readonly<Record<string, AppIconSpec>> = {
+  phone: {
+    strokes: [
+      "M7,4 L10,4 L11.5,8 L9.5,9.5 C10.6,11.8 12.2,13.4 14.5,14.5 L16,12.5 L20,14 L20,17 C20,18.7 18.7,20 17,20 C10.4,20 4,13.6 4,7 C4,5.3 5.3,4 7,4 Z",
+    ],
+    accentFills: [
+      "M16.5,5.5 A1.5,1.5 0 1,1 16.49,5.5 Z",
+    ],
+  },
+  messages: {
+    strokes: [
+      "M5,5 H19 C20.1,5 21,5.9 21,7 V15 C21,16.1 20.1,17 19,17 H10 L5,20.5 V17 C3.9,17 3,16.1 3,15 V7 C3,5.9 3.9,5 5,5 Z",
+      "M8,10 H16",
+      "M8,13.2 H13",
+    ],
+    accentFills: [
+      "M16.2,13.2 A1.2,1.2 0 1,1 16.19,13.2 Z",
+    ],
+  },
+  contacts: {
+    strokes: [
+      "M12,11 A3.5,3.5 0 1,0 12,4 A3.5,3.5 0 1,0 12,11 Z",
+      "M5,20 C5,16.2 8.1,14 12,14 C15.9,14 19,16.2 19,20",
+    ],
+    accentFills: [
+      "M18.5,6.5 A1.3,1.3 0 1,1 18.49,6.5 Z",
+    ],
+  },
+  browser: {
+    strokes: [
+      "M12,3 A9,9 0 1,0 12,21 A9,9 0 1,0 12,3 Z",
+      "M3.5,12 H20.5",
+      "M12,3 C14.8,5.6 16,8.7 16,12 C16,15.3 14.8,18.4 12,21 C9.2,18.4 8,15.3 8,12 C8,8.7 9.2,5.6 12,3 Z",
+    ],
+    accentFills: [
+      "M12,10.5 A1.5,1.5 0 1,1 11.99,10.5 Z",
+    ],
+  },
+  inbox: {
+    strokes: [
+      "M4,6 H20 C20.6,6 21,6.4 21,7 V17 C21,17.6 20.6,18 20,18 H4 C3.4,18 3,17.6 3,17 V7 C3,6.4 3.4,6 4,6 Z",
+      "M3.5,7.2 L12,13.2 L20.5,7.2",
+    ],
+    accentFills: [
+      "M18,5.8 A1.6,1.6 0 1,1 17.99,5.8 Z",
+    ],
+  },
+  telegram: {
+    strokes: [
+      "M20.5,4.5 L3.5,11.2 L9.8,13.5 L17.5,7.5 L12.2,14.8 L17.8,19.2 L20.5,4.5 Z",
+      "M9.8,13.5 L11.4,18.8 L13.8,16.2",
+    ],
+  },
+  slack: {
+    strokes: [
+      "M9,4.5 V19.5",
+      "M15,4.5 V19.5",
+      "M4.5,9 H19.5",
+      "M4.5,15 H19.5",
+    ],
+    accentFills: [
+      "M15,9 A1.4,1.4 0 1,1 14.99,9 Z",
+    ],
+  },
+  calendar: {
+    strokes: [
+      "M4,6 H20 C20.6,6 21,6.4 21,7 V19 C21,19.6 20.6,20 20,20 H4 C3.4,20 3,19.6 3,19 V7 C3,6.4 3.4,6 4,6 Z",
+      "M3,10.5 H21",
+      "M8,3.5 V7",
+      "M16,3.5 V7",
+    ],
+    accentFills: [
+      "M15.5,15 A1.6,1.6 0 1,1 15.49,15 Z",
+    ],
+  },
+  clock: {
+    strokes: [
+      "M12,3 A9,9 0 1,0 12,21 A9,9 0 1,0 12,3 Z",
+      "M12,7.2 V12 L15.8,14.2",
+    ],
+    accentFills: [
+      "M12,10.6 A1.4,1.4 0 1,1 11.99,10.6 Z",
+    ],
+  },
+  reminders: {
+    strokes: [
+      "M12,3.5 A8.5,8.5 0 1,0 12,20.5 A8.5,8.5 0 1,0 12,3.5 Z",
+      "M8.4,12.2 L11,14.8 L16,9.4",
+    ],
+    accentFills: [
+      "M18.2,5.8 A1.4,1.4 0 1,1 18.19,5.8 Z",
+    ],
+  },
+  camera: {
+    strokes: [
+      "M4,8 H7.2 L8.8,5.5 H15.2 L16.8,8 H20 C20.6,8 21,8.4 21,9 V18 C21,18.6 20.6,19 20,19 H4 C3.4,19 3,18.6 3,18 V9 C3,8.4 3.4,8 4,8 Z",
+      "M12,10 A3.5,3.5 0 1,0 12,17 A3.5,3.5 0 1,0 12,10 Z",
+    ],
+    accentFills: [
+      "M12,12.2 A1.3,1.3 0 1,1 11.99,12.2 Z",
+    ],
+  },
+  photos: {
+    strokes: [
+      "M4,5 H20 C20.6,5 21,5.4 21,6 V18 C21,18.6 20.6,19 20,19 H4 C3.4,19 3,18.6 3,18 V6 C3,5.4 3.4,5 4,5 Z",
+      "M4,16.5 L9.2,11.5 L13.5,15.5 L16.2,13 L20,16.5",
+    ],
+    accentFills: [
+      "M15.8,8.8 A1.6,1.6 0 1,1 15.79,8.8 Z",
+    ],
+  },
+  maps: {
+    strokes: [
+      "M12,21 C12,21 18.5,14.8 18.5,10 C18.5,6.4 15.6,3.5 12,3.5 C8.4,3.5 5.5,6.4 5.5,10 C5.5,14.8 12,21 12,21 Z",
+    ],
+    accentFills: [
+      "M12,8.1 A1.9,1.9 0 1,1 11.99,8.1 Z",
+    ],
+  },
+  notes: {
+    strokes: [
+      "M6,3.5 H14.5 L19,8 V19.5 C19,20.1 18.6,20.5 18,20.5 H6 C5.4,20.5 5,20.1 5,19.5 V4.5 C5,3.9 5.4,3.5 6,3.5 Z",
+      "M14.5,3.5 V8 H19",
+      "M8.5,12 H15.5",
+      "M8.5,15.8 H13.5",
+    ],
+    accentFills: [
+      "M15.6,15.8 A1.2,1.2 0 1,1 15.59,15.8 Z",
+    ],
+  },
+  files: {
+    strokes: [
+      "M3.5,6 C3.5,5.4 3.9,5 4.5,5 H9.5 L11.5,7.5 H19.5 C20.1,7.5 20.5,7.9 20.5,8.5 V18 C20.5,18.6 20.1,19 19.5,19 H4.5 C3.9,19 3.5,18.6 3.5,18 V6 Z",
+      "M3.5,10.5 H20.5",
+    ],
+    accentFills: [
+      "M16.5,14.5 A1.4,1.4 0 1,1 16.49,14.5 Z",
+    ],
+  },
+  workflows: {
+    strokes: [
+      "M13.2,3.2 L5.8,13 H12 L10.8,20.8 L18.2,11 H12 L13.2,3.2 Z",
+    ],
+    accentFills: [
+      "M17.8,5.6 A1.4,1.4 0 1,1 17.79,5.6 Z",
+    ],
+  },
+  wallet: {
+    strokes: [
+      "M4,6.5 H19 C19.8,6.5 20.5,7.2 20.5,8 V17.5 C20.5,18.3 19.8,19 19,19 H5 C4.2,19 3.5,18.3 3.5,17.5 V7 C3.5,5.9 4.4,5 5.5,5 H17.5",
+      "M15.5,11.2 H20.5 V14.8 H15.5 C14.6,14.8 14,14.1 14,13 C14,11.9 14.6,11.2 15.5,11.2 Z",
+    ],
+    accentFills: [
+      "M16.2,13 A1.1,1.1 0 1,1 16.19,13 Z",
+    ],
+  },
+  settings: {
+    strokes: [
+      "M4.5,7.5 H19.5",
+      "M4.5,12 H19.5",
+      "M4.5,16.5 H19.5",
+    ],
+    accentFills: [
+      "M9,5.7 A1.8,1.8 0 1,1 8.99,5.7 Z",
+      "M15.5,10.2 A1.8,1.8 0 1,1 15.49,10.2 Z",
+      "M10.5,14.7 A1.8,1.8 0 1,1 10.49,14.7 Z",
+    ],
+  },
+};
+
+function renderAdaptiveIconXml(): string {
+  return [
+    `<?xml version="1.0" encoding="utf-8"?>`,
+    `<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">`,
+    `    <background android:drawable="@drawable/ic_launcher_background" />`,
+    `    <foreground android:drawable="@drawable/ic_launcher_foreground" />`,
+    `    <monochrome android:drawable="@drawable/ic_launcher_foreground" />`,
+    `</adaptive-icon>`,
+    ``,
+  ].join("\n");
+}
+
+function renderIconBackgroundXml(): string {
+  return [
+    `<?xml version="1.0" encoding="utf-8"?>`,
+    `<vector xmlns:android="http://schemas.android.com/apk/res/android"`,
+    `    android:width="108dp"`,
+    `    android:height="108dp"`,
+    `    android:viewportWidth="108"`,
+    `    android:viewportHeight="108">`,
+    `    <path android:fillColor="#0A0A0E" android:pathData="M0,0 H108 V108 H0 Z" />`,
+    `    <path android:strokeColor="#1F2438" android:strokeWidth="1.2" android:fillColor="#00000000" android:pathData="M24,24 H84 V84 H24 Z" />`,
+    `</vector>`,
+    ``,
+  ].join("\n");
+}
+
+function renderIconForegroundXml(appId: string): string {
+  const spec = APP_ICON_SPECS[appId] ?? APP_ICON_SPECS.notes;
+  const strokeLines = (spec?.strokes ?? []).map(
+    (d) => `        <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="1.85" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="${d}" />`,
+  );
+  const accentLines = (spec?.accentFills ?? []).map(
+    (d) => `        <path android:fillColor="#4B6BFF" android:pathData="${d}" />`,
+  );
+  return [
+    `<?xml version="1.0" encoding="utf-8"?>`,
+    `<vector xmlns:android="http://schemas.android.com/apk/res/android"`,
+    `    android:width="108dp"`,
+    `    android:height="108dp"`,
+    `    android:viewportWidth="108"`,
+    `    android:viewportHeight="108">`,
+    `    <group android:translateX="32" android:translateY="32" android:scaleX="1.8333" android:scaleY="1.8333">`,
+    ...strokeLines,
+    ...accentLines,
+    `    </group>`,
+    `</vector>`,
+    ``,
+  ].join("\n");
+}
+
 function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string {
   const permSet = new Set(app.permissions);
   const permissionLines = [
@@ -499,7 +725,10 @@ function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string
     ...permissionLines,
     ...featureLines,
     ...queryLines,
-    `    <application android:label="${escapeXml(app.label)}">`,
+    `    <application`,
+    `        android:icon="@mipmap/ic_launcher"`,
+    `        android:roundIcon="@mipmap/ic_launcher_round"`,
+    `        android:label="${escapeXml(app.label)}">`,
     `        <activity`,
     `            android:name="ai.alphacompute.thinapp.ThinAppActivity"`,
     `            android:label="${escapeXml(app.label)}"`,
@@ -561,14 +790,15 @@ function renderFlavorsGradle(registry: SuiteRegistry): string {
       `file('../generated/flavors/${app.id}/java')`,
       ...(profile?.sourceDirs ?? []).map((dir) => `file('${dir}')`),
     ];
-    const resLines = (profile?.resDirs ?? []).length > 0
-      ? [`            res.srcDirs += [${(profile?.resDirs ?? []).map((dir) => `file('${dir}')`).join(", ")}]`]
-      : [];
+    const resDirs = [
+      `file('../generated/flavors/${app.id}/res')`,
+      ...(profile?.resDirs ?? []).map((dir) => `file('${dir}')`),
+    ];
     return [
       `        ${app.id} {`,
       `            manifest.srcFile file('../generated/flavors/${app.id}/AndroidManifest.xml')`,
       `            java.srcDirs += [${javaDirs.join(", ")}]`,
-      ...resLines,
+      `            res.srcDirs += [${resDirs.join(", ")}]`,
       `            assets.srcDirs += [file('src/${app.id}/assets')]`,
       `        }`,
     ].join("\n");
@@ -612,6 +842,10 @@ export function buildSuiteOutputs(registry: SuiteRegistry, registryRaw: string):
     if (app.surface !== "app") continue;
     push(`flavors/${app.id}/AndroidManifest.xml`, renderThinManifest(registry, app));
     push(`flavors/${app.id}/java/ai/alphacompute/thinapp/FlavorPlugins.java`, renderFlavorPluginsJava(app));
+    push(`flavors/${app.id}/res/mipmap-anydpi-v26/ic_launcher.xml`, renderAdaptiveIconXml());
+    push(`flavors/${app.id}/res/mipmap-anydpi-v26/ic_launcher_round.xml`, renderAdaptiveIconXml());
+    push(`flavors/${app.id}/res/drawable/ic_launcher_background.xml`, renderIconBackgroundXml());
+    push(`flavors/${app.id}/res/drawable/ic_launcher_foreground.xml`, renderIconForegroundXml(app.id));
   }
 
   push("suite-flavors.gradle", renderFlavorsGradle(registry));
