@@ -13,7 +13,7 @@ import { type MessagingFailure, MessagingSessions } from "../platform/index.vibe
 import { Unreachable, Unsent } from "../platform/index.vibe"
 import { Slack } from "../platform/index.vibe"
 import { Telegram } from "../platform/index.vibe"
-import { contained, started, together } from "../runtime/index.vibe"
+import { attemptKey, contained, started, together } from "../runtime/index.vibe"
 import { SlackLedger, handleSlackFailure, withWorkspaceToken } from "../slack/ledger.vibe"
 import { slackAmbientSnapshot, slackHomeCard } from "../slack/resident.vibe"
 import { reportSessionRevoked } from "../telegram/auth.vibe"
@@ -346,14 +346,11 @@ const messagingHandlers = started(effect {
     if (meta === undefined || !(try slackAuth.get()).connected.some((item) => item.workspace === meta.num)) {
       return { status: "failed" as const, error: "Connect a Slack workspace first" }
     }
+    const key = try attemptKey(`alpha-card-${draft.id}-r${draft.revision}`)
     const res = withWorkspaceToken(meta.num, (token) => slack.postMessage(
       token,
-      {
-        channel: draft.targetId,
-        text: draft.body,
-        ...(draft.threadTs ? { thread_ts: draft.threadTs } : {}),
-      },
-      `alpha-card-${draft.id}-r${draft.revision}`,
+      { channel: draft.targetId, text: draft.body, threadTs: draft.threadTs },
+      key,
     )).pipe(Effect.provideService(Slack, slack), Effect.provideService(SlackLedger, slackLedger), Effect.provideService(MessagingSessions, sessions)) catch (failure) => ({ failed: failure })
     if (res === undefined) return { status: "failed" as const, error: "Reconnect your Slack workspace" }
     if ("failed" in res) {

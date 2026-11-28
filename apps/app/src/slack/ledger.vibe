@@ -280,7 +280,7 @@ function buildMessageOps(core: LedgerCore) {
         bucket.threadMessages.set(key, mergeMessages(bucket.threadMessages.get(key) ?? [], [message]))
         if (ownerId && message.user === ownerId) bucket.participatedThreads.add(key)
         const existingChannel = bucket.channelMessages.get(channelId) ?? []
-        const updatedChannel = existingChannel.map((item) => (item.ts === threadStr
+        const updatedChannel = existingChannel.map((item) => (item.ts === threadStr && (!item.latest_reply || compareSlackTs(message.ts, item.latest_reply) > 0)
           ? { ...item, reply_count: (item.reply_count ?? 0) + 1, latest_reply: message.ts }
           : item))
         bucket.channelMessages.set(channelId, message.reply_broadcast ? mergeMessages(updatedChannel, [message]) : updatedChannel)

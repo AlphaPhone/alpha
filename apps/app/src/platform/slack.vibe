@@ -529,10 +529,10 @@ export function slackAt(base: string, registrationBase = base, transport: "nativ
   return Layer.effect(Slack, effect {
     const wired = try remoteAt(base)
     const registration = try remoteAt(registrationBase)
-    const browserMethod = (path: string, fields: SlackFields, token: string, clientMessageId?: string) =>
-      formPost(path, { ...fields, client_msg_id: clientMessageId, token })
+    const browserMethod = (path: string, fields: SlackFields, token: string) => formPost(path, { ...fields, token })
     const get = transport === "browser" ? browserMethod : queryGet
-    const post = transport === "browser" ? browserMethod : jsonPost
+    const post = (path: string, fields: SlackFields, token: string, key?: string) =>
+      transport === "browser" ? browserMethod(path, fields, token) : jsonPost(path, fields, token, key)
     const oauth = <A>(brokered: boolean | undefined, fields: Readonly<Record<string, string | undefined>>, response: Schema.Decoder<A>) => callSlack(
       brokered ? registration : wired, formPost(brokered ? "/api/slack/oauth" : "/api/oauth.v2.access", fields), response,
     )
@@ -626,6 +626,7 @@ export function slackAt(base: string, registrationBase = base, transport: "nativ
           text: req.text,
           thread_ts: req.threadTs,
           reply_broadcast: req.replyBroadcast,
+          client_msg_id: idempotencyKey,
         }, t, idempotencyKey),
         SlackPostMessageResponse,
       ),

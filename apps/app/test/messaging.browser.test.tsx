@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { FetchHttpClient } from "effect/http";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { commands, page } from "vitest/browser";
@@ -236,23 +236,42 @@ describe("Messaging E2E", () => {
     await page.getByText("general", { exact: true }).click();
     await until(alpha, alpha.runtime, SlackConversation.Machine, (s) => s.channel > 0 && s.channelRead.status === "Loaded");
 
-    await sendStagedDraft(alpha, {
+    const draftText = "Alpha Chromium Slack draft & + = 👋";
+    const threadTs = "1730000100.000100";
+    const slackDraft: MessagingDraftProposal = {
       id: "sl-browser-draft-1",
       platform: "Slack",
       target: "Alpha Team · #general",
       targetId: "C01GENERAL",
       workspaceId: "T01ALPHA",
-      body: "Alpha Chromium Slack draft & + = 👋",
+      threadTs,
+      body: draftText,
       revision: 1,
       status: "draft",
-    });
+    };
+    await sendStagedDraft(alpha, slackDraft);
+    await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goBack" })));
+    await sendStagedDraft(alpha, slackDraft);
 
     expect(new URL(slackOrigin).origin).not.toBe(location.origin);
     const slackPosts = await controlJson(slackOrigin, "/__control/requests?path=/api/chat.postMessage");
-    expect(slackPosts.requests).toEqual(expect.arrayContaining([expect.objectContaining({
-      method: "POST", query: {}, body: expect.objectContaining({ text: "Alpha Chromium Slack draft & + = 👋", client_msg_id: expect.any(String) }),
-    })]));
+    const posts = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+      method: Schema.String, query: Schema.Record(Schema.String, Schema.String),
+      body: Schema.Struct({ channel: Schema.String, text: Schema.String, thread_ts: Schema.String, client_msg_id: Schema.String.check(Schema.isUUID(5)) }),
+    })))(slackPosts.requests);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(posts[0]?.query).toEqual({});
+    expect(posts[0]).toMatchObject({ method: "POST", body: { channel: "C01GENERAL", text: draftText, thread_ts: threadTs } });
 
+    await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goHome" })));
+    await page.getByRole("button", { name: /^Slack/ }).first().click();
+    await expect.element(page.getByRole("button", { name: "Back to conversations" })).toBeVisible();
+    await page.getByRole("article", { name: /^Maya Chen at / }).filter({ has: page.getByText("Sprint review kicks off at 2pm today.", { exact: true }) }).getByRole("button", { name: /3 replies/ }).click();
+    await expect.element(page.getByText("Sprint review kicks off at 2pm today.", { exact: true })).toBeVisible();
+    const sentDraft = page.getByRole("article", { name: /^Alex Rivera at / }).getByText(draftText, { exact: true });
+    await expect.element(sentDraft).toBeVisible();
+    expect(page.getByRole("article").getByText(draftText, { exact: true }).elements()).toHaveLength(1);
     await alpha.runtime.runPromise(Effect.flatMap(Shell.Machine, (m) => m.send({ type: "goHome" })));
     await until(alpha, alpha.runtime, SlackNotices.Machine, (s) => (s.watermarks[alphaWs] ?? 0) > 0 && (s.watermarks[designWs] ?? 0) > 0);
     await controlJson(slackOrigin, "/__control/inject", {
