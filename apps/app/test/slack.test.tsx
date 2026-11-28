@@ -6,7 +6,7 @@ import { FetchHttpClient } from "effect/http";
 import type * as KeyValueStore from "effect/persistence/KeyValueStore";
 import { act } from "react";
 import { type Root, createRoot } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as Preferences from "../gen/app__settings__preferences.effect.vibe";
 import { Machine as WorkspacesMachine, attention } from "../gen/app__slack.effect.vibe";
 import { Machine as AgentMachine } from "../gen/app__slack__agent.effect.vibe";
@@ -16,12 +16,16 @@ import { Machine as ConversationMachine } from "../gen/app__slack__conversation.
 import { Machine as NoticesMachine } from "../gen/app__slack__notices.effect.vibe";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
-import { MessagingSessions, messagingSessions } from "../src/platform/messaging.vibe";
-import { pagePlatform } from "../src/platform/platform.vibe";
-import { type Slack, assertSlackUserToken, slackAt } from "../src/platform/slack.vibe";
+import { MessagingSessions, messagingSessions, tokenValue } from "../src/platform/messaging.vibe";
+import { slackAt } from "../src/platform/slack.vibe";
+import { slackPhone } from "./fakes/messaging.ts";
+import { plugIn } from "./fakes/phone.ts";
+import { plugins } from "./fakes/plugins.ts";
+import { scene, services, type Scene } from "./fakes/scene.ts";
+import { pagePlatform, phonePlatform } from "../src/platform/platform.vibe";
+import { type Slack, assertSlackUserToken } from "../src/platform/slack.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 import { SlackScreen } from "../src/slack/Slack.tsx";
-import { completeSlackOAuthCallback, submitSlackTokenAttempt } from "../src/slack/auth.vibe";
 import { type PendingOAuth, SlackLedger, slackSessionKey } from "../src/slack/ledger.vibe";
 import { executeSlackAgentRequest, slackAmbientSnapshot, slackBack, slackHomeCard, slackResident } from "../src/slack/resident.vibe";
 
@@ -55,9 +59,10 @@ async function underAct(work: () => Promise<void> | void): Promise<void> {
   });
 }
 
-async function mountSlack(origin: string): Promise<MountedSlack> {
+async function mountSlack(origin: string, phone?: Scene, options?: Parameters<typeof slackPhone>[1]): Promise<MountedSlack> {
+  const unplug = phone && plugIn({ ...plugins(phone, services(phone)), ...slackPhone(origin, options) });
   const slackLayer = Layer.provide(slackAt(origin), FetchHttpClient.layer);
-  const platform = pagePlatform(
+  const platform = phone ? phonePlatform() : pagePlatform(
     Layer.provide(agentAt(origin), FetchHttpClient.layer),
     Layer.provide(cloudAt(origin), FetchHttpClient.layer),
     { slack: slackLayer, sessions: messagingSessions },
@@ -79,6 +84,9 @@ async function mountSlack(origin: string): Promise<MountedSlack> {
       });
       host.remove();
       await runtime.dispose();
+      unplug?.();
+      const index = mounted.indexOf(handle);
+      if (index >= 0) mounted.splice(index, 1);
     },
   };
   mounted.push(handle);
@@ -147,7 +155,7 @@ const muteChannel = (app: MountedSlack, channel: number) => underAct(async () =>
   await app.runtime.runPromise(Effect.flatMap(WorkspacesMachine, (m) => m.send({ type: "toggleMute", channel, muted: true })));
 });
 
-async function connectWorkspaceViaPkce(app: MountedSlack, teamId: string): Promise<number> {
+async function returnWorkspaceConsent(app: MountedSlack, teamId: string): Promise<void> {
   await underAct(async () => {
     await app.runtime.runPromise(Effect.flatMap(SlackLedger, (ledger) => Effect.sync(() => ledger.setPendingTeam(teamId))));
     await app.runtime.runPromise(Effect.flatMap(AuthMachine, (m) => m.send({ type: "startConnect" })));
@@ -175,9 +183,15 @@ async function connectWorkspaceViaPkce(app: MountedSlack, teamId: string): Promi
   expect(code).not.toBe("");
   expect(state).toBe(pending.state);
 
-  await underAct(async () => {
-    await app.runtime.runPromise(completeSlackOAuthCallback(state, code));
+  await underAct(() => {
+    const channel = new BroadcastChannel("alpha-slack-oauth");
+    channel.postMessage({ state, code, error: "" });
+    channel.close();
   });
+}
+
+async function connectWorkspaceViaPkce(app: MountedSlack, teamId: string): Promise<number> {
+  await returnWorkspaceConsent(app, teamId);
   const authAfter = await waitFor(
     app.runtime,
     Effect.map(AuthMachine, (m) => m.changes),
@@ -224,7 +238,7 @@ afterAll(async () => {
   await provider.stop();
 });
 
-describe("Slack user-account client over live HTTP+SSE provider", () => {
+describe("Slack user-account client over live HTTP provider", () => {
   // spec/app/slack/auth.md, "Adding a workspace presents scope consent first, then opens PKCE OAuth with a fresh state nonce"; spec/app/slack/auth.md, "OAuth callback verifies the state nonce and exchanges the secret code and PKCE verifier; only user tokens (`UserToken`) are admitted"; spec/app/slack/auth.md, "Bot tokens are never admitted into connected workspaces, and per-workspace sign-out preserves all other workspaces"
   it("completes scope consent and real PKCE OAuth2 user flow for two workspaces and strictly rejects bot tokens", async () => {
     const app = await mountSlack(provider.origin);
@@ -246,14 +260,72 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
     const botScopeRes = await fetch(`${provider.origin}/oauth/v2/authorize?client_id=alpha&scope=chat:write&redirect_uri=alphaphone://cb&state=s1`);
     expect(botScopeRes.status).toBe(400);
 
-    await underAct(async () => {
-      const admitted = await app.runtime.runPromise(submitSlackTokenAttempt("xoxb-disallowed-bot-token"));
-      expect(admitted).toBe(false);
-    });
-    const authAfterBot = await app.runtime.runPromise(Effect.flatMap(AuthMachine, (m) => m.get()));
+    await controlPost("/__control/fault", { path: "/api/slack/oauth", status: 200, remaining: 1, body: {
+      ok: true, app_id: "A1", team: { id: "T01ALPHA", name: "Alpha" },
+      authed_user: { id: "U1", scope: "chat:write", token_type: "bot", access_token: "xoxb-disallowed-bot-token" },
+    } });
+    await returnWorkspaceConsent(app, "T01ALPHA");
+    const authAfterBot = await waitFor(app.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.step === "Idle" && s.trouble === "BotTokenRejected");
     expect(authAfterBot.trouble).toBe("BotTokenRejected");
     expect(authAfterBot.connected.length).toBe(2);
     expect(authAfterBot.connected.every((w) => w.tokenKind === "UserToken")).toBe(true);
+  });
+
+  it('links a workspace through the phone browser, renews its grant and reads a channel (spec/app/slack/auth.md, "Story: Connect and manage my Slack workspaces with user tokens only")', async () => {
+    const phone = { ...scene(), phone: true };
+    const app = await mountSlack(provider.origin, phone, { initialExpirySeconds: 1 });
+    await underAct(() => findButton(app.host, "Connect workspace").click());
+    await underAct(() => findButton(app.host, "Approve & connect").click());
+    const workspace = await waitFor(app.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    const key = slackSessionKey("T01ALPHA");
+    const general = await channelNum(app, workspace.selected.workspace, "C01GENERAL");
+    await controlPost("/__control/fault", { path: "/api/conversations.history", status: 200, remaining: 1, body: {
+      ok: true, messages: [{ type: "message", subtype: "bot_message", bot_id: "B1", username: "Release bot", ts: "1730000123.100000", text: "Release passed" }],
+    } });
+    await composeIn(app, workspace.selected.workspace, general);
+    const after = await app.runtime.runPromise(MessagingSessions.use((s) => s.get(key)));
+    if (Option.isNone(after)) throw new Error("No renewed Slack user");
+    const grants = (await controlRequests("/api/slack/oauth")).map((request) => request.body);
+    expect(grants).toHaveLength(2);
+    expect(grants[0]).toHaveProperty("code_verifier");
+    expect(grants[1]).toMatchObject({ grant_type: "refresh_token" });
+    expect(after.value.workspace?.teamId).toBe("T01ALPHA");
+    expect(app.host.textContent).toContain("Release bot");
+    expect(app.host.textContent).toContain("Release passed");
+    expect(app.host.textContent).toContain("general");
+    const ownerOrganization = phone.voice.organizationId;
+    phone.voice.organizationId = "different-live-org";
+    await underAct(() => phone.voice.signedInHere?.());
+    await waitFor(app.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.connected.length === 0);
+    await vi.waitFor(() => expect(app.host.textContent).not.toContain("general"));
+    phone.voice.organizationId = ownerOrganization;
+    await underAct(() => phone.voice.signedInHere?.());
+    await waitFor(app.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded" && s.selected.workspace !== workspace.selected.workspace);
+    await app.close();
+
+    phone.voice.organizationId = "other-owner-org";
+    const other = await mountSlack(provider.origin, phone);
+    expect(await other.runtime.runPromise(MessagingSessions.use((s) => s.keys()))).toEqual([]);
+    expect((await other.runtime.runPromise(AuthMachine.use((m) => m.get()))).connected).toEqual([]);
+    await other.close();
+
+    phone.voice.organizationId = ownerOrganization;
+    const reopened = await mountSlack(provider.origin, phone);
+    const restored = await waitFor(reopened.runtime, WorkspacesMachine.use((m) => Effect.succeed(m.changes)), (s) => s.list.status === "Loaded");
+    expect(restored.selected.workspace).toBeGreaterThan(0);
+    const reopenedSecret = await reopened.runtime.runPromise(MessagingSessions.use((s) => s.get(key)));
+    expect(Option.map(reopenedSecret, tokenValue)).toEqual(Option.some(tokenValue(after.value)));
+    expect(reopened.host.textContent).toContain("general");
+    await reopened.close();
+
+    phone.voice.organizationId = "pending-owner";
+    const switched = await mountSlack(provider.origin, phone, { beforeReturn: () => { phone.voice.organizationId = "other-owner-org"; } });
+    await underAct(() => findButton(switched.host, "Connect workspace").click());
+    await underAct(() => findButton(switched.host, "Approve & connect").click());
+    const refused = await waitFor(switched.runtime, AuthMachine.use((m) => Effect.succeed(m.changes)), (s) => s.step === "Idle" && s.trouble === "ExchangeFailed");
+    expect(refused.connected).toEqual([]);
+    expect(await switched.runtime.runPromise(MessagingSessions.use((s) => s.keys()))).toEqual([]);
+    expect((await controlRequests("/api/slack/oauth")).length).toBe(grants.length);
   });
 
   // spec/app/slack/index.md, "Switching workspace, choosing a section, searching or refreshing reads the first page under a new ticket"; spec/app/slack/conversation.md, "Opening a channel reads its newest history; opening a thread drawer pins its parent and reads thread replies independently"; spec/app/slack/conversation.md, "Edit, reviewed delete and emoji reactions execute one attempt at a time with honest outcomes"; spec/app/slack/composer.md, "Only the owner's tap sends; Unknown outcomes reconcile via read-back only"
@@ -366,11 +438,11 @@ describe("Slack user-account client over live HTTP+SSE provider", () => {
 
     await muteChannel(app, engNum);
     await waitFor(app.runtime, Effect.map(WorkspacesMachine, (m) => m.changes), (s) => s.mutedChannels.includes(engNum));
-    expect((await controlRequests("/api/conversations.setMute")).length).toBe(1);
+    expect(findButton(app.host, "Unmute Alpha notifications")).toBeDefined();
   });
 
   // spec/app/slack/agent.md, "Ambient context is emitted ONLY for a connected workspace when non-sensitive and allowed by `SlackContext`, bounded to 15 messages and 6000 characters, with zero secrets"; spec/app/slack/agent.md, "Workspace-scoped direct reads and staged drafts never mutate state or send"; spec/app/slack/notices.md, "Own, muted and currently visible front target messages are suppressed; DMs, channel mentions and participated thread replies trigger"
-  it("gates Ask Alpha ambient context, stages drafts without sending, handles 429 Retry-After, and streams live SSE notices with mute suppression", async () => {
+  it("gates Ask Alpha ambient context, stages drafts without sending, handles 429 Retry-After, and reads live notices with mute suppression", async () => {
     const app = await mountSlack(provider.origin);
     expect(await app.runtime.runPromise(slackAmbientSnapshot)).toBeUndefined();
 

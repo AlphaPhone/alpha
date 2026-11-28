@@ -9,10 +9,12 @@ import {
   Forbidden,
   MessagingSessions,
   RateLimited,
+  refreshTokenValue,
+  secretOf,
   tokenValue,
 } from "../platform/index.vibe"
 import { Unreachable } from "../platform/index.vibe"
-import { type SlackChannelSummary, type SlackClient, type SlackMessage, type SlackSearchMatch, type SlackUser, Slack } from "../platform/index.vibe"
+import { type SlackChannelSummary, type SlackClient, type SlackMessage, type SlackSearchMatch, type SlackUser, Slack, assertSlackUserToken } from "../platform/index.vibe"
 import { contained } from "../runtime/index.vibe"
 
 /** Metadata for one connected Slack workspace (strictly free of tokens, codes, or PKCE verifiers). */
@@ -23,14 +25,22 @@ export interface WorkspaceMeta {
   readonly ownerUserId: string
   readonly ownerUserNum: number
   readonly credentialRev: number
+  readonly owner: string
+  readonly clientId?: string
+  readonly brokered?: boolean
+  readonly expiresAt?: number
 }
 
 /** Ephemeral in-flight PKCE OAuth state kept strictly in memory until exchange or cancel. */
 export interface PendingOAuth {
   readonly nonce: number
+  readonly owner: string
   readonly state: string
   readonly verifier: string
+  readonly brokered: boolean
   readonly authorizeUrl: string
+  readonly redirectUri: string
+  readonly clientId: string
   readonly team?: string
 }
 
@@ -68,7 +78,6 @@ interface WorkspaceBucket {
   readonly threadMessages: Map<string, SlackMessage[]>
   readonly channelNums: Map<string, number>
   readonly channelIds: Map<number, string>
-  nextChannelNum: number
   readonly tsNums: Map<string, number>
   readonly tsStrs: Map<string, string>
   nextTsNum: number
@@ -84,6 +93,7 @@ interface WorkspaceBucket {
   readonly notices: Map<string, SlackNoticeRecord>
   readonly participatedThreads: Set<string>
   watermarkPoint: number
+  readonly rotate: Semaphore.Semaphore
 }
 
 interface LedgerCore {
@@ -105,7 +115,6 @@ function createBucket(): WorkspaceBucket {
     threadMessages: new Map(),
     channelNums: new Map(),
     channelIds: new Map(),
-    nextChannelNum: 1,
     tsNums: new Map(),
     tsStrs: new Map(),
     nextTsNum: 1,
@@ -121,6 +130,7 @@ function createBucket(): WorkspaceBucket {
     notices: new Map(),
     participatedThreads: new Set(),
     watermarkPoint: 0,
+    rotate: Semaphore.makeUnsafe(1),
   }
 }
 
@@ -146,7 +156,12 @@ export function convKindOf(channel: SlackChannelSummary): ConvKind {
 export function userNameOf(users: ReadonlyMap<string, SlackUser>, userId: string): string {
   const user = users.get(userId)
   if (!user) return userId
-  return user.real_name || user.display_name || user.name || userId
+  return user.profile?.display_name || user.real_name || user.profile?.real_name || user.name || userId
+}
+
+/** Slack integrations may send a message without a corresponding user. */
+export function messageSenderName(users: ReadonlyMap<string, SlackUser>, message: SlackMessage): string {
+  return message.user ? userNameOf(users, message.user) : message.username || message.bot_id || "Slack"
 }
 
 /** Resolve a Slack conversation's display label (DM counterpart name or channel name). */
@@ -157,13 +172,13 @@ export function channelTitleOf(
 ): string {
   if (channel.is_im) {
     const peerId = channel.user ?? channel.members?.find((id) => id !== ownerUserId)
-    return peerId ? userNameOf(users, peerId) : channel.name
+    return peerId ? userNameOf(users, peerId) : channel.name ?? channel.id
   }
   if (channel.is_mpim && channel.members && channel.members.length > 0) {
     const others = channel.members.filter((id) => id !== ownerUserId).map((id) => userNameOf(users, id))
     if (others.length > 0) return others.join(", ")
   }
-  return channel.name
+  return channel.name ?? channel.id
 }
 
 /** Format a Slack epoch timestamp string (`"1730000100.000100"`) into HH:MM for display. */
@@ -323,7 +338,7 @@ function buildConversationOps(core: LedgerCore) {
       const ids: string[] = append ? [...bucket.listOrder] : []
       for (const ch of channels) {
         core.channelNum(workspace, ch.id)
-        bucket.channels.set(ch.id, ch)
+        bucket.channels.set(ch.id, { ...ch, is_muted: bucket.channels.get(ch.id)?.is_muted ?? false })
         if (!ids.includes(ch.id)) ids.push(ch.id)
       }
       bucket.listOrder = ids
@@ -453,10 +468,12 @@ export type SlackLedgerStore = ReturnType<typeof createSlackLedger>
 function createSlackLedger() {
   let version = 0
   const listeners = new Set<() => void>()
+  let boundOwner: string | undefined
   let oauth: PendingOAuth | undefined
   let nextTeamHint: string | undefined
   let rateNotice: string | undefined
   let nextWorkspaceNum = 1
+  let nextChannelNum = 1
   const teamToNum = new Map<string, number>()
   const metas = new Map<number, WorkspaceMeta>()
   const buckets = new Map<number, WorkspaceBucket>()
@@ -482,7 +499,7 @@ function createSlackLedger() {
     const bucket = bucketOf(workspace)
     const known = bucket.channelNums.get(channelId)
     if (known !== undefined) return known
-    const assigned = bucket.nextChannelNum++
+    const assigned = nextChannelNum++
     bucket.channelNums.set(channelId, assigned)
     bucket.channelIds.set(assigned, channelId)
     return assigned
@@ -512,6 +529,21 @@ function createSlackLedger() {
       return () => { listeners.delete(listener) }
     },
     notify,
+    owner: () => boundOwner,
+    bindOwner(owner: string | undefined) {
+      if (owner === boundOwner) return
+      boundOwner = owner
+      oauth = undefined
+      nextTeamHint = undefined
+      rateNotice = undefined
+      pendingMutation = undefined
+      agentResults.clear()
+      sendPayloads.clear()
+      buckets.clear()
+      metas.clear()
+      teamToNum.clear()
+      notify()
+    },
     pendingTeam: () => nextTeamHint,
     setPendingTeam(team: string | undefined) {
       nextTeamHint = team
@@ -527,7 +559,7 @@ function createSlackLedger() {
       rateNotice = message
       notify()
     },
-    registerWorkspace(teamId: string, name: string, ownerUserId: string): WorkspaceMeta {
+    registerWorkspace(teamId: string, name: string, ownerUserId: string, grant: Pick<WorkspaceMeta, "owner" | "clientId" | "expiresAt" | "brokered">): WorkspaceMeta {
       const num = teamToNum.get(teamId) ?? nextWorkspaceNum++
       teamToNum.set(teamId, num)
       const bucket = bucketOf(num)
@@ -537,7 +569,7 @@ function createSlackLedger() {
         return assigned
       })()
       const prev = metas.get(num)
-      const meta: WorkspaceMeta = { num, teamId, name, ownerUserId, ownerUserNum, credentialRev: prev?.credentialRev ?? 0 }
+      const meta: WorkspaceMeta = { num, teamId, name, ownerUserId, ownerUserNum, credentialRev: prev?.credentialRev ?? 0, ...grant }
       metas.set(num, meta)
       notify()
       return meta
@@ -549,6 +581,7 @@ function createSlackLedger() {
       notify()
     },
     workspaceMeta: (workspace: number) => metas.get(workspace),
+    grantLock: (workspace: number) => bucketOf(workspace).rotate,
     workspaceByTeamId(teamId: string) {
       const num = teamToNum.get(teamId)
       return num === undefined ? undefined : metas.get(num)
@@ -608,14 +641,28 @@ export service SlackLedger: SlackLedgerStore {}
 /** Layer providing the in-memory non-secret `SlackLedger` service. */
 export const slackLedger = Layer.sync(SlackLedger, createSlackLedger)
 
-/** Retrieve the raw `xoxp-` user token for `workspace` from isolated `MessagingSessions` at the outbound HTTP boundary. */
-export effect function tokenForWorkspace(workspace: number): (string | undefined)!!(SlackLedger | MessagingSessions) {
+/** Get a valid user grant, serializing the single-use refresh token per workspace and refusing a superseded grant. */
+export effect function tokenForWorkspace(workspace: number, expired?: string): (string | undefined)!MessagingFailure!(Slack | SlackLedger | MessagingSessions) {
   const ledger = try SlackLedger
   const sessions = try MessagingSessions
+  const slack = try Slack
   const meta = ledger.workspaceMeta(workspace)
   if (!meta) return undefined
-  const secret = try sessions.get(slackSessionKey(meta.teamId))
-  return Option.isSome(secret) ? tokenValue(secret.value) : undefined
+  const key = slackSessionKey(meta.teamId)
+  return try ledger.grantLock(workspace).withPermits(1)(effect {
+    const found = try sessions.get(key, meta.owner)
+    if (Option.isNone(found)) return undefined
+    const secret = found.value
+    const token = tokenValue(secret)
+    const now = try Clock.currentTimeMillis
+    if (expired !== token && (secret.expiresAt === undefined || secret.expiresAt > now + 60_000)) return token
+    const refreshToken = refreshTokenValue(secret)
+    if (!refreshToken || !secret.clientId) throw new AuthRevoked({ provider: "slack", code: "token_expired" })
+    const reply = try slack.refreshToken({ refreshToken, clientId: secret.clientId, brokered: secret.workspace?.brokered === true })
+    const next = try assertSlackUserToken(reply.access_token)
+    const replacement = { ...secret, ...secretOf(next, reply.refresh_token, now + reply.expires_in * 1000) }
+    return (try sessions.rotate(key, token, replacement, meta.owner)) ? next : undefined
+  })
 }
 
 /** Handle a typed Slack HTTP/SSE failure: propagate `AuthRevoked` to `Auth.Machine` for that workspace only, and surface `RateLimited`. */
@@ -650,7 +697,8 @@ export effect function runWorkspaceCall<A>(
 ): SlackCallResult<A>!!(Slack | SlackLedger | MessagingSessions | Auth.Machine) {
   const slack = try Slack
   const ledger = try SlackLedger
-  const token = try tokenForWorkspace(workspace)
+  const token = tokenForWorkspace(workspace) catch (failure) => failure
+  if (token !== undefined && typeof token !== "string") return { ok: false, failure: try handleSlackFailure(workspace, token), known: true }
   if (token === undefined) return { ok: false, failure: "Revoked", known: true }
   const outcome = effect {
     const value = try invoke(slack, token, ledger)

@@ -128,6 +128,12 @@ pure def sometimesReviewedBesideAWaitingOne(s: Deletions): bool = s.asked != 0 a
 
 ### Confirming the review holds the deletion; a deletion still waiting is sent first, so the only Undo shown is the newest
 
+The phone's calendar reviews a deletion of one of its events as the owner
+confirms it, while Calendar is still in front, since it reviews nothing
+while Alpha is out of sight or the phone is locked. When the deletion is
+sent, after its Undo window or once the owner leaves, it is the one the
+phone reviewed, and the phone still refuses it if the event changed since.
+
 ```quint
 pure def canConfirm(s: Deletions, now: int): bool = s.asked != 0 and s.sending == 0 and not(s.paused)
 

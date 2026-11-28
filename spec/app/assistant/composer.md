@@ -16,6 +16,12 @@ in [attachments](./attachments.md).
 > fails tried again without a word by the field: told in the conversation
 > only when it stays broken, with a way to try again.
 
+A card about the draft is drawn in the conversation, never by the field.
+When one is due while Ask Alpha rests at the bar or is being typed in, Ask
+Alpha rises once to a sheet so the card is seen: never again for the same
+card, and never over Phone, Messages or Contacts, whose own bar stands in
+for Ask Alpha there.
+
 ### The composer holds the slot it is bound to, the draft, the editor, the send in hand, and the message moved from a new conversation
 
 A slot belongs to one owner and one conversation; conversation 0 is a new
@@ -201,15 +207,20 @@ pure def canSave(c: Composer): bool = c.slot == Open and c.away == Free and not(
 pure def save(c: Composer): Moved = written(false, c)
 ```
 
-### A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept
+### A write that lands clears any sending mark, and one that finds another revision stops until both texts are kept or the message it marks is checked
 
 A write that fails keeps the edits unsaved, to be written again. A
 message whose mark could not be written goes back into the composer: it
 was never asked. The first write that lands in a new conversation's slot
-lets the slot the message came from be cleared.
+lets the slot the message came from be cleared. A write that finds a
+revision another Alpha marked as sending, such as a second window sending
+from the same conversation, puts that message under review as a slot read
+does, never into the editor: the editor keeps only the owner's own text.
+So does the first write of a message moved from a new conversation, whose
+old slot then keeps its copy, never cleared.
 
 ```quint
-type Wrote = Landed | Collided | Lost
+type Wrote = Landed | Collided | Marked | Lost
 
 pure def givenBack(held: Message, c: Composer): Composer =
   { ...c, away: Free, editor: { ...held, text: held.text or c.editor.text }, held: blankMessage }
@@ -219,9 +230,11 @@ pure def canWrote(c: Composer, ticket: int, revision: int): bool = D::canLand(c.
 pure def wrote(c: Composer, ticket: int, result: Wrote, revision: int): Moved =
   val landed = { ...c, draft: D::land(c.draft) }
   val clear = A::dispatch(A::record(A::plan(c.clear.id + 1)))
+  val review = result == Marked and c.slot == Open
   val stopped =
-    if (result == Collided) { ...c, draft: D::collide(c.draft, revision) }
-    else { ...c, draft: D::interrupt(c.draft), failing: true }
+    if (result == Lost) { ...c, draft: D::interrupt(c.draft), failing: true }
+    else { ...c, draft: D::collide(c.draft, revision), unsettled: c.unsettled or review, marked: c.marked or review,
+      source: if (review) 0 else c.source }
   if (result == Landed and c.away == Marking)
     { state: { ...landed, away: Asked, marked: true }, out: List(Ask({ hold: c.hold, attachments: attachments(c.held) })) }
   else if (result == Landed and c.source > 0)
@@ -424,13 +437,14 @@ pure def sometimesACarriedDraftLandsInANewChat(c: Composer): bool =
 
 ### A conflict keeps the saved copy and the current text together, and saves them
 
-Alpha settles a conflict by itself. The editor takes the saved copy and
-the current text together — keeping whichever already holds the other, or
-the saved copy followed on a new line by the current text — and writes
-that text to the slot as a new revision (restore saved; replace saved
-keeps the current text over the saved copy directly). Restoring a message
-the slot marked as sending makes it an ordinary draft again, and the mark
-is written away.
+Alpha settles a conflict by itself (restore saved). The editor takes the
+saved copy, followed on a new line by the current text, and that text is
+written to the slot as a new revision. Where one of the two is empty,
+equal to the other, or the start of the other, only the longer is kept, so
+nothing is written twice and nothing is dropped. Replace saved keeps the
+current text over the saved copy directly. Restoring a message the slot
+marked as sending makes it an ordinary draft again, and the mark is
+written away.
 
 ```quint
 pure def restored(saved: D::Draft, c: Composer): Moved =
@@ -447,14 +461,24 @@ pure def replaceSaved(c: Composer): Composer = { ...c, draft: D::keepMine(c.draf
 
 ### A message that may already have been sent is checked by itself, and what the read found settles it
 
-Alpha asks the conversation's one read by itself as soon as the agent can
-answer, then after one, five and thirty seconds and each time it comes back
-to the front. If the message arrived, the mark is written away and nothing
-is shown; if it was never recorded, it goes back into the editor, ahead of
-what the owner typed since, for the owner to send. Nothing is ever sent by
-itself. Once those tries cannot tell, the conversation shows one card that
-the message may not have arrived, with Check again and Put back in the
-field; putting it back unchecked stays the owner's own choice.
+Alpha checks by itself as soon as the agent can answer, then after one,
+five and thirty seconds and each time it comes back to the front. As the
+message leaves, Alpha keeps its send key beside the slot, under the
+revision of the mark, so the check finds the exact message in its
+conversation even after a restart or from another Alpha; without that key
+the conversation's one read tells. If the message arrived, or the slot no
+longer holds the mark under review because the Alpha that marked it
+settled it, the mark is written away and nothing is shown; if it was never
+recorded, it goes back into the editor, ahead of what the owner typed
+since, for the owner to send. A history read without the exact key leaves
+the mark under review while the original request may still arrive.
+Nothing is ever sent by itself. Once those
+tries cannot tell, the conversation shows one card that the message may
+already have been sent, with its text, Check again, It was sent, and Put
+back in the field: It was sent keeps only what the owner typed since
+(replace saved), and putting it back unchecked stays the owner's own
+choice. While a message is under review, the turn note offers no check of
+its own.
 
 ```quint
 pure def canArrived(c: Composer, recorded: bool): bool = c.unsettled and c.away == Free

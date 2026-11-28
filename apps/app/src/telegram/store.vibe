@@ -30,6 +30,7 @@ const BOT_TOKEN_INPUT = /^(?:bot\d+:|(?:\d{5,}:[A-Za-z0-9_-]{10,}))/
 
 /** Ephemeral sign-in fields kept only in memory during authentication; never persisted to KeyValueStore. */
 export interface TelegramAuthCache {
+  readonly owner: string | undefined
   readonly phone: string
   readonly phoneCodeHash: string
   readonly pendingAuthId: string
@@ -120,6 +121,7 @@ export interface TelegramSnapshot {
 }
 
 const emptyAuth: TelegramAuthCache = {
+  owner: undefined,
   phone: "",
   phoneCodeHash: "",
   pendingAuthId: "",
@@ -226,9 +228,19 @@ export function isBotTokenInput(value: string): boolean {
 }
 
 /** Read the raw Telegram user-session token from `MessagingSessions` at the outbound HTTP boundary only. */
-export effect function currentSessionToken(): Option.Option<string>!!MessagingSessions {
-  const secret = try (try MessagingSessions).get(TELEGRAM_SESSION_KEY)
+export effect function currentSessionToken(): Option.Option<string>!!(MessagingSessions | TelegramStore) {
+  const { owner } = (try (try TelegramStore).get()).auth
+  if (owner === undefined) return Option.none()
+  const secret = try (try MessagingSessions).get(TELEGRAM_SESSION_KEY, owner)
   return Option.map(secret, tokenValue)
+}
+
+/** Deliver each authenticated reply only while the phone still holds the grant that requested it. */
+export effect function acceptedReply<A>(token: string, request: A!MessagingFailure): A!MessagingFailure!(MessagingSessions | TelegramStore) {
+  const reply = try Effect.result(request)
+  if (!Option.contains(try currentSessionToken(), token)) throw new Unreachable({ cause: "Telegram owner changed" })
+  if (Result.isFailure(reply)) throw reply.failure
+  return reply.success
 }
 
 /** Classify a dialog into the spec's `ChatKind` union. */

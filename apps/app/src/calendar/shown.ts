@@ -1,5 +1,8 @@
 // spec/app/calendar/index.md, "Rows shown are for the day the calendar is anchored to, from a source it may read"; spec/app/calendar/presentation.md, "A read for a day covers the month before it through the month after next"
+import type { AndroidCalendarDeletionScope, CalendarPick } from "@elizaos/os-bridges";
 import type { Source } from "../../gen/app__calendar.ts";
+import type { Reach } from "../../gen/app__calendar__deletions.ts";
+import type { Scope } from "../../gen/app__calendar__editor.ts";
 import { rowShown } from "../../gen/app__calendar__presentation.ts";
 import type { Cancellation, OwnAnswer } from "../../gen/app__calendar__writing.ts";
 import { createShelf } from "../runtime/store.ts";
@@ -91,6 +94,24 @@ export function searchWords(query: string): ReadonlyArray<string> {
 export function matchesSearch(row: Pick<Row, "title" | "place" | "notes">, words: ReadonlyArray<string>): boolean {
   const text = `${row.title} ${row.place} ${row.notes}`.toLocaleLowerCase();
   return words.every((word) => text.includes(word));
+}
+
+/** An event of the phone as eliza's calendar review picks it. @throws {never} */
+export function pickOf(row: Row): CalendarPick {
+  return {
+    event: { id: row.key, calendarId: row.calendarId, title: row.title, body: row.notes, location: row.place, ...androidWindowOf(row), allDay: row.allDay, recurring: row.recurring },
+    calendar: { id: row.calendarId, writable: true, local: true },
+  };
+}
+
+/** Which occurrences a deletion of `reach` names to the editor. @throws {never} */
+export function scopeOf(reach: Reach): Scope {
+  return reach === "WholeSeries" ? "WholeSeries" : reach === "FromThisOn" ? "ThisAndFollowing" : "ThisOne";
+}
+
+/** Which occurrences eliza's deletion review takes; it has no "this and following". @throws {never} */
+export function deletionScope(scope: Scope, recurring: boolean): AndroidCalendarDeletionScope | undefined {
+  return scope === "ThisOne" ? (recurring ? "occurrence" : "event") : scope === "WholeSeries" ? "series" : undefined;
 }
 
 /** Android stores an all-day event's civil dates at UTC midnight. @throws {never} */

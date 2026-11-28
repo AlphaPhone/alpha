@@ -963,8 +963,9 @@ pure def interrupt(v: Voice): Change =
 
 A stop is settled once the microphone and speech are confirmed off. Only
 what could go on listening or making sound counts: the agent acknowledging
-that it closed its side of the speech session, a Cloud speech session that
-never opened, and the speaker's volume being set back do not. Talk's
+that it closed its side of the speech session, a Cloud speech session the
+relay was never asked to start or refused to start, and the speaker's volume
+being set back do not. Talk's
 controls offer Stop and no keyboard switch. Both are as in Alpha's Sunday
 demo build.
 
@@ -997,22 +998,35 @@ pure def dismiss(v: Voice): Voice = { ...v, phase: Idle, failure: D::NoFailure }
 
 The microphone or speech may still be running, so neither a conversation
 nor dictation starts, and no words are shown. Alpha asks again whether they
-are off two seconds after the stop and each time it returns to the
-foreground; once they are, voice opens again and Talk is offered, with no
-restart.
+are off two seconds after the stop, then, while they are still not, after
+twice as long each time, up to every thirty seconds, and at once each time
+it returns to the foreground; once they are, voice opens again and Talk is
+offered, with no restart.
 
 ```quint
 pure val releaseAgainMs = 2000
 
+pure val releaseAgainMostMs = 30000
+
+pure val afterMsValues = Set(0, 2000, 16000, 30000)
+
+pure def againAfter(afterMs: int): int =
+  if (afterMs < releaseAgainMs) releaseAgainMs
+  else if (afterMs * 2 > releaseAgainMostMs) releaseAgainMostMs
+  else afterMs * 2
+
 pure def alwaysAnUnconfirmedStopKeepsVoiceClosed(v: Voice): bool =
   v.latched implies (quiet(v) and v.recorder.stage == D::Closed)
 
-pure def canReleased(v: Voice, confirmed: bool): bool = v.latched
+pure def canReleased(v: Voice, confirmed: bool, afterMs: int): bool = v.latched
 
-pure def released(v: Voice, confirmed: bool): Voice = { ...v, latched: not(confirmed) }
+pure def released(v: Voice, confirmed: bool, afterMs: int): Change =
+  { state: { ...v, latched: not(confirmed) },
+    out: if (confirmed) List() else List(Release({ afterMs: againAfter(afterMs) })) }
 
 pure def stepAnUnconfirmedStopIsAskedAgain(before: Voice, via: str, after: Voice, out: List[Effect]): bool =
-  (after.latched and not(before.latched)) implies out.includes(Release({ afterMs: releaseAgainMs }))
+  ((after.latched and not(before.latched)) implies out.includes(Release({ afterMs: releaseAgainMs })))
+    and ((via == "released" and after.latched) implies not(out.every(e => match e { | Release(_) => false | _ => true })))
 
 pure def sometimesStopUnconfirmed(v: Voice): bool = v.latched
 ```

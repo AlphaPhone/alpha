@@ -2,7 +2,7 @@
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, say } from "../notices/index.vibe"
 import type { MessagingSessions } from "../platform/index.vibe"
-import { type SlackEventEnvelope, type SlackMessage, Slack } from "../platform/index.vibe"
+import { type SlackEventEnvelope, type SlackMessage, AuthRevoked, RateLimited, Slack } from "../platform/index.vibe"
 import { type Job, answer, contained, reacting, run, stop } from "../runtime/index.vibe"
 import {
   SlackLedger,
@@ -11,7 +11,7 @@ import {
   handleSlackFailure,
   targetId,
   tokenForWorkspace,
-  userNameOf,
+  messageSenderName,
 } from "./ledger.vibe"
 import * as Notices from "../../gen/app__slack__notices.effect.vibe"
 import type { Effect as Out, Event, Incoming, Target } from "../../gen/app__slack__notices.effect.vibe"
@@ -118,16 +118,56 @@ effect function handleLiveEnvelope(
   try waitAndPoll(workspace)
 }
 
+effect function readWorkspaceEvents(workspace: number, cursor: number | undefined) {
+  const slack = try Slack
+  const token = try tokenForWorkspace(workspace)
+  if (token === undefined) return undefined
+  return slack.readEvents(token, cursor) catch effect (failure) => {
+    if (!(failure instanceof AuthRevoked)) throw failure
+    const current = try tokenForWorkspace(workspace, failure.code === "token_expired" ? token : undefined)
+    if (current === undefined) return undefined
+    if (current === token) throw failure
+    return try slack.readEvents(current, cursor)
+  }
+}
+
 effect function watchWorkspace(
   workspace: number,
 ): void!!(Slack | SlackLedger | MessagingSessions | Auth.Machine | Conversation.Machine | Notices.Machine) {
-  const slack = try Slack
-  const token = try tokenForWorkspace(workspace)
-  if (token === undefined) return
-  try waitAndPoll(workspace)
-  const stream = slack.eventsStream(token)
-  const ended = Stream.runForEach(stream, (envelope) => handleLiveEnvelope(workspace, envelope)) catch (failure) => failure
-  if (ended !== undefined) try handleSlackFailure(workspace, ended)
+  const ledger = try SlackLedger
+  const grant = ledger.workspaceMeta(workspace)
+  if (!grant?.brokered) return
+  let cursor: number | undefined
+  while (ledger.workspaceMeta(workspace) === grant) {
+    const page = readWorkspaceEvents(workspace, cursor) catch (failure) => failure
+    if (page === undefined || ledger.workspaceMeta(workspace) !== grant) return
+    if (!("events" in page)) {
+      try handleSlackFailure(workspace, page)
+      if (page instanceof AuthRevoked) return
+      const seconds = page instanceof RateLimited ? Math.max(1, page.retryAfter ?? 5) : 5
+      try sleep(seconds * 1000)
+      continue
+    }
+    const advanced = cursor !== undefined && page.cursor > cursor
+    if (cursor === undefined) try waitAndPoll(workspace)
+    else if (advanced) {
+      for (const envelope of page.events) try handleLiveEnvelope(workspace, envelope)
+    }
+    cursor = page.cursor
+    if (!advanced) try sleep("5 seconds")
+  }
+}
+
+/** Change delivery of Alpha's live notices for this connected workspace and channel. */
+export effect function muteSlackNotices(workspace: number, channel: number, muted: boolean): boolean!!(Notices.Machine | SlackLedger) {
+  const notices = try Notices.Machine
+  const ledger = try SlackLedger
+  const state = try notices.get()
+  if (!Notices.watching(state, workspace) || !ledger.channelOf(workspace, channel)) return false
+  if (Notices.canMuteChannelChanged(state, channel, muted))
+    try contained(notices.send({ type: "muteChannelChanged", channel, isMuted: muted }), "Slack local notification mute")
+  ledger.setChannelMuted(workspace, channel, muted)
+  return true
 }
 
 effect function pollWorkspace(ticket: number, workspace: number): Event!!SlackLedger {
@@ -149,7 +189,7 @@ effect function postSlackNotice(target: Target, ts: number): void!!SlackLedger {
   const msg = tsStr ? list.find((m) => m.ts === tsStr) : list.at(-1)
   const channelName = channel ? channelTitleOf(channel, users, meta?.ownerUserId ?? "") : `Channel ${target.channel}`
   const title = meta ? `${meta.name} · ${channelName}` : channelName
-  const sender = msg ? userNameOf(users, msg.user) : "Slack"
+  const sender = msg ? messageSenderName(users, msg) : "Slack"
   const body = msg ? `${sender}: ${msg.text}` : "New Slack message"
   ledger.putNotice({
     key: targetId(target),
@@ -192,8 +232,8 @@ function carry(
   }
 }
 
-/** Slack per-workspace SSE live-sync and notification machine layer. */
+/** Slack per-workspace live-sync and notification machine layer. */
 export const slackNotices = reacting(Notices, {
-  open: [{ type: "notifyPermissionChanged", notifyAllowed: true }],
+  open: [{ type: "restart" }],
   carry,
 })

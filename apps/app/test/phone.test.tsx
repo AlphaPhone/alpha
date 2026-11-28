@@ -213,16 +213,18 @@ describe("Phone on an Alpha image", () => {
     await until(alpha, alpha.runtime, Phone, (state) => state.front && state.tab === "Recents" && state.recents.status === "Loaded");
     expect(button("Call Maya Chen")).toBeDefined();
 
-    // spec/app/contacts/index.md, "Back from the search field clears the query and returns to Contacts"
+    // spec/app/contacts/index.md, "Filtering or changing the filter chip starts a new list"
     await tab("Contacts");
     await contactsFront();
     const contactsListed = () => until(alpha, alpha.runtime, Contacts, (state) =>
-      state.front && !state.searching && !state.sought && state.list.status === "Loaded" && state.rows === 2);
+      state.front && !state.sought && state.list.status === "Loaded" && state.rows === 2);
     await contactsListed();
-    await press("Search contacts");
-    await fill("Search contacts", "Maya");
-    await until(alpha, alpha.runtime, Contacts, (state) =>
-      state.searching && state.sought && state.list.status === "Loaded" && state.rows === 1);
+    expect(button("Search contacts")).toBeUndefined();
+    const contactsHeader = document.querySelector("[data-alpha-phone-header]");
+    expect([
+      Boolean(contactsHeader?.querySelector('[role="tablist"][aria-label="Phone"]')),
+      Boolean(contactsHeader?.querySelector('button[aria-label="New contact"]')),
+    ]).toEqual([true, true]);
     expect(button("Maya Chen")).toBeDefined();
     await tab("Voicemail");
     await until(alpha, alpha.runtime, Shell, (state) => state.trail.join(",") === "Phone");

@@ -10,6 +10,7 @@ import * as Stopwatch from "../gen/app__clock__stopwatch.effect.vibe";
 import * as Timers from "../gen/app__clock__timers.effect.vibe";
 import * as World from "../gen/app__clock__world.effect.vibe";
 import * as Toasts from "../gen/app__notices__toasts.effect.vibe";
+import { Machine as Home } from "../gen/app__home.effect.vibe";
 import * as Shell from "../gen/app__shell.effect.vibe";
 import { at } from "../src/areas.ts";
 import alertOverlayArea from "../src/clock/alertOverlay.tsx";
@@ -20,6 +21,7 @@ import { createClockRecords } from "../src/clock/records.ts";
 import { activeClockRecords, activeClockTicks } from "../src/clock/shelf.vibe";
 import { syncClockNow } from "../src/clock/sync.vibe";
 import { nextAlarmFireAt } from "../src/clock/time.ts";
+import home from "../src/home/index.tsx";
 import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
@@ -111,7 +113,8 @@ async function mountClock(startMs: number, remote: RemoteClock) {
   const runtime = clockArea.runtime(alpha);
   const currentShell = await alpha.runtime.runPromise(Shell.Machine.use((m) => m.get()));
   if (!Shell.showing(currentShell, "Clock")) {
-    await drawn(() => alpha.runtime.runPromise(Shell.Machine.use((m) => m.send({ type: "openView", view: "Clock" }))));
+    await until(alpha, home.runtime(alpha), Home, (h) => h.tiles.load.status === "Loaded");
+    await press("Clock");
   }
   await until(alpha, alpha.runtime, Shell.Machine, (s) => Shell.showing(s, "Clock"));
   await until(alpha, runtime, ClockView.Machine, () => true);

@@ -1132,8 +1132,8 @@ function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | Device | Layers.
     when { tag: "Release", let afterMs }: answer("release", effect {
       const time = try Time
       if (afterMs > 0) try time.until((try time.now()) + afterMs)
-      return { type: "released", confirmed: try (try VoiceBridge).release() }
-    }, { type: "released", confirmed: false });
+      return { type: "released", confirmed: try (try VoiceBridge).release(), afterMs }
+    }, { type: "released", confirmed: false, afterMs });
     when { tag: "Navigate", let session, let turn, let place, let sourceRoute }: run("spoken navigation", navigateLeased(session, turn, place, sourceRoute));
     when { tag: "CheckDictation", let ticket }: answer("check dictation recognition", effect {
       const voice = try Voice.Machine

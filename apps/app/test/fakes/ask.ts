@@ -72,6 +72,10 @@ export interface AskScene {
   beforeDraftExchange?: () => Promise<void>;
   /** The native store answers every read of a draft slot as unreadable, as its SecureSlots does for a slot it cannot decrypt. */
   draftReadsFail?: boolean;
+  /** Every message posted waits: "unheard" before the agent keeps it, as when Alpha stops before its request arrives; "unanswered" once the agent kept it, with no frame back. */
+  holdPosts?: "unheard" | "unanswered";
+  /** The text of each post held "unheard", which reached the agent's address but was never kept. */
+  readonly unheard: string[];
   refusedDraftExchanges: number;
   /** When true, /api/status omits serverInstanceId so the peer does not declare optional turn-context fields. */
   noOptionalFields?: boolean;
@@ -81,6 +85,7 @@ export interface AskScene {
   beforeStatus?: () => Promise<void>;
   /** Whether the agent's status says it can answer, and each warm-up it was asked for, with the headers it came with. */
   canRespond: boolean;
+  lastCloudFailure?: { readonly kind: string; readonly at: number };
   warmUps: Record<string, string>[];
   warmUpFails: boolean;
   statusReads: number;
@@ -93,12 +98,22 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), heldAborts: [], heldCreates: [], kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), heldAborts: [], heldCreates: [], kept: new Map(), searchDown: false, pagesDown: false, pagesMissing: false, pageReads: 0, listReads: 0, holdLists: false, heldLists: [], heldPages: [], drafts: new Map(), refusedDraftExchanges: 0, unheard: [], canRespond: true, warmUps: [], warmUpFails: false, statusReads: 0 };
 }
 
 /** A storage address within the fake phone's already verified local account. */
 export function draftKey(owner: string, agent: string, conversation?: string, room?: string) {
   return JSON.stringify([owner, agent, conversation ?? null, room ?? null]);
+}
+
+/** The rows AlphaAssistantDraft writes, as `AlphaDraftRow.admits` checks a `next` before the plugin exchanges it: a whole revision of at least 1, a text, a sending flag, and only beside a sending mark a string `lastSentId` and `lastSentWire`. */
+function admitsRow(next: string) {
+  let row: unknown;
+  try { row = JSON.parse(next); } catch { return false; }
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return false;
+  const { revision, text, sending, ...mark } = row as Record<string, unknown>;
+  return Number.isSafeInteger(revision) && (revision as number) >= 1 && typeof text === "string" && typeof sending === "boolean"
+    && Object.entries(mark).every(([key, value]) => sending && (key === "lastSentId" || key === "lastSentWire") && typeof value === "string");
 }
 
 /** AlphaAssistantDraft derives the slot after admitting the supplied owner, agent and epoch as assertions. */
@@ -124,6 +139,7 @@ export function alphaAssistantDraft(scene: AskScene, authority: () => Pick<Draft
         scene.refusedDraftExchanges += 1;
         return { status: "denied" };
       }
+      if (address.next !== undefined && !admitsRow(address.next)) return { status: "denied" };
       if (scene.drafts.get(key) !== address.expected) return { status: "conflict" };
       if (address.next === undefined) scene.drafts.delete(key);
       else scene.drafts.set(key, address.next);
@@ -313,6 +329,7 @@ export function askRoutes(scene: AskScene): Route[] {
     (request, url) => {
       const found = /^\/api\/conversations\/([^/]+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
+      if (scene.holdPosts === "unheard") return request.json().then((body: { text: string }) => { scene.unheard.push(body.text); return new Promise<Response>(() => undefined); });
       const conversationId = decodeURIComponent(found[1] ?? "");
       const kept = scene.kept.get(conversationId);
       if (kept === undefined) return Response.json({ error: "unknown_conversation" }, { status: 404 });
@@ -332,6 +349,7 @@ export function askRoutes(scene: AskScene): Route[] {
         scene.said.push(body.text);
         keep("user", body.text);
         Object.assign(kept.messages.at(-1) ?? {}, { clientMessageId: body.clientMessageId });
+        if (scene.holdPosts === "unanswered") return new Promise<Response>(() => undefined);
         if (found[2] !== undefined && scene.nextDropsWith !== undefined) {
           const dropped = scene.nextDropsWith;
           scene.nextDropsWith = undefined;
@@ -371,7 +389,11 @@ export function askRoutes(scene: AskScene): Route[] {
       scene.statusReads += 1;
       const answer = () => scene.failStatus
         ? Response.json({ error: "status_unavailable" }, { status: 503 })
-        : Response.json({ ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }), canRespond: scene.canRespond });
+        : Response.json({
+          ...(scene.noOptionalFields ? {} : { serverInstanceId: "alpha-fake" }),
+          canRespond: scene.canRespond,
+          ...(scene.lastCloudFailure === undefined ? {} : { lastCloudFailure: scene.lastCloudFailure }),
+        });
       return scene.beforeStatus ? scene.beforeStatus().then(answer) : answer();
     },
     (request, url) => {

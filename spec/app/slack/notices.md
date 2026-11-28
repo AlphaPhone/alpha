@@ -5,7 +5,13 @@ Per-workspace watermarked sync and notification rules for [Slack](./): DM,
 watermark (`since != 0`) is established, strict suppression of own, muted and
 currently visible front `(workspace, channel, threadTs)` messages, deep-link
 opening on notice tap, and per-workspace withdrawal on read, sign-out or
-revocation.
+revocation. Live notices require a Slack Events API receiver with an active
+workspace subscription. A connected handset polls its own cloud mailbox with the
+current user grant, resumes from the last reply's cursor and respects a
+rate-limit retry delay. Signing out stops the poll. A workspace connected
+directly to Slack can enable these notices by reconnecting after the cloud
+receiver becomes available. When the deployment has no receiver, Alpha shows
+that live notifications are unavailable and offers manual refresh.
 
 ## Story: Hear about Slack DMs, mentions and thread replies per workspace
 

@@ -44,6 +44,8 @@ export interface VoiceScene {
   agentClosesLiveCapture: boolean;
   /** Whether stopping the microphone itself fails, so `LiveCaptureController.java` keeps holding it. */
   liveCaptureReleaseFails: boolean;
+  /** Held while the phone is asked to stop a live capture, as a slow `stopAndWait` answers it. */
+  liveCaptureStopGate?: () => Promise<void>;
   startCloudSpeechCalls: number;
   cloudStartGate?: () => Promise<void>;
   /** Held while the relay is asked to unmute its microphone, as a slow phone answers it. */
@@ -58,7 +60,13 @@ export interface VoiceScene {
   organizationId: string;
   streamTiming: unknown;
   stopCloudSpeechCalls: number;
+  /** Whether the relay rejects being asked to stop its session. */
+  cloudStopFails: boolean;
   hushCalls: number;
+  /** Each local playback the phone was asked to stop, by request, or `undefined` for all of its speech. */
+  readonly playbackStops: (string | undefined)[];
+  /** Whether the phone rejects being asked to stop its speech. */
+  playbackStopFails: boolean;
   speakerMuted: boolean;
   speakerGainGate?: (muted: boolean) => Promise<void>;
   synthesisGate?: () => Promise<void>;
@@ -115,7 +123,10 @@ export function voiceScene(): VoiceScene {
     organizationId: "org-1",
     streamTiming: { format: "alpha-cloud-stream-timing-v1", records: [] },
     stopCloudSpeechCalls: 0,
+    cloudStopFails: false,
     hushCalls: 0,
+    playbackStops: [],
+    playbackStopFails: false,
     speakerMuted: false,
     speakerGainRequests: [],
     speakerMutedAtPlayback: [],
@@ -183,12 +194,14 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         if (nativeAsr) agentSessions.add(captureId);
         return Promise.resolve({ captureId, nativeAsr, echoCancelled: true });
       },
-      stopLiveCapture: ({ captureId }: { captureId: string }) => {
+      stopLiveCapture: async ({ captureId }: { captureId: string }) => {
         voice.stopLiveCaptureCalls += 1;
+        const gate = voice.liveCaptureStopGate;
+        if (gate !== undefined) await gate();
         const held = voice.activeMicSession === captureId && voice.liveCaptureReleaseFails;
         if (voice.activeMicSession === captureId && !held) voice.activeMicSession = undefined;
         const piped = agentSessions.delete(captureId);
-        return Promise.resolve({ captureId, durationMs: 0, serverClosed: !held && (!piped || voice.agentClosesLiveCapture) });
+        return { captureId, durationMs: 0, serverClosed: !held && (!piped || voice.agentClosesLiveCapture) };
       },
       synthesizeLocal: async ({ text, append, replace }: { requestId: string; text: string; append?: boolean; replace?: boolean }) => {
         voice.spoken.push({ text, append: append === true, replace: replace !== false, channel: "local" });
@@ -217,9 +230,10 @@ export function alphaVoiceCloud(voice: VoiceScene): Faked {
         await voice.speakerGainGate?.(muted);
         voice.speakerMuted = muted;
       },
-      stopPlayback: () => {
+      stopPlayback: ({ requestId }: { requestId?: string }) => {
         voice.hushCalls += 1;
-        return Promise.resolve({});
+        voice.playbackStops.push(requestId);
+        return voice.playbackStopFails ? Promise.reject(rejection("Playback could not be stopped")) : Promise.resolve({});
       },
       cancel: () => Promise.resolve({}),
       transcribeSavedNote: async (window: NoteWindow) => {
@@ -289,11 +303,17 @@ export function elizaCloudSpeech(voice: VoiceScene): Faked {
         if (credentialId !== voice.credentialId) throw rejection("Voice is already active or unavailable");
         voice.startCloudSpeechCalls += 1;
         voice.activeMicSession = sessionId;
-        if (voice.cloudStartGate) await voice.cloudStartGate();
+        try {
+          await voice.cloudStartGate?.();
+        } catch (refused) {
+          if (voice.activeMicSession === sessionId) voice.activeMicSession = undefined;
+          throw refused;
+        }
         return { sessionId, sampleRate: 16000, echoCancelled: true };
       },
       stopCloudSpeech: ({ sessionId }) => {
         voice.stopCloudSpeechCalls += 1;
+        if (voice.cloudStopFails) return Promise.reject(rejection("Cloud speech could not be stopped"));
         if (voice.activeMicSession === sessionId) voice.activeMicSession = undefined;
         return Promise.resolve({});
       },
