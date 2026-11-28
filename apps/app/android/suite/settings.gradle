@@ -33,6 +33,7 @@ def elizaAndroidModules = [
     'eliza-reminders': 'reminders',
     'eliza-messages': 'messages',
     'eliza-phone': 'phone',
+    'eliza-action-journal': 'action-journal',
 ]
 
 elizaAndroidModules.each { moduleName, dirName ->

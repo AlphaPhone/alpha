@@ -85,7 +85,9 @@
       "defaultRoles": ["ROLE_SMS"],
       "intentFilters": [
         { "action": "android.intent.action.SENDTO", "category": "android.intent.category.DEFAULT", "scheme": "sms" },
-        { "action": "android.intent.action.SENDTO", "category": "android.intent.category.DEFAULT", "scheme": "smsto" }
+        { "action": "android.intent.action.SENDTO", "category": "android.intent.category.DEFAULT", "scheme": "smsto" },
+        { "action": "android.intent.action.SENDTO", "category": "android.intent.category.DEFAULT", "scheme": "mms" },
+        { "action": "android.intent.action.SENDTO", "category": "android.intent.category.DEFAULT", "scheme": "mmsto" }
       ],
       "permissions": [
         "android.permission.READ_SMS",
@@ -626,6 +628,7 @@
         "/api/agents",
         "/api/turns/",
         "/api/lifeops/calendar",
+        "/api/alpha/local-llm",
         "/api/views/",
         "/api/client-devices/"
       ],

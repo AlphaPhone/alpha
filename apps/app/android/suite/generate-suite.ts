@@ -224,19 +224,32 @@ interface FlavorPluginProfile {
 
 const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
   phone: {
-    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts", ":eliza-action-journal"],
     sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
-    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinTelephonyPlugin",
+      "ai.alphacompute.thinapp.ThinContactsPlugin",
+      "ai.alphacompute.thinapp.ThinOngoingCallPlugin",
+      "ai.alphacompute.thinapp.ThinTelephonyActionJournalPlugin",
+    ],
   },
   messages: {
-    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts", ":eliza-action-journal"],
     sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
-    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinTelephonyPlugin",
+      "ai.alphacompute.thinapp.ThinContactsPlugin",
+      "ai.alphacompute.thinapp.ThinTelephonyActionJournalPlugin",
+    ],
   },
   contacts: {
-    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts"],
+    modules: [":eliza-messages", ":eliza-phone", ":eliza-contacts", ":eliza-action-journal"],
     sourceDirs: ["src/plugins/telephony/java", "src/plugins/contacts/java"],
-    pluginClasses: ["ai.alphacompute.thinapp.ThinTelephonyPlugin", "ai.alphacompute.thinapp.ThinContactsPlugin"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinTelephonyPlugin",
+      "ai.alphacompute.thinapp.ThinContactsPlugin",
+      "ai.alphacompute.thinapp.ThinTelephonyActionJournalPlugin",
+    ],
   },
   browser: {
     modules: [":eliza-browser-surface"],
@@ -246,6 +259,11 @@ const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
       "ai.eliza.plugins.browsersurface.ElizaSurfaceManagerPlugin",
       "ai.alphacompute.thinapp.ThinBrowserPlugin",
     ],
+  },
+  inbox: {
+    modules: [":eliza-media"],
+    sourceDirs: ["src/plugins/inbox/java"],
+    pluginClasses: ["ai.alphacompute.thinapp.ThinInboxAttachmentsPlugin"],
   },
   calendar: {
     modules: [":eliza-calendar"],
@@ -263,13 +281,15 @@ const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
     pluginClasses: ["ai.alphacompute.thinapp.ThinRemindersPlugin"],
   },
   camera: {
-    modules: [":eliza-camera", ":eliza-media"],
-    sourceDirs: ["src/plugins/media/java"],
+    modules: [":eliza-camera", ":eliza-media", ":eliza-filesystem"],
+    sourceDirs: ["src/plugins/media/java", "src/plugins/documents/java"],
     pluginClasses: [
       "ai.eliza.plugins.camera.CameraPlugin",
       "ai.alphacompute.thinapp.ThinPhotosPlugin",
       "ai.alphacompute.thinapp.ThinPhotoLibraryPlugin",
       "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
+      "ai.alphacompute.thinapp.ThinSelectedDocumentsPlugin",
+      "ai.alphacompute.thinapp.ThinScanPlugin",
     ],
   },
   photos: {
@@ -283,13 +303,27 @@ const FLAVOR_PLUGIN_PROFILES: Readonly<Record<string, FlavorPluginProfile>> = {
   },
   maps: {
     modules: [":eliza-location"],
-    sourceDirs: [],
-    pluginClasses: ["ai.eliza.plugins.location.LocationPlugin"],
+    sourceDirs: ["src/plugins/maps/java"],
+    pluginClasses: [
+      "ai.eliza.plugins.location.LocationPlugin",
+      "ai.alphacompute.thinapp.ThinMapsTransportPlugin",
+      "ai.alphacompute.thinapp.ThinNetworkLocationPlugin",
+    ],
+  },
+  notes: {
+    modules: [":eliza-media"],
+    sourceDirs: ["src/plugins/notes/java"],
+    pluginClasses: [
+      "ai.alphacompute.thinapp.ThinNotesPlugin",
+      "ai.alphacompute.thinapp.ThinNoteDocumentsPlugin",
+    ],
   },
   files: {
     modules: [":eliza-filesystem", ":eliza-media"],
-    sourceDirs: ["src/plugins/files/java", "src/plugins/media/java"],
+    sourceDirs: ["src/plugins/files/java", "src/plugins/media/java", "src/plugins/documents/java"],
     pluginClasses: [
+      "ai.alphacompute.thinapp.ThinSelectedDocumentsPlugin",
+      "ai.alphacompute.thinapp.ThinScanPlugin",
       "ai.alphacompute.thinapp.ThinFilesPlugin",
       "ai.alphacompute.thinapp.ThinPhotosPermissionsPlugin",
     ],
@@ -439,11 +473,118 @@ function renderFlavorComponents(app: SuiteAppEntry): readonly string[] {
       `        </receiver>`,
     ];
   }
-  if (app.id === "phone" || app.id === "messages" || app.id === "contacts") {
+  if (app.id === "phone") {
     return [
       `        <receiver`,
       `            android:name="ai.alphacompute.thinapp.ThinSmsSendReceiver"`,
       `            android:exported="false" />`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinTelephonyDeletionWakeup"`,
+      `            android:exported="false" />`,
+      `        <service`,
+      `            android:name="ai.alphacompute.thinapp.ThinInCallService"`,
+      `            android:exported="true"`,
+      `            android:permission="android.permission.BIND_INCALL_SERVICE">`,
+      `            <meta-data`,
+      `                android:name="android.telecom.IN_CALL_SERVICE_UI"`,
+      `                android:value="true" />`,
+      `            <meta-data`,
+      `                android:name="android.telecom.IN_CALL_SERVICE_RINGING"`,
+      `                android:value="false" />`,
+      `            <intent-filter>`,
+      `                <action android:name="android.telecom.InCallService" />`,
+      `            </intent-filter>`,
+      `        </service>`,
+      `        <activity`,
+      `            android:name="ai.alphacompute.thinapp.ThinCallActivity"`,
+      `            android:exported="false"`,
+      `            android:launchMode="singleTop"`,
+      `            android:screenOrientation="portrait"`,
+      `            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />`,
+    ];
+  }
+  if (app.id === "messages") {
+    return [
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinSmsSendReceiver"`,
+      `            android:exported="false" />`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinTelephonyDeletionWakeup"`,
+      `            android:exported="false" />`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinSmsDeliverReceiver"`,
+      `            android:exported="true"`,
+      `            android:permission="android.permission.BROADCAST_SMS">`,
+      `            <intent-filter>`,
+      `                <action android:name="android.provider.Telephony.SMS_DELIVER" />`,
+      `            </intent-filter>`,
+      `        </receiver>`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinMmsWapPushReceiver"`,
+      `            android:exported="true"`,
+      `            android:permission="android.permission.BROADCAST_WAP_PUSH">`,
+      `            <intent-filter>`,
+      `                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" />`,
+      `                <data android:mimeType="application/vnd.wap.mms-message" />`,
+      `            </intent-filter>`,
+      `        </receiver>`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinMmsResultReceiver"`,
+      `            android:exported="false" />`,
+      `        <service`,
+      `            android:name="ai.alphacompute.thinapp.ThinRespondViaMessageService"`,
+      `            android:exported="true"`,
+      `            android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">`,
+      `            <intent-filter>`,
+      `                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE" />`,
+      `                <category android:name="android.intent.category.DEFAULT" />`,
+      `                <data android:scheme="sms" />`,
+      `                <data android:scheme="smsto" />`,
+      `                <data android:scheme="mms" />`,
+      `                <data android:scheme="mmsto" />`,
+      `            </intent-filter>`,
+      `        </service>`,
+      `        <provider`,
+      `            android:name="ai.eliza.plugins.messages.MmsFileProvider"`,
+      `            android:authorities="\${applicationId}.mms"`,
+      `            android:exported="false"`,
+      `            android:grantUriPermissions="true" />`,
+    ];
+  }
+  if (app.id === "contacts") {
+    return [
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinSmsSendReceiver"`,
+      `            android:exported="false" />`,
+      `        <receiver`,
+      `            android:name="ai.alphacompute.thinapp.ThinTelephonyDeletionWakeup"`,
+      `            android:exported="false" />`,
+    ];
+  }
+  if (app.id === "notes") {
+    return [
+      `        <service`,
+      `            android:name="ai.alphacompute.thinapp.ThinNoteRecordingService"`,
+      `            android:exported="false"`,
+      `            android:foregroundServiceType="microphone" />`,
+    ];
+  }
+  if (app.id === "maps") {
+    return [
+      `        <service`,
+      `            android:name="ai.alphacompute.thinapp.ThinNavigationService"`,
+      `            android:exported="false"`,
+      `            android:foregroundServiceType="location" />`,
+    ];
+  }
+  if (app.id === "files" || app.id === "camera") {
+    return [
+      `        <service`,
+      `            android:name="ai.alphacompute.thinapp.ThinIsolatedPdfService"`,
+      `            android:exported="false"`,
+      `            android:isolatedProcess="true"`,
+      `            android:process=":isolated_pdf"`,
+      `            android:stopWithTask="true" />`,
     ];
   }
   return [];
@@ -707,7 +848,7 @@ function renderThinManifest(registry: SuiteRegistry, app: SuiteAppEntry): string
       `    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion" />`,
     );
   }
-  if (app.id === "files" && !permSet.has("android.permission.WRITE_EXTERNAL_STORAGE")) {
+  if ((app.id === "files" || app.id === "camera") && !permSet.has("android.permission.WRITE_EXTERNAL_STORAGE")) {
     permissionLines.push(
       `    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:replace="android:maxSdkVersion" />`,
     );

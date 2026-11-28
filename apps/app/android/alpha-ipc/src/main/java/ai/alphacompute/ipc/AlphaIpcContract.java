@@ -42,6 +42,8 @@ public final class AlphaIpcContract {
     public static final String KEY_PREFERENCES = "alpha.preferences";
     public static final String KEY_TEXT_SCALE = "alpha.textScale";
     public static final String KEY_INSTALL = "alpha.install";
+    public static final String KEY_AI_MODE = "alpha.aiMode";
+    public static final String KEY_LOCAL_MODEL = "alpha.localModel";
     public static final String KEY_LEGACY_APPEARANCE = "alpha.appearance.v1";
     public static final String KEY_LEGACY_PREFERENCES = "alpha.browser.device.v1";
 
@@ -49,7 +51,9 @@ public final class AlphaIpcContract {
         KEY_APPEARANCE,
         KEY_PREFERENCES,
         KEY_TEXT_SCALE,
-        KEY_INSTALL
+        KEY_INSTALL,
+        KEY_AI_MODE,
+        KEY_LOCAL_MODEL
     );
 
     public static final Set<String> READABLE_PREFERENCE_KEYS = Set.of(
@@ -57,6 +61,8 @@ public final class AlphaIpcContract {
         KEY_PREFERENCES,
         KEY_TEXT_SCALE,
         KEY_INSTALL,
+        KEY_AI_MODE,
+        KEY_LOCAL_MODEL,
         KEY_LEGACY_APPEARANCE,
         KEY_LEGACY_PREFERENCES
     );

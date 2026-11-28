@@ -5,7 +5,7 @@ import android.Manifest;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 
-/** Thin standalone {@code ElizaFiles} plugin using Alpha's shared trash folder name. */
+/** Thin standalone {@code ElizaFiles} plugin using Alpha's shared trash folder and selected-document registry. */
 @CapacitorPlugin(name = "ElizaFiles", permissions = {
     @Permission(alias = "legacyStorage", strings = {
         Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -15,5 +15,10 @@ import com.getcapacitor.annotation.Permission;
 public final class ThinFilesPlugin extends FilesPlugin {
     @Override protected String trashFolder() {
         return ".Trash-alpha";
+    }
+
+    @Override protected SelectionRegistry selections() {
+        if (!ThinSelectionBridge.available()) return null;
+        return (uri, flags) -> ThinSelectionBridge.authorize(getContext(), uri, flags);
     }
 }

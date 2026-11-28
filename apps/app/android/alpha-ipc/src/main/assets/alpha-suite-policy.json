@@ -338,6 +338,7 @@
         "/api/agents",
         "/api/turns/",
         "/api/lifeops/calendar",
+        "/api/alpha/local-llm",
         "/api/views/",
         "/api/client-devices/"
       ],

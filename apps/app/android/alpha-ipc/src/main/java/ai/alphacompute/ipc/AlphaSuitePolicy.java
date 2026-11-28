@@ -289,7 +289,7 @@ public final class AlphaSuitePolicy {
         put(rules, "wallet", "Wallet", "app", "ai.alphacompute.wallet",
             Set.of("/api/health", "/api/status", "/api/wallet", "/api/approvals", "/api/views/", "/api/client-devices/"), Set.of(), Set.of(), false);
         put(rules, "settings", "Settings", "app", "ai.alphacompute.settings",
-            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/approvals", "/api/notifications", "/api/conversations", "/api/agents", "/api/turns/", "/api/lifeops/calendar", "/api/views/", "/api/client-devices/"),
+            Set.of("/api/health", "/api/status", "/api/auth/me", "/api/approvals", "/api/notifications", "/api/conversations", "/api/agents", "/api/turns/", "/api/lifeops/calendar", "/api/alpha/local-llm", "/api/views/", "/api/client-devices/"),
             Set.of("/api/v1/user", "/api/v1/referrals", "/api/v1/subscriptions/", "/api/v1/subscription/", "/api/v1/billing/", "/api/v1/eliza/google/"),
             Set.of(), false);
         return new AlphaSuitePolicy(rules);

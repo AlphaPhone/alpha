@@ -2,10 +2,14 @@ package ai.alphacompute.runtime;
 
 import ai.alphacompute.ipc.AlphaIpcContract;
 import ai.alphacompute.ipc.IAlphaActionCallback;
+import android.app.Activity;
+import android.app.KeyguardManager;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
 import android.database.ContentObserver;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +17,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
+import android.os.UserManager;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
@@ -25,6 +30,7 @@ import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import com.getcapacitor.PluginHandle;
 import com.getcapacitor.WebViewListener;
 import java.nio.charset.StandardCharsets;
@@ -53,6 +59,8 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
     private JSONObject bufferedIntent;
     private volatile boolean pageLoaded;
     private volatile boolean volumeShutterEnabled;
+    private volatile boolean resumed;
+    private volatile boolean windowFocused;
 
     private record InsetsState(int top, int bottom, boolean keyboard) {
         void publish(WebView page) {
@@ -97,6 +105,11 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         registerPlugin(RemoteHostedDigestPlugin.class);
         registerPlugin(RemoteInboxNoticesPlugin.class);
         registerPlugin(RemoteResetPlugin.class);
+        registerPlugin(RemoteLocalLlmPlugin.class);
+        registerPlugin(RemoteAssistantDraftPlugin.class);
+        registerPlugin(RemoteCallStatePlugin.class);
+        registerPlugin(RemoteCarrierSetupPlugin.class);
+        registerPlugin(RemoteNetworkPolicyPlugin.class);
         registerAppPlugins();
         super.onCreate(savedInstanceState);
 
@@ -109,6 +122,11 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
         page.setFilterTouchesWhenObscured(true);
         page.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptThirdPartyCookies(page, false);
+        page.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+            @Override public Bitmap getDefaultVideoPoster() {
+                return Bitmap.createBitmap(new int[] { Color.BLACK }, 1, 1, Bitmap.Config.ARGB_8888);
+            }
+        });
 
         syncSharedAppearanceAndTextScale();
         registerPreferencesObserver();
@@ -120,10 +138,13 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
 
     @Override public void onResume() {
         super.onResume();
+        resumed = true;
         syncSharedAppearanceAndTextScale();
     }
 
     @Override public void onPause() {
+        resumed = false;
+        windowFocused = false;
         clearForegroundContext();
         super.onPause();
     }
@@ -145,12 +166,33 @@ public abstract class AlphaBaseActivity extends BridgeActivity {
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        windowFocused = hasFocus;
         if (!hasFocus || !pageLoaded) return;
         var bridge = getBridge();
         WebView page = bridge == null ? null : bridge.getWebView();
         if (page != null) {
             page.evaluateJavascript("window.dispatchEvent(new Event('focus'))", null);
         }
+    }
+
+    /** True while this activity is resumed, focused, and the user device is unlocked. */
+    public boolean isForegroundFocused() {
+        return resumed && windowFocused && !isFinishing() && !isDestroyed();
+    }
+
+    /** Checks whether {@code activity} is foreground-focused on an unlocked device. */
+    public static boolean shareForeground(Activity activity) {
+        if (activity == null || activity.isFinishing() || activity.isDestroyed()) return false;
+        if (activity instanceof AlphaBaseActivity alpha) {
+            if (!alpha.isForegroundFocused()) return false;
+        } else if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (!activity.hasWindowFocus()) return false;
+        } else {
+            return false;
+        }
+        KeyguardManager lock = activity.getSystemService(KeyguardManager.class);
+        UserManager users = activity.getSystemService(UserManager.class);
+        return lock != null && users != null && !lock.isDeviceLocked() && users.isUserUnlocked();
     }
 
     /** Enables or disables capturing hardware volume keys as Camera shutter triggers. */

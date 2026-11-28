@@ -53,6 +53,10 @@ public final class AlphaSuitePolicyTest {
         assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/agents"));
         assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/turns/123"));
         assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/lifeops/calendar"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/alpha/local-llm/status"));
+        assertTrue(policy.isAgentRouteAllowed("ai.alphacompute.settings", "/api/alpha/local-llm/catalog"));
+        assertTrue(policy.isAgentRouteAllowed(AlphaIpcContract.CORE_PACKAGE, "/api/alpha/local-llm/download"));
+        assertFalse(policy.isAgentRouteAllowed("ai.alphacompute.notes", "/api/alpha/local-llm/status"));
         assertFalse(policy.isAgentRouteAllowed("com.example.untrusted", "/api/health"));
     }
 
@@ -127,11 +131,22 @@ public final class AlphaSuitePolicyTest {
         assertFalse(policy.isSignInMethodAllowed("ai.alphacompute.notes", "signOut"));
         assertTrue(policy.isSignInMethodAllowed("ai.alphacompute.inbox", "upgradeMailLease"));
         assertFalse(policy.isSignInMethodAllowed("ai.alphacompute.maps", "upgradeMailLease"));
+        for (String method : new String[] {
+            "startEmail", "startPhone", "verify", "resend", "sendFactorCode", "cancel",
+            "signOut", "reauthenticate", "startGoogle", "upgradeMailLease", "cancelMailLeaseUpgrade"
+        }) {
+            assertTrue(policy.isSignInMethodAllowed("ai.alphacompute.settings", method));
+        }
 
         assertTrue(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_APPEARANCE));
+        assertTrue(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_AI_MODE));
+        assertTrue(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_LOCAL_MODEL));
+        assertTrue(AlphaIpcContract.isReadablePreferenceKey(AlphaIpcContract.KEY_AI_MODE));
+        assertTrue(AlphaIpcContract.isReadablePreferenceKey(AlphaIpcContract.KEY_LOCAL_MODEL));
         assertFalse(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.settings", AlphaIpcContract.KEY_INSTALL));
         assertTrue(policy.isSharedPreferenceWriteAllowed(AlphaIpcContract.CORE_PACKAGE, AlphaIpcContract.KEY_INSTALL));
         assertFalse(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.notes", AlphaIpcContract.KEY_APPEARANCE));
+        assertFalse(policy.isSharedPreferenceWriteAllowed("ai.alphacompute.notes", AlphaIpcContract.KEY_AI_MODE));
     }
 
     @Test public void parsesSuiteRegistryJsonMatchingDefaults() throws Exception {
