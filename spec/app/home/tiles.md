@@ -53,29 +53,25 @@ pure def there(apps: Set[str], shell: S::Shell, tile: Tile): bool =
 
 ### Home's defaults use the product's Home order, and Home holds at most 4096 tiles
 
-The order is the one the owner approved on the Sunday demo build (Alpha
-45f6bed30, `apps/app/src/product/alpha-product-registration.ts:308`). That
-build's Home held only the apps its install admitted, and it admitted no
-Wallet ("Wallet is removed from MVP", `apps/app/src/prototype/mvp-features.ts:4`,
-`:17`; `prototype/model.js:4210`), so the demo's Home has thirteen apps with
-Workflows right after Files. Clock, Reminders, Wallet, Telegram and Slack
-start in Apps until the owner adds them to Home.
+Home holds Alpha's sixteen default apps — including Telegram, Slack and
+Wallet — in Home order. Clock and Reminders stay off Home until the owner
+adds them through Add to Home.
 
 ```quint
 pure val homeOrder: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings)
+  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera,
+  S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings)
 
 pure val homeCatalog: List[S::View] = List(
-  S::Phone, S::Messages, S::Inbox, S::Calendar, S::Browser, S::Camera, S::Photos,
-  S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Settings,
-  S::Clock, S::Reminders, S::Wallet, S::Telegram, S::Slack)
+  S::Phone, S::Messages, S::Inbox, S::Telegram, S::Slack, S::Calendar, S::Browser, S::Camera,
+  S::Photos, S::Maps, S::Notes, S::Contacts, S::Files, S::Workflows, S::Wallet, S::Settings,
+  S::Clock, S::Reminders)
 
 pure val defaults: List[Tile] = List(
-  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Calendar }),
-  Own({ view: S::Browser }), Own({ view: S::Camera }), Own({ view: S::Photos }), Own({ view: S::Maps }),
-  Own({ view: S::Notes }), Own({ view: S::Contacts }), Own({ view: S::Files }), Own({ view: S::Workflows }),
-  Own({ view: S::Settings }))
+  Own({ view: S::Phone }), Own({ view: S::Messages }), Own({ view: S::Inbox }), Own({ view: S::Telegram }),
+  Own({ view: S::Slack }), Own({ view: S::Calendar }), Own({ view: S::Browser }), Own({ view: S::Camera }),
+  Own({ view: S::Photos }), Own({ view: S::Maps }), Own({ view: S::Notes }), Own({ view: S::Contacts }),
+  Own({ view: S::Files }), Own({ view: S::Workflows }), Own({ view: S::Wallet }), Own({ view: S::Settings }))
 
 pure val maxTiles = 4096
 
@@ -92,13 +88,12 @@ pure def lawTheDefaultsAreHomeOrder(i: int): bool =
     and ((0 <= i and i < homeOrder.length()) implies shows(defaults.nthOr(i, noTile), homeOrder.nthOr(i, S::Phone)))
 
 pure def lawTheCatalogOffersEveryDefaultAndOptionalApp(i: int): bool =
-  homeCatalog.length() == homeOrder.length() + 5
-    and not(homeOrder.includes(S::Wallet))
+  homeCatalog.length() == homeOrder.length() + 2
+    and homeOrder.includes(S::Telegram)
+    and homeOrder.includes(S::Slack)
+    and homeOrder.includes(S::Wallet)
     and homeCatalog.nthOr(homeOrder.length(), S::Phone) == S::Clock
     and homeCatalog.nthOr(homeOrder.length() + 1, S::Phone) == S::Reminders
-    and homeCatalog.nthOr(homeOrder.length() + 2, S::Phone) == S::Wallet
-    and homeCatalog.nthOr(homeOrder.length() + 3, S::Phone) == S::Telegram
-    and homeCatalog.nthOr(homeOrder.length() + 4, S::Phone) == S::Slack
     and ((0 <= i and i < homeOrder.length()) implies homeCatalog.nthOr(i, S::Phone) == homeOrder.nthOr(i, S::Phone))
 ```
 
