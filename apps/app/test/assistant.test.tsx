@@ -285,20 +285,25 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     };
     // spec/app/assistant/chats.md, "A conversation made new here shows what it holds while its page is read": the first send stays in place, never loading rows, while the page of the conversation made for it is read.
     world.ask.holdPages = true;
+    world.ask.holdAfterTools = true;
     const loadingRows = () => document.querySelector("section[aria-label='Ask Alpha'] [role=log] [aria-busy]");
     write("Hello ");
     await press("Send");
     await until(alpha, runtime, Chats, (s) => s.chosen > 0 && s.page.status === "Loading");
     expect(loadingRows()).toBeNull();
     await until(alpha, runtime, Conversation, (s) => s.turn.send.id === 1);
-    await settled(alpha, () => world.ask.heldPages.length > 0 && lines()[0] === "Hello", lines);
+    await drawn(() => vi.waitFor(() => expect([world.ask.heldPages.length, world.ask.turns.size]).toEqual([1, 1])));
+    expect(lines()).toEqual(["Hello"]);
     expect(loadingRows()).toBeNull();
-    world.ask.holdPages = false;
-    for (const release of world.ask.heldPages.splice(0)) release();
+    await drawn(() => { for (const answer of world.ask.turns.values()) answer(); });
     // spec/app/assistant/index.md, "A reply completes, streamed or all at once, even after the owner asked to stop it"
     await until(alpha, runtime, Conversation, (s) => s.turn.reply === "Complete");
     // spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"
     await until(alpha, runtime, Reply, (s) => s.status === "Settled" && s.final === "You said: Hello".length);
+    expect([world.ask.heldPages.length, lines(), loadingRows()]).toEqual([1, ["Hello", "You said: Hello"], null]);
+    world.ask.holdPages = false;
+    for (const release of world.ask.heldPages.splice(0)) release();
+    await until(alpha, runtime, Chats, (s) => s.page.status === "Loaded");
     // spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"
     expect(world.ask.metadata).toMatchObject([{ observation: { view: "home", sensitive: false } }]);
     // spec/app/browser/reading.md, "Only the committed page of a normal tab in front, while Browser is the open screen and Browser page for Alpha is on, is ever handed over": a turn asked on Home takes no page.

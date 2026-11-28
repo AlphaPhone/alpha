@@ -842,7 +842,8 @@ function posted(ticket: number, told: boolean, context: Conversation.Context): S
     if (authority !== undefined) try bindArchiveAuthority(board, authority)
     const pageTicket = (try history.get()).page.ticket
     const releasePage = board.holdTurnPage(pageTicket)
-    try addFinalizer(() => sync(releasePage))
+    try addFinalizer(() => Effect.map(history.get(), (selected) =>
+      releasePage(selected.chosen === chats.chosen && selected.page.ticket === pageTicket)))
     const mine: Line = {
       id: `sent ${ticket}`, mine: true, text,
       ...(quoted === undefined ? {} : { quote: quoted.text }),
