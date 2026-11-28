@@ -167,19 +167,35 @@ public final class AlphaLocalLlmTest {
         assertTrue(partial.getParentFile().mkdirs());
         Files.write(partial.toPath(), Arrays.copyOfRange(payload, 0, 128));
 
+        List<AlphaLocalModelManager.DownloadProgress> directEvents = new ArrayList<>();
+        List<AlphaLocalModelManager.DownloadProgress> subscribedEvents = new ArrayList<>();
+        AutoCloseable subscription = manager.subscribeProgress(subscribedEvents::add);
         AlphaLocalModelManager.DownloadProgress done = manager.downloadBlockingForTest(
             entry,
             "https://example.invalid/model.gguf",
             payload.length,
             expectedSha,
             false,
-            null
+            directEvents::add
         );
+        subscription.close();
         assertEquals("installed", done.phase());
         assertEquals(1, rangeRequests.get());
         assertTrue(manager.modelFile(entry).isFile());
         assertFalse(partial.exists());
+        assertFalse(directEvents.isEmpty());
+        assertEquals(directEvents.size(), subscribedEvents.size());
+        assertTrue(directEvents.stream().anyMatch(p -> "downloading".equals(p.phase())));
+        assertTrue(directEvents.stream().anyMatch(p -> "verifying".equals(p.phase())));
+        assertTrue(directEvents.stream().anyMatch(p -> "installed".equals(p.phase()) && p.percent() == 100));
+        JSONObject lastProgressJson = subscribedEvents.get(subscribedEvents.size() - 1).toJson();
+        assertEquals(entry.id(), lastProgressJson.getString("modelId"));
+        assertEquals(payload.length, lastProgressJson.getLong("downloadedBytes"));
+        assertEquals(payload.length, lastProgressJson.getLong("totalBytes"));
+        assertEquals(100, lastProgressJson.getInt("percent"));
+        assertEquals("installed", lastProgressJson.getString("phase"));
 
+        int eventsBeforeTampered = subscribedEvents.size();
         AlphaLocalModelManager.DownloadProgress tampered = manager.downloadBlockingForTest(
             AlphaLocalLlmCatalog.byId("qwen3.5-4b-q4"),
             "https://example.invalid/tampered.gguf",
@@ -190,6 +206,7 @@ public final class AlphaLocalLlmTest {
         );
         assertEquals("failed", tampered.phase());
         assertEquals("DIGEST_MISMATCH", tampered.error());
+        assertEquals(eventsBeforeTampered, subscribedEvents.size());
         assertFalse(manager.modelFile(AlphaLocalLlmCatalog.byId("qwen3.5-4b-q4")).exists());
 
         assertTrue(manager.onTrimMemory(40));

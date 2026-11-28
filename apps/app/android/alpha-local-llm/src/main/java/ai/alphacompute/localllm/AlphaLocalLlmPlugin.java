@@ -25,6 +25,28 @@ public final class AlphaLocalLlmPlugin extends Plugin {
         thread.setDaemon(true);
         return thread;
     });
+    private volatile AutoCloseable progressSubscription;
+
+    @Override public void load() {
+        super.load();
+        Context context = getContext();
+        if (context != null) {
+            progressSubscription = AlphaLocalModelManager.shared(context).subscribeProgress(this::emitDownloadProgress);
+        }
+    }
+
+    @Override protected void handleOnDestroy() {
+        AutoCloseable sub = progressSubscription;
+        progressSubscription = null;
+        if (sub != null) {
+            try {
+                sub.close();
+            } catch (Exception ignored) {
+            }
+        }
+        executor.shutdownNow();
+        super.handleOnDestroy();
+    }
 
     /** Returns the pinned GGUF model catalog annotated with device RAM and storage fit. */
     @PluginMethod public void catalog(PluginCall call) {
@@ -41,23 +63,15 @@ public final class AlphaLocalLlmPlugin extends Plugin {
         executor.execute(() -> {
             try {
                 JSONObject params = call.getData() == null ? new JSONObject() : call.getData();
-                String modelId = params.optString("modelId", AlphaLocalLlmCatalog.DEFAULT_MODEL_ID);
-                boolean allowMetered = params.optBoolean("allowMetered", false);
-                AlphaLocalModelManager manager = AlphaLocalModelManager.shared(getContext());
-                AlphaLocalModelManager.DownloadProgress started = manager.startDownload(modelId, allowMetered, progress -> {
-                    try {
-                        notifyListeners("downloadProgress", JSObject.fromJSONObject(progress.toJson()));
-                    } catch (JSONException ignored) {
-                    }
-                });
-                call.resolve(JSObject.fromJSONObject(new JSONObject()
-                    .put("ok", true)
-                    .put("modelId", started.modelId())
-                    .put("status", started.toJson())));
+                AlphaLocalModelManager.ProgressListener listener = progressSubscription == null
+                    ? this::emitDownloadProgress
+                    : null;
+                JSONObject result = invoke(getContext(), "download", params, listener);
+                call.resolve(JSObject.fromJSONObject(result));
             } catch (AlphaLocalModelManager.ModelRefusedException refused) {
                 call.reject(refused.getMessage(), refused.code);
-            } catch (JSONException failed) {
-                call.reject(failed.getMessage(), "JSON_ERROR");
+            } catch (IOException | JSONException failed) {
+                call.reject(failed.getMessage() == null ? "Local LLM operation failed" : failed.getMessage(), "LOCAL_LLM_FAILED");
             }
         });
     }
@@ -98,6 +112,19 @@ public final class AlphaLocalLlmPlugin extends Plugin {
      */
     public static JSONObject invoke(Context context, String method, JSONObject params)
         throws AlphaLocalModelManager.ModelRefusedException, IOException, JSONException {
+        return invoke(context, method, params, null);
+    }
+
+    /**
+     * Headless dispatch entry point accepting an optional download {@code progressListener}
+     * so broker callers can stream {@code downloadProgress} updates to thin apps.
+     */
+    public static JSONObject invoke(
+        Context context,
+        String method,
+        JSONObject params,
+        AlphaLocalModelManager.ProgressListener progressListener
+    ) throws AlphaLocalModelManager.ModelRefusedException, IOException, JSONException {
         JSONObject input = params == null ? new JSONObject() : params;
         AlphaLocalModelManager manager = AlphaLocalModelManager.shared(context);
         AlphaLocalInferenceHost host = AlphaLocalInferenceHost.shared(context);
@@ -110,7 +137,7 @@ public final class AlphaLocalLlmPlugin extends Plugin {
             case "download" -> {
                 String modelId = input.optString("modelId", AlphaLocalLlmCatalog.DEFAULT_MODEL_ID);
                 boolean allowMetered = input.optBoolean("allowMetered", false);
-                AlphaLocalModelManager.DownloadProgress started = manager.startDownload(modelId, allowMetered, null);
+                AlphaLocalModelManager.DownloadProgress started = manager.startDownload(modelId, allowMetered, progressListener);
                 yield new JSONObject()
                     .put("ok", true)
                     .put("modelId", started.modelId())
@@ -157,6 +184,14 @@ public final class AlphaLocalLlmPlugin extends Plugin {
             }
             default -> throw new AlphaLocalModelManager.ModelRefusedException("UNSUPPORTED_METHOD", "Unsupported AlphaLocalLlm method: " + method);
         };
+    }
+
+    private void emitDownloadProgress(AlphaLocalModelManager.DownloadProgress progress) {
+        if (progress == null) return;
+        try {
+            notifyListeners("downloadProgress", JSObject.fromJSONObject(progress.toJson()));
+        } catch (JSONException | RuntimeException ignored) {
+        }
     }
 
     private void dispatch(PluginCall call, String method, JSONObject params) {

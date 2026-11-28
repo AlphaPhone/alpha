@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -124,6 +125,7 @@ public final class AlphaLocalModelManager {
     });
     private final Map<String, ActiveDownload> activeDownloads = new ConcurrentHashMap<>();
     private final Map<String, DownloadProgress> lastProgress = new ConcurrentHashMap<>();
+    private final Set<ProgressListener> progressListeners = new CopyOnWriteArraySet<>();
     private final Object stateLock = new Object();
 
     private volatile Runnable memoryReleaseHook;
@@ -174,6 +176,13 @@ public final class AlphaLocalModelManager {
     /** Registers a callback invoked when memory pressure or model removal must release native state. */
     public void setMemoryReleaseHook(Runnable hook) {
         this.memoryReleaseHook = hook;
+    }
+
+    /** Subscribes to live download progress events across all model downloads until closed. */
+    public AutoCloseable subscribeProgress(ProgressListener listener) {
+        if (listener == null) return () -> {};
+        progressListeners.add(listener);
+        return () -> progressListeners.remove(listener);
     }
 
     /** Returns the canonical root directory where all local GGUF bundles live. */
@@ -641,9 +650,19 @@ public final class AlphaLocalModelManager {
         return progress;
     }
 
-    private static void notifyProgress(ProgressListener listener, DownloadProgress progress) {
+    private void notifyProgress(ProgressListener listener, DownloadProgress progress) {
         if (listener != null) {
-            listener.onProgress(progress);
+            try {
+                listener.onProgress(progress);
+            } catch (RuntimeException ignored) {
+            }
+        }
+        for (ProgressListener subscriber : progressListeners) {
+            if (subscriber == listener) continue;
+            try {
+                subscriber.onProgress(progress);
+            } catch (RuntimeException ignored) {
+            }
         }
     }
 
