@@ -26,7 +26,8 @@ import { MessagingSessions, messagingSessions } from "../src/platform/messaging.
 import { grounded } from "../src/platform/platform.vibe";
 import { browserVoiceBridge } from "../src/platform/voice.vibe";
 import { telegramMessages } from "../src/platform/telegram-messages.vibe";
-import { telegramAt } from "../src/platform/telegram.vibe";
+import { telegramNetwork } from "../src/platform/telegram-mtproto.vibe";
+import { mtprotoRequest, telegramAt } from "../src/platform/telegram.vibe";
 import { together, whole } from "../src/runtime/reactor.vibe";
 import { shell } from "../src/shell/shell.vibe";
 import { TelegramScreen } from "../src/telegram/Telegram.tsx";
@@ -651,8 +652,8 @@ describe("Telegram on a phone", () => {
   });
 });
 
-it('reads, replies and reconnects through Telegram MTProto (spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise")', async () => {
-  const { BaseTelegramClient, MemoryStorage, TelegramClient, WebCryptoProvider } = await import("@mtcute/web");
+it('reports sign-in flood waits, reads, replies and reconnects through Telegram MTProto (spec/app/telegram/auth.md, "Story: Sign in to my Telegram user account"; spec/app/telegram/conversation.md, "Story: Read and interact with a Telegram conversation"; spec/app/telegram/notices.md, "Story: Hear about new Telegram messages without noise")', async () => {
+  const { BaseTelegramClient, MemoryStorage, TelegramClient, WebCryptoProvider, networkMiddlewares } = await import("@mtcute/web");
   const require = createRequire(import.meta.url);
   const wasm = createRequire(require.resolve("@mtcute/web")).resolve("@mtcute/wasm/mtcute.wasm");
   const peer = { _: "peerChat", chatId: 9 } as const;
@@ -663,8 +664,13 @@ it('reads, replies and reconnects through Telegram MTProto (spec/app/telegram/co
   const dialog = { _: "dialog", peer, topMessage: 2, readInboxMaxId: 1, readOutboxMaxId: 1, unreadCount: 1,
     unreadMentionsCount: 0, unreadReactionsCount: 0, unreadPollVotesCount: 0, notifySettings: { _: "peerNotifySettings" } };
   const sent = new Map<string, { id: number; text: string }>();
+  let loginRequests = 0;
   function replyToRpc(request: tl.RpcMethod): unknown {
       switch (request._) {
+        case "auth.sendCode":
+          loginRequests++;
+          if (loginRequests === 1) return { _: "mt_rpc_error", errorCode: 420, errorMessage: "FLOOD_WAIT_2" };
+          return { _: "auth.sentCode", type: { _: "auth.sentCodeTypeApp", length: 5 }, phoneCodeHash: "local-retry" };
         case "updates.getState": return state;
         case "messages.getDialogs": return { _: "messages.dialogs", dialogs: request.offsetId ? [] : [dialog], messages: [line(2, "Meet at ten")], users: [sender], chats: [chat] };
         case "messages.getDialogFilters": return { _: "messages.dialogFilters", filters: [] };
@@ -681,11 +687,14 @@ it('reads, replies and reconnects through Telegram MTProto (spec/app/telegram/co
   }
   const base = new BaseTelegramClient({ apiId: 1, apiHash: "local", storage: new MemoryStorage(), disableUpdates: true,
     crypto: new WebCryptoProvider({ wasmInput: await WebAssembly.compile(Uint8Array.from(await readFile(wasm))) }),
-    network: { middlewares: [({ request }) => Promise.resolve(replyToRpc(request))] },
+    network: { middlewares: [...telegramNetwork(networkMiddlewares), ({ request }) => Promise.resolve(replyToRpc(request))] },
   });
   vi.spyOn(base.mt.network, "connect").mockResolvedValue(undefined);
   const client = new TelegramClient({ client: base, disableUpdates: true });
   try {
+    const sendCode = mtprotoRequest((abortSignal) => client.sendCode({ phone: "+9996621234", abortSignal }));
+    expect(await Effect.runPromise(Effect.flip(sendCode))).toMatchObject({ _tag: "RateLimited", retryAfter: 2 });
+    expect(loginRequests).toBe(1);
     const telegram = telegramMessages(() => Promise.resolve(client));
     const list = await Effect.runPromise(telegram.getDialogs("local-owner"));
     expect(list.dialogs[0]).toMatchObject({ peer_key: "chat:9", can_post: true });

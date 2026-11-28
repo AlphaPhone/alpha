@@ -115,6 +115,8 @@ pure def alwaysAuthScreensAreSensitive(s: Auth): bool =
 
 ### Opening sign-in moves to phone entry or QR login; phone submission respects FloodWait and takes the next ticket
 
+Telegram’s first flood-wait response sets the retry deadline, even for a short wait. The owner can submit again when that deadline passes.
+
 ```quint
 pure def canOpenSignIn(s: Auth): bool =
   (s.step == SignedOut or s.step == SessionExpired) and s.work == Idle

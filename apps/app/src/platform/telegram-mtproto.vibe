@@ -5,14 +5,26 @@ import { telegramMessages } from "./telegram-messages.vibe"
 
 module mtproto {
   import { appVersion, cloudApiOrigin } from "./build.ts"
-  import type { TelegramClient as SdkClient, User, tl as TelegramTypes } from "@mtcute/web"
+  import type { TelegramClient as SdkClient, RpcCallMiddleware, networkMiddlewares, User, tl as TelegramTypes } from "@mtcute/web"
   import { telegramUser, type TelegramSignInResult, type TelegramExportLoginTokenResult } from "./telegram.vibe"
 
+  const loginRequests = new Set<TelegramTypes.RpcMethod["_"]>([
+    "auth.sendCode", "auth.signIn", "auth.checkPassword", "account.getPassword", "auth.exportLoginToken", "auth.importLoginToken", "auth.acceptLoginToken",
+  ])
+
+  export function telegramNetwork(middlewares: typeof networkMiddlewares): RpcCallMiddleware[] {
+    return [
+      (ctx, next) => next(loginRequests.has(ctx.request._) ? { ...ctx, params: { ...ctx.params, floodSleepThreshold: 0 } } : ctx),
+      ...middlewares.basic(),
+    ]
+  }
+
   export async function openTransport(app: { id: number; hash: string }) {
-    const { TelegramClient, MemoryStorage, tl } = await import("@mtcute/web")
+    const { TelegramClient, MemoryStorage, networkMiddlewares, tl } = await import("@mtcute/web")
     const { LogManager } = await import("@mtcute/web/utils.js")
     const make = () => new TelegramClient({
       apiId: app.id, apiHash: app.hash, storage: new MemoryStorage(), logLevel: LogManager.OFF,
+      network: { middlewares: telegramNetwork(networkMiddlewares) },
       initConnectionOptions: { deviceModel: "Alpha Phone", appVersion: appVersion() },
     })
     type Pending = { client: SdkClient; id: string; qr?: Extract<TelegramExportLoginTokenResult, { kind: "Pending" }>; scanned: boolean; stopListening: () => void }
@@ -175,6 +187,7 @@ module mtproto {
   }
 }
 import { openTransport } from mtproto
+export { telegramNetwork } from mtproto
 
 /** The installed client's MTProto connection. Only its encrypted session can survive an app restart. */
 export const personalTelegram = Layer.unwrap(sync(() => {
