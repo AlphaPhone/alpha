@@ -27,6 +27,27 @@ export {
   type VoiceOverlayInspection,
 } from "./commands/alpha-next-emulator.ts";
 export {
+  buildGcpAospPlan,
+  isGcpAospAction,
+  renderGcpBootstrapScript,
+  type GcpAospAction,
+  type GcpAospFlags,
+  type GcpAospPlan,
+  type GcpAospReport,
+  type GcpMachineProfile,
+} from "./commands/alpha-next-gcp-aosp.ts";
+export {
+  buildPixelDeploySteps,
+  evaluatePixelCompatibility,
+  parsePixelPackageSummary,
+  type InstalledCoreSummary,
+  type LocalSuiteApkSummary,
+  type PixelCompatibilityReport,
+  type PixelDeployFlags,
+  type PixelDeployReport,
+  type PixelDeviceInspection,
+} from "./commands/alpha-next-pixel-deploy.ts";
+export {
   buildWalkthroughPlan,
   type CapturedArtifact,
   type WalkthroughAction,

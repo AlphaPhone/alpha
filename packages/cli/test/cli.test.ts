@@ -7,11 +7,13 @@ import {
   REQUIRED_CORE_COMPONENTS,
   WALKTHROUGH_VIEWS,
   assertSafeEmulatorSerial,
+  buildPixelDeploySteps,
   buildStoryboardHtml,
   buildWalkthroughStoryboard,
   commands,
   cssLengthToDp,
   defineCommand,
+  evaluatePixelCompatibility,
   extractPackageUid,
   inspectAccessibilityDump,
   inspectControlTelemetry,
@@ -21,6 +23,8 @@ import {
   inspectThinAppLaunchLog,
   inspectVoiceAndOverlayDump,
   oklchToHex,
+  parsePixelPackageSummary,
+  renderGcpBootstrapScript,
   resolveAndroidAvdHome,
   resolveInstalledBlockedGuards,
   runCli,
@@ -29,6 +33,8 @@ import {
   validateSuiteManifest,
   type CliIo,
   type EmulatorE2eReport,
+  type GcpAospReport,
+  type PixelDeployReport,
   type SyncFontsReport,
   type SyncTokensReport,
   type ValidateReport,
@@ -155,10 +161,11 @@ describe("project CLI", () => {
     });
     const alphaNextHelp = helpPayload.data.commands[1];
     expect(alphaNextHelp).toBeDefined();
-    expect(alphaNextHelp.usage).toContain("sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough");
+    expect(alphaNextHelp.usage).toContain("sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough|gcp-aosp|pixel-deploy");
     expect(Object.keys(alphaNextHelp.flags).sort()).toEqual([
-      "aapt2", "apk-dir", "avd", "check", "dry-run", "out", "serial",
-      "suite", "target", "timeout", "tokens", "url", "with-fonts", "write",
+      "aapt2", "apk-dir", "avd", "bucket", "check", "dry-run", "execute",
+      "machine", "out", "project", "serial", "spot",
+      "suite", "target", "timeout", "tokens", "url", "with-fonts", "write", "zone",
     ]);
     expect(alphaNextHelp.flags.target?.short).toBe("t");
     expect(alphaNextHelp.flags.out?.short).toBe("o");
@@ -759,5 +766,121 @@ describe("project CLI", () => {
     expect(report.data.manifestValid).toBe(true);
     expect(report.data.securityPassed).toBe(true);
     expect(report.data.aapt2?.passed).toBe(true);
+  });
+
+  test("alpha-next gcp-aosp plan and bootstrap-script generate deterministic Pixel 10a build artifacts", async () => {
+    const planRec = createRecorder();
+    expect(await runCli({
+      argv: [
+        "alpha-next",
+        "gcp-aosp",
+        "plan",
+        "--project",
+        "alpha-demo",
+        "--zone",
+        "us-central1-a",
+        "--machine",
+        "c3-standard-44",
+        "--bucket",
+        "gs://alpha-demo-aosp",
+        "--spot",
+        "--json",
+      ],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: planRec.io,
+    })).toBe(0);
+    const planPayload = parseJson(planRec.out()) as { readonly ok: boolean; readonly data: GcpAospReport };
+    expect(planPayload.ok).toBe(true);
+    expect(planPayload.data.plan.aospTag).toBe("android-17.0.0_r1");
+    expect(planPayload.data.plan.deviceCodename).toBe("stallion");
+    expect(planPayload.data.plan.lunchTarget).toBe("alpha_stallion_phone-cp2a-userdebug");
+    expect(planPayload.data.plan.spot).toBe(true);
+    expect(planPayload.data.plan.gmsCompatRepos).toHaveLength(3);
+    expect(planPayload.data.plan.commands.provision).toContain("--provisioning-model=SPOT");
+
+    const script = renderGcpBootstrapScript(planPayload.data.plan);
+    expect(script).toContain("fetch-gmscompat.py");
+    expect(script).toContain("suite stage");
+    expect(script).toContain("alpha_stallion_phone-cp2a-userdebug");
+    expect(script).toContain("sudo shutdown -h now");
+
+    const scriptRec = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "gcp-aosp", "bootstrap-script", "--dry-run", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: scriptRec.io,
+    })).toBe(0);
+    const scriptPayload = parseJson(scriptRec.out()) as { readonly ok: boolean; readonly data: GcpAospReport };
+    expect(scriptPayload.ok).toBe(true);
+    expect(scriptPayload.data.bootstrapScript).toContain("android-17.0.0_r1");
+
+    const badAction = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "gcp-aosp", "invalid", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: badAction.io,
+    })).toBe(2);
+  });
+
+  test("alpha-next pixel-deploy parses installed Pixel state, flags cert/version mismatches, and stays read-only", async () => {
+    const parsedCore = parsePixelPackageSummary([
+      "Package [ai.alphacompute.alphaphone] (abc):",
+      "  codePath=/product/priv-app/AlphaPhone",
+      "  versionCode=703 minSdk=29 targetSdk=36",
+      "  versionName=0.1.0",
+      "  privateFlags=[ PRIVILEGED PRODUCT ]",
+      "  Signatures: [22:42:99:4D:2D:23:7F:98:D0:19:27:99:91:57:06:7D:F4:E2:49:5A:8F:98:04:51:AC:3D:E5:D4:06:42:58:4A]",
+    ].join("\n"));
+    expect(parsedCore.installed).toBe(true);
+    expect(parsedCore.versionCode).toBe(703);
+    expect(parsedCore.isSystemPrivApp).toBe(true);
+    expect(parsedCore.certSha256).toBe("2242994d2d237f98d01927999157067df4e2495a8f980451ac3de5d40642584a");
+
+    const device = {
+      serial: "67091JEA313850",
+      connected: true,
+      deviceCodename: "stallion",
+      displayId: "alpha_stallion_phone-userdebug 17 CP2A.260605.016 alpha.v703 test-keys",
+      buildType: "userdebug",
+      isUserdebug: true,
+      bootloaderUnlocked: true,
+      verityMode: "enforcing",
+      installedCore: parsedCore,
+    };
+    const localApks = {
+      coreApkPath: "apps/app/artifacts/launcher-debug.apk",
+      coreVersionCode: 121,
+      coreCertSha256: "227ddd0bf51116a69fb6f8f8ceb32ee2df9ed086471bceec4f9a26f48f31d5d5",
+      thinApkPaths: ["apps/app/android/suite/out/notes-debug.apk"],
+    };
+    const compat = evaluatePixelCompatibility(device, localApks);
+    expect(compat.directAdbInstallPossible).toBe(false);
+    expect(compat.overlayfsRemountAvailable).toBe(true);
+    expect(compat.certMismatch).toBe(true);
+    expect(compat.versionDowngrade).toBe(true);
+    expect(compat.minRequiredVersionCode).toBe(704);
+
+    const steps = buildPixelDeploySteps("67091JEA313850", localApks, compat);
+    expect(steps.some((step) => step.includes("disable-verity"))).toBe(true);
+    expect(steps.some((step) => step.includes("android.app.role.HOME com.android.launcher3"))).toBe(true);
+
+    const dryRun = createRecorder();
+    expect(await runCli({
+      argv: ["alpha-next", "pixel-deploy", "--serial", "nonexistent-device-000", "--dry-run", "--json"],
+      commands,
+      rootDir: templateRoot,
+      cwd: templateRoot,
+      io: dryRun.io,
+    })).toBe(0);
+    const payload = parseJson(dryRun.out()) as { readonly ok: boolean; readonly data: PixelDeployReport };
+    expect(payload.ok).toBe(true);
+    expect(payload.data.mode).toBe("dry-run");
+    expect(payload.data.executed).toBe(false);
   });
 });

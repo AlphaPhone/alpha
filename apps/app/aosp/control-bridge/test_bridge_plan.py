@@ -230,6 +230,18 @@ public final class BridgePolicyTest {{
         check(!AlphaControlBridgeService.CAPTURE_SECURE_LAYERS, "secure layers hardcoded false");
         check("{expected_signer}".equals(toHex(AlphaControlBridgeService.ALPHA_SIGNER_SHA256)),
                 "signer digest matches release-signer.json");
+        check(AlphaControlBridgeService.ALPHA_DEBUG_SIGNER_HEX.equals(
+                toHex(AlphaControlBridgeService.decodeHexDigest(
+                        AlphaControlBridgeService.ALPHA_DEBUG_SIGNER_HEX))),
+                "debug signer hex decodes cleanly");
+        check(AlphaControlBridgeService.isAuthorizedSigner(false, true, false),
+                "user build accepts release signer");
+        check(!AlphaControlBridgeService.isAuthorizedSigner(false, false, true),
+                "user build strictly rejects debug signer");
+        check(AlphaControlBridgeService.isAuthorizedSigner(true, false, true),
+                "userdebug build accepts debug signer");
+        check(!AlphaControlBridgeService.isAuthorizedSigner(true, false, false),
+                "userdebug build rejects unknown signer");
 
         String talkback = "com.google.android.marvin.talkback/.TalkBackService";
         String alpha = AlphaControlBridgeService.ALPHA_ACCESSIBILITY_COMPONENT;

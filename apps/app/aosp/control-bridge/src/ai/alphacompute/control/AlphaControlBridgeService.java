@@ -11,6 +11,7 @@ import android.graphics.Bitmap;
 import android.hardware.HardwareBuffer;
 import android.hardware.input.InputManagerGlobal;
 import android.os.Binder;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.InputEventInjectionSync;
 import android.os.ParcelFileDescriptor;
@@ -73,6 +74,13 @@ public final class AlphaControlBridgeService extends Service {
         (byte) 0x8b, (byte) 0x1d, (byte) 0xe4, (byte) 0xff,
         (byte) 0xae, (byte) 0x04, (byte) 0x45, (byte) 0xed,
     };
+
+    /**
+     * SHA-256 certificate digest of the development signer permitted exclusively on
+     * {@code userdebug}/{@code eng} builds ({@code Build.IS_DEBUGGABLE}).
+     */
+    static final String ALPHA_DEBUG_SIGNER_HEX =
+            "227ddd0bf51116a69fb6f8f8ceb32ee2df9ed086471bceec4f9a26f48f31d5d5";
 
     /** Hardcoded guarantee that FLAG_SECURE and DRM layers are never captured. */
     static final boolean CAPTURE_SECURE_LAYERS = false;
@@ -263,12 +271,61 @@ public final class AlphaControlBridgeService extends Service {
         if (!isSystem || isSuspended) {
             throw new SecurityException("Alpha package must be an active system app");
         }
+        final boolean matchesReleaseCert = pm.hasSigningCertificate(
+                ALPHA_PACKAGE, ALPHA_SIGNER_SHA256, PackageManager.CERT_INPUT_SHA256);
+        final boolean isDebuggableBuild = isDebuggableBuild();
+        final boolean matchesDebugCert = isDebuggableBuild
+                && pm.hasSigningCertificate(
+                        ALPHA_PACKAGE,
+                        decodeHexDigest(ALPHA_DEBUG_SIGNER_HEX),
+                        PackageManager.CERT_INPUT_SHA256);
         if (pkgInfo.signingInfo == null
                 || pkgInfo.signingInfo.hasMultipleSigners()
-                || !pm.hasSigningCertificate(
-                        ALPHA_PACKAGE, ALPHA_SIGNER_SHA256, PackageManager.CERT_INPUT_SHA256)) {
+                || !isAuthorizedSigner(isDebuggableBuild, matchesReleaseCert, matchesDebugCert)) {
             throw new SecurityException("Alpha signing certificate verification failed");
         }
+    }
+
+    /**
+     * Returns true only when the running OS build is a debuggable {@code userdebug} or
+     * {@code eng} image and {@code Build.IS_DEBUGGABLE} is true (fails closed on {@code user}
+     * builds or if the hidden field is unavailable).
+     */
+    static boolean isDebuggableBuild() {
+        if (!"userdebug".equals(Build.TYPE) && !"eng".equals(Build.TYPE)) {
+            return false;
+        }
+        try {
+            return Build.class.getField("IS_DEBUGGABLE").getBoolean(null);
+        } catch (ReflectiveOperationException ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Authorizes the release signer unconditionally and the debug signer solely when
+     * {@code isDebuggableBuild} is true; {@code user} builds accept only the release signer.
+     */
+    static boolean isAuthorizedSigner(
+            boolean isDebuggableBuild, boolean matchesReleaseCert, boolean matchesDebugCert) {
+        return matchesReleaseCert || (isDebuggableBuild && matchesDebugCert);
+    }
+
+    /** Decodes a 64-character lowercase hexadecimal SHA-256 digest into 32 bytes. */
+    static byte[] decodeHexDigest(String hex) {
+        if (hex == null || hex.length() != 64) {
+            throw new IllegalArgumentException("Expected 64-char SHA-256 hex digest");
+        }
+        final byte[] out = new byte[32];
+        for (int index = 0; index < 32; index++) {
+            final int hi = Character.digit(hex.charAt(index * 2), 16);
+            final int lo = Character.digit(hex.charAt(index * 2 + 1), 16);
+            if (hi < 0 || lo < 0) {
+                throw new IllegalArgumentException("Invalid hex digit in SHA-256 digest");
+            }
+            out[index] = (byte) ((hi << 4) | lo);
+        }
+        return out;
     }
 
     /** Returns true only when keyguard is dismissed and the user storage is unlocked. */

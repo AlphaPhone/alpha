@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/app/image/index.md, "Story: Keep the phone and messages on Alpha's phone"; spec/app/image/index.md, "Story: Let a handed-over phone update its launcher on its own"; spec/app/image/index.md, "Story: Update an Alpha Pixel by cable, and get back"; spec/app/image/index.md, "Story: Sign Alpha's releases with one key"; spec/release/os.md, "Story: Enrol the image's updater"; spec/release/os.md, "Story: Update an image by hand"; spec/release/os.md, "Story: Recover an image"; spec/release/os.md, "Story: Run the drills"; spec/release/os.md, "Enrolment is staged only with exactly the pinned profile, and staged disabled"; spec/release/os.md, "A drill's result is recorded by the release owner only once that drill has been run, and a failed drill takes back physical recovery and turns the updater off"
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,7 +45,17 @@ const SUITE_REGISTRY = "android/suite/apps.json";
 const SUITE_CONTROL_BRIDGE_DIR = "aosp/control-bridge";
 const SUITE_SANDBOXED_PLAY_DIR = "aosp/sandboxed-play";
 const SUITE_LAUNCHER3_DIR = "aosp/launcher3";
+const SUITE_BRANDING_DIR = "aosp/branding";
 const SUITE_BRANDING_MAKEFILE = "aosp/branding/branding.mk";
+const ALPHA_NEXT_ROLES_OVERLAY_MODULE = "AlphaNextRolesOverlay";
+const ALPHA_NEXT_DEFAULT_ROLES: Readonly<Record<string, string>> = {
+  HOME: "com.android.launcher3",
+  ASSISTANT: "ai.alphacompute.alphaphone/ai.alphacompute.alphaphone.overlay.AlphaVoiceInteractionService",
+  DIALER: "ai.alphacompute.phone",
+  SMS: "ai.alphacompute.messages",
+  BROWSER: "ai.alphacompute.browser",
+  NOTES: "ai.alphacompute.notes",
+};
 const FORBIDDEN_BINARY_EXTENSIONS = new Set([".apk", ".apex", ".jar", ".dex", ".so", ".vdex", ".odex"]);
 const ANDROID_PACKAGE_ID = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
 const HEX_40 = /^[0-9a-f]{40}$/;
@@ -364,12 +374,11 @@ const DRILLS: Readonly<Record<string, Os.Drill>> = {
 
 /** The profile the image's enrolment stages: the pilot enrolment's manifest, hosts, product, device and certificate, with the channel's verified-boot key. */
 function enrolledProfile(): Os.Profile {
-  const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean; readonly allowDowngrade?: boolean };
-  const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string };
+  const pilot = json(ENROLLMENT) as { readonly manifestUrl: string; readonly hosts: readonly string[]; readonly product: string; readonly device: string; readonly otaCertificateSha256: string; readonly rotatePlatformOrAVBKeys: boolean; readonly wipeData: boolean };
+  const channel = json(CHANNEL) as { readonly avbPublicKeySha256: string; readonly downgradeAllowed: boolean };
   return {
     manifest: pilot.manifestUrl, hosts: pilot.hosts.join(" "), product: pilot.product, device: pilot.device,
-    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData,
-    downgrade: pilot.allowDowngrade ?? false,
+    certificate: pilot.otaCertificateSha256, avb: channel.avbPublicKeySha256, rotate: pilot.rotatePlatformOrAVBKeys, wipe: pilot.wipeData, downgrade: channel.downgradeAllowed,
   };
 }
 
@@ -578,6 +587,18 @@ function signerBytesInSource(source: string, expectedHex: string): boolean {
   return bytes.length === 32 && bytes.join("") === expectedHex.toLowerCase();
 }
 
+function checkModuleFiles(
+  label: string,
+  requiredFiles: readonly string[],
+  enabled: boolean,
+): { readonly present: boolean; readonly problems: string[] } {
+  const missing = requiredFiles.filter((relative) => !existsSync(place(relative)));
+  return {
+    present: missing.length === 0,
+    problems: enabled ? missing.map((relative) => `${label} missing ${relative}`) : [],
+  };
+}
+
 function validateControlBridgeModule(enabled: boolean, signerHex: string): { readonly status: SuiteModuleStatus; readonly problems: readonly string[] } {
   const makefile = `${SUITE_CONTROL_BRIDGE_DIR}/control-bridge.mk`;
   const blueprint = `${SUITE_CONTROL_BRIDGE_DIR}/Android.bp`;
@@ -591,23 +612,17 @@ function validateControlBridgeModule(enabled: boolean, signerHex: string): { rea
     `${SUITE_CONTROL_BRIDGE_DIR}/sepolicy/alpha_control_bridge.te`,
     `${SUITE_CONTROL_BRIDGE_DIR}/sepolicy/seapp_contexts`,
   ];
-  const present = requiredFiles.every((relative) => existsSync(place(relative)));
-  const problems: string[] = [];
-  if (enabled) {
-    for (const relative of requiredFiles) {
-      if (!existsSync(place(relative))) problems.push(`control-bridge missing ${relative}`);
+  const { present, problems } = checkModuleFiles("control-bridge", requiredFiles, enabled);
+  if (enabled && present) {
+    const manifest = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/AndroidManifest.xml`), "utf8");
+    if (manifest.includes("android.permission.INTERNET")) problems.push("control-bridge manifest must not request INTERNET");
+    const sepolicy = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/sepolicy/alpha_control_bridge.te`), "utf8");
+    if (!sepolicy.includes("neverallow alpha_control_bridge") || sepolicy.includes("net_domain(")) {
+      problems.push("control-bridge sepolicy must deny network sockets via neverallow");
     }
-    if (present) {
-      const manifest = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/AndroidManifest.xml`), "utf8");
-      if (manifest.includes("android.permission.INTERNET")) problems.push("control-bridge manifest must not request INTERNET");
-      const sepolicy = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/sepolicy/alpha_control_bridge.te`), "utf8");
-      if (!sepolicy.includes("neverallow alpha_control_bridge") || sepolicy.includes("net_domain(")) {
-        problems.push("control-bridge sepolicy must deny network sockets via neverallow");
-      }
-      const service = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/src/ai/alphacompute/control/AlphaControlBridgeService.java`), "utf8");
-      if (!service.includes("CAPTURE_SECURE_LAYERS = false")) problems.push("control-bridge must hardcode CAPTURE_SECURE_LAYERS = false");
-      if (!signerBytesInSource(service, signerHex)) problems.push("control-bridge ALPHA_SIGNER_SHA256 does not match release-signer.json");
-    }
+    const service = readFileSync(place(`${SUITE_CONTROL_BRIDGE_DIR}/src/ai/alphacompute/control/AlphaControlBridgeService.java`), "utf8");
+    if (!service.includes("CAPTURE_SECURE_LAYERS = false")) problems.push("control-bridge must hardcode CAPTURE_SECURE_LAYERS = false");
+    if (!signerBytesInSource(service, signerHex)) problems.push("control-bridge ALPHA_SIGNER_SHA256 does not match release-signer.json");
   }
   return {
     status: {
@@ -636,12 +651,8 @@ function validateSandboxedPlayModule(enabled: boolean): { readonly status: Suite
     `${SUITE_SANDBOXED_PLAY_DIR}/installer/src/ai/alphacompute/playinstaller/PlayPackageVerifier.java`,
     `${SUITE_SANDBOXED_PLAY_DIR}/installer/src/ai/alphacompute/playinstaller/AlphaPlayInstallerService.java`,
   ];
-  const present = requiredFiles.every((relative) => existsSync(place(relative)));
-  const problems: string[] = [];
+  const { present, problems } = checkModuleFiles("sandboxed-play", requiredFiles, enabled);
   if (enabled) {
-    for (const relative of requiredFiles) {
-      if (!existsSync(place(relative))) problems.push(`sandboxed-play missing ${relative}`);
-    }
     for (const file of walkFiles(place(SUITE_SANDBOXED_PLAY_DIR))) {
       const lower = file.toLowerCase();
       if ([...FORBIDDEN_BINARY_EXTENSIONS].some((suffix) => lower.endsWith(suffix))) {
@@ -740,27 +751,31 @@ function renderSuiteMakefile(
   apps: readonly SuiteAppEntry[],
   modules: { readonly launcher3: SuiteModuleStatus; readonly controlBridge: SuiteModuleStatus; readonly sandboxedPlay: SuiteModuleStatus },
 ): string {
+  const packages = [
+    ...apps.map((entry) => suiteModuleName(entry)),
+    ALPHA_NEXT_ROLES_OVERLAY_MODULE,
+  ];
   const lines: string[] = [
     `# Alpha NEXT multi-APK suite product configuration (${target}).`,
     "alpha_suite_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))",
     "PRODUCT_PACKAGES += \\",
-    ...apps.map((entry, index) => `    ${suiteModuleName(entry)}${index + 1 < apps.length ? " \\" : ""}`),
+    ...packages.map((name, index) => `    ${name}${index + 1 < packages.length ? " \\" : ""}`),
   ];
   if (existsSync(place(SUITE_BRANDING_MAKEFILE))) {
-    lines.push(`$(call inherit-product, apps/app/${SUITE_BRANDING_MAKEFILE})`);
+    lines.push("$(call inherit-product, $(alpha_suite_dir)/branding/branding.mk)");
   }
   if (modules.launcher3.enabled) {
     if (modules.launcher3.makefile !== null) {
-      lines.push(`$(call inherit-product, apps/app/${modules.launcher3.makefile})`);
+      lines.push("$(call inherit-product, $(alpha_suite_dir)/launcher3/launcher3.mk)");
     } else {
       lines.push("PRODUCT_PACKAGES += AlphaLauncher3Overlay AlphaPartnerCustomization");
     }
   }
   if (modules.controlBridge.enabled && modules.controlBridge.makefile !== null) {
-    lines.push(`$(call inherit-product, apps/app/${modules.controlBridge.makefile})`);
+    lines.push("$(call inherit-product, $(alpha_suite_dir)/control-bridge/control-bridge.mk)");
   }
   if (modules.sandboxedPlay.enabled && modules.sandboxedPlay.makefile !== null) {
-    lines.push(`$(call inherit-product, apps/app/${modules.sandboxedPlay.makefile})`);
+    lines.push("$(call inherit-product, $(alpha_suite_dir)/sandboxed-play/sandboxed-play.mk)");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -768,17 +783,111 @@ function renderSuiteMakefile(
 function renderSuiteBlueprint(apps: readonly SuiteAppEntry[]): string {
   const blocks = [
     'package {\n    default_applicable_licenses: ["Android-Apache-2.0"],\n}',
-    ...apps.map((entry) => [
-      "android_app_import {",
-      `    name: "${suiteModuleName(entry)}",`,
-      `    apk: "apks/${entry.id}.apk",`,
-      "    presigned: true,",
-      "    product_specific: true,",
-      ...(suiteAppIsPrivileged(entry) ? ["    privileged: true,"] : []),
-      "}",
-    ].join("\n")),
+    ...apps.map((entry) => {
+      const isCore = entry.id === "core";
+      return [
+        "android_app_import {",
+        `    name: "${suiteModuleName(entry)}",`,
+        `    apk: "apks/${entry.id}.apk",`,
+        "    presigned: true,",
+        "    product_specific: true,",
+        ...(suiteAppIsPrivileged(entry) ? ["    privileged: true,"] : []),
+        ...(isCore
+          ? [
+            "    preprocessed: true,",
+            "    dex_preopt: {",
+            "        enabled: false,",
+            "    },",
+            "    required: [",
+            `        "${ALPHA_NEXT_ROLES_OVERLAY_MODULE}",`,
+            "    ],",
+          ]
+          : []),
+        "}",
+      ].join("\n");
+    }),
   ];
   return `${blocks.join("\n\n")}\n`;
+}
+
+function writeAlphaNextRolesOverlay(outputDir: string): { readonly files: readonly string[]; readonly roles: Readonly<Record<string, string>> } {
+  const rolesDir = join(outputDir, "roles");
+  const valuesDir = join(rolesDir, "res", "values");
+  mkdirSync(valuesDir, { recursive: true });
+  const bp = [
+    'package {',
+    '    default_applicable_licenses: ["Android-Apache-2.0"],',
+    '}',
+    "",
+    "runtime_resource_overlay {",
+    `    name: "${ALPHA_NEXT_ROLES_OVERLAY_MODULE}",`,
+    '    manifest: "AndroidManifest.xml",',
+    "    product_specific: true,",
+    '    resource_dirs: ["res"],',
+    "}",
+    "",
+  ].join("\n");
+  const manifestXml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
+    '    package="ai.alphacompute.alpha.overlay.roles">',
+    '    <overlay',
+    '        android:targetPackage="android"',
+    '        android:isStatic="true"',
+    '        android:priority="100" />',
+    "</manifest>",
+    "",
+  ].join("\n");
+  const configXml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    "<resources>",
+    `    <string name="config_defaultHomePackage" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.HOME}</string>`,
+    `    <string name="config_defaultAssistant" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.ASSISTANT}</string>`,
+    `    <string name="config_defaultDialer" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.DIALER}</string>`,
+    `    <string name="config_defaultSms" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.SMS}</string>`,
+    `    <string name="config_defaultBrowser" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.BROWSER}</string>`,
+    `    <string name="config_defaultNotes" translatable="false">${ALPHA_NEXT_DEFAULT_ROLES.NOTES}</string>`,
+    "</resources>",
+    "",
+  ].join("\n");
+  const bpPath = join(rolesDir, "Android.bp");
+  const manifestPath = join(rolesDir, "AndroidManifest.xml");
+  const configPath = join(valuesDir, "config.xml");
+  const jsonPath = join(rolesDir, "roles-overrides.json");
+  writeFileSync(bpPath, bp, { flag: "wx" });
+  writeFileSync(manifestPath, manifestXml, { flag: "wx" });
+  writeFileSync(configPath, configXml, { flag: "wx" });
+  writeFileSync(jsonPath, `${JSON.stringify({ schemaVersion: 1, roles: ALPHA_NEXT_DEFAULT_ROLES }, null, 2)}\n`, { flag: "wx" });
+  return {
+    files: [
+      "roles/Android.bp",
+      "roles/AndroidManifest.xml",
+      "roles/res/values/config.xml",
+      "roles/roles-overrides.json",
+    ],
+    roles: ALPHA_NEXT_DEFAULT_ROLES,
+  };
+}
+
+function copyDirectoryTreeClean(sourceDir: string, destinationDir: string): void {
+  cpSync(sourceDir, destinationDir, {
+    recursive: true,
+    filter: (src) => {
+      const normalized = src.replaceAll("\\", "/");
+      return !normalized.includes("/__pycache__") && !normalized.endsWith(".pyc") && !normalized.endsWith("/.git");
+    },
+  });
+}
+
+function resolveStagedApkSource(apksDir: string, appId: string): string | undefined {
+  const candidates = appId === "core"
+    ? ["core.apk", "launcher-debug.apk", "alpha-launcher-debug.apk", "ai.alphacompute.alphaphone.apk"]
+    : [`${appId}.apk`, `${appId}-debug.apk`, `ai.alphacompute.${appId}.apk`];
+  for (const name of candidates) {
+    const candidate = join(apksDir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function readReleaseSignerSha256(): string {
@@ -813,6 +922,14 @@ export function validateSuiteState(options: { readonly registryFile?: string; re
   };
 }
 
+const validateSuiteFor = (switches: ReadonlySet<string>, registryFile: string | undefined) => {
+  const selection = suiteModuleSelection(switches);
+  return validateSuiteState({
+    ...(registryFile === undefined ? {} : { registryFile }),
+    selection,
+  });
+};
+
 const suite = (argv: readonly string[]) => Effect.gen(function* () {
   const [subcommand, ...rest] = argv;
   switch (subcommand) {
@@ -821,11 +938,7 @@ const suite = (argv: readonly string[]) => Effect.gen(function* () {
         valued: ["registry"],
         switches: ["with-launcher3", "with-control-bridge", "with-sandboxed-play"],
       }));
-      const selection = suiteModuleSelection(found.switches);
-      const checked = yield* attempt(() => validateSuiteState({
-        ...(found.values.registry === undefined ? {} : { registryFile: found.values.registry }),
-        selection,
-      }));
+      const checked = yield* attempt(() => validateSuiteFor(found.switches, found.values.registry));
       return {
         valid: true,
         schemaVersion: checked.registry.schemaVersion,
@@ -849,29 +962,20 @@ const suite = (argv: readonly string[]) => Effect.gen(function* () {
         return yield* new UsageError({ message: "--target must be cuttlefish or pixel10a" });
       }
       const target: Target = targetName === "pixel10a" ? "Pixel10a" : "Cuttlefish";
-      const selection = suiteModuleSelection(found.switches);
-      const checked = yield* attempt(() => validateSuiteState({
-        ...(found.values.registry === undefined ? {} : { registryFile: found.values.registry }),
-        selection,
-      }));
+      const checked = yield* attempt(() => validateSuiteFor(found.switches, found.values.registry));
       if (existsSync(output)) {
         return yield* new UsageError({ message: `--output ${output} already exists; provide a new directory` });
       }
       const apksDir = found.values["apks-dir"];
-      const stagedApps = yield* attempt(() => {
+      const resolvedApks = yield* attempt(() => {
         const missing: string[] = [];
         const rows = checked.registry.apps.map((entry) => {
-          const apkFile = apksDir === undefined ? undefined : join(apksDir, `${entry.id}.apk`);
-          if (apkFile !== undefined && !existsSync(apkFile)) missing.push(`missing APK ${apkFile}`);
+          const apkFile = apksDir === undefined ? undefined : resolveStagedApkSource(apksDir, entry.id);
+          if (apksDir !== undefined && apkFile === undefined) missing.push(`missing APK for ${entry.id} in ${apksDir}`);
           return {
-            id: entry.id,
-            moduleName: suiteModuleName(entry),
-            applicationId: entry.applicationId,
-            surface: entry.surface,
-            privileged: suiteAppIsPrivileged(entry),
-            imageOnly: entry.imageOnly,
-            defaultRoles: entry.defaultRoles,
-            apkSha256: apkFile !== undefined && existsSync(apkFile) ? sha256File(apkFile) : null,
+            entry,
+            apkFile,
+            apkSha256: apkFile !== undefined ? sha256File(apkFile) : null,
           };
         });
         if (missing.length > 0) {
@@ -879,19 +983,64 @@ const suite = (argv: readonly string[]) => Effect.gen(function* () {
         }
         return rows;
       });
+      const stagedApps = resolvedApks.map(({ entry, apkSha256 }) => ({
+        id: entry.id,
+        moduleName: suiteModuleName(entry),
+        applicationId: entry.applicationId,
+        surface: entry.surface,
+        privileged: suiteAppIsPrivileged(entry),
+        preprocessedNative: entry.id === "core",
+        imageOnly: entry.imageOnly,
+        defaultRoles: entry.defaultRoles,
+        apkSha256,
+      }));
       const makefileContent = renderSuiteMakefile(target, checked.registry.apps, checked.modules);
       const blueprintContent = renderSuiteBlueprint(checked.registry.apps);
+      const stagedDirs: string[] = [];
+      const rolesOverlay = yield* attempt(() => {
+        mkdirSync(output, { recursive: true });
+        if (existsSync(place(SUITE_BRANDING_DIR))) {
+          copyDirectoryTreeClean(place(SUITE_BRANDING_DIR), join(output, "branding"));
+          stagedDirs.push("branding");
+        }
+        if (checked.modules.launcher3.enabled && existsSync(place(SUITE_LAUNCHER3_DIR))) {
+          copyDirectoryTreeClean(place(SUITE_LAUNCHER3_DIR), join(output, "launcher3"));
+          stagedDirs.push("launcher3");
+        }
+        if (checked.modules.controlBridge.enabled && existsSync(place(SUITE_CONTROL_BRIDGE_DIR))) {
+          copyDirectoryTreeClean(place(SUITE_CONTROL_BRIDGE_DIR), join(output, "control-bridge"));
+          stagedDirs.push("control-bridge");
+        }
+        if (checked.modules.sandboxedPlay.enabled && existsSync(place(SUITE_SANDBOXED_PLAY_DIR))) {
+          copyDirectoryTreeClean(place(SUITE_SANDBOXED_PLAY_DIR), join(output, "sandboxed-play"));
+          stagedDirs.push("sandboxed-play");
+        }
+        if (apksDir !== undefined) {
+          const apksOut = join(output, "apks");
+          mkdirSync(apksOut, { recursive: true });
+          for (const item of resolvedApks) {
+            if (item.apkFile !== undefined) {
+              copyFileSync(item.apkFile, join(apksOut, `${item.entry.id}.apk`));
+            }
+          }
+          stagedDirs.push("apks");
+        }
+        const roles = writeAlphaNextRolesOverlay(output);
+        stagedDirs.push("roles");
+        return roles;
+      });
       const manifest = {
         schemaVersion: 1,
         target,
         registrySha256: checked.registrySha256,
         signerSha256: checked.signerSha256,
         modules: checked.modules,
+        stagedDirectories: stagedDirs,
+        roleOverrides: rolesOverlay.roles,
         apps: stagedApps,
         claims: "suite staging only: not an image build, a boot, an update or acceptance",
       };
       yield* attempt(() => {
-        mkdirSync(output, { recursive: true });
         writeFileSync(join(output, "alpha-suite.mk"), makefileContent, { flag: "wx" });
         writeFileSync(join(output, "Android.bp"), blueprintContent, { flag: "wx" });
         writeFileSync(join(output, "suite-stage-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });

@@ -1,5 +1,7 @@
 import { defineCommand, type CliContext, type CommandResult } from "../runner.ts";
 import { runEmulatorE2e } from "./alpha-next-emulator.ts";
+import { isGcpAospAction, runGcpAosp, type GcpAospAction } from "./alpha-next-gcp-aosp.ts";
+import { runPixelDeploy } from "./alpha-next-pixel-deploy.ts";
 import { runSyncFonts, runSyncTokens } from "./alpha-next-tokens.ts";
 import { runManifest, runValidate } from "./alpha-next-validate.ts";
 import { isWalkthroughAction, runWalkthrough, type WalkthroughAction } from "./alpha-next-walkthrough.ts";
@@ -11,7 +13,9 @@ export type AlphaNextSubcommand =
   | "manifest"
   | "validate"
   | "emulator-e2e"
-  | "walkthrough";
+  | "walkthrough"
+  | "gcp-aosp"
+  | "pixel-deploy";
 
 interface AlphaNextFlags {
   readonly check: boolean;
@@ -19,6 +23,8 @@ interface AlphaNextFlags {
   readonly "with-fonts": boolean;
   readonly aapt2: boolean;
   readonly "dry-run": boolean;
+  readonly spot: boolean;
+  readonly execute: boolean;
   readonly target: string | undefined;
   readonly out: string | undefined;
   readonly url: string | undefined;
@@ -28,6 +34,10 @@ interface AlphaNextFlags {
   readonly avd: string | undefined;
   readonly serial: string | undefined;
   readonly timeout: string | undefined;
+  readonly project: string | undefined;
+  readonly zone: string | undefined;
+  readonly machine: string | undefined;
+  readonly bucket: string | undefined;
 }
 
 interface SubcommandSlot {
@@ -117,6 +127,41 @@ const SUBCOMMANDS: Readonly<Record<AlphaNextSubcommand, SubcommandSlot>> = {
       }, ctx);
     },
   },
+  "gcp-aosp": {
+    name: "gcp-aosp",
+    summary: "Plan, generate bootstrap scripts, provision, fetch, or tear down a GCP AOSP Pixel 10a build VM",
+    run: (flags, positionals, ctx) => {
+      const rawAction = positionals[1] ?? "plan";
+      if (!isGcpAospAction(rawAction)) {
+        return {
+          ok: false,
+          message: `Unknown gcp-aosp action "${rawAction}". Expected: plan, bootstrap-script, provision, fetch, or teardown.`,
+          exitCode: 2,
+        };
+      }
+      const action: GcpAospAction = rawAction;
+      return runGcpAosp({
+        action,
+        project: flags.project,
+        zone: flags.zone,
+        machine: flags.machine,
+        bucket: flags.bucket,
+        spot: flags.spot,
+        dryRun: flags["dry-run"],
+        out: flags.out,
+      }, ctx);
+    },
+  },
+  "pixel-deploy": {
+    name: "pixel-deploy",
+    summary: "Read-only preflight and deployment plan for installing Alpha NEXT onto a userdebug Pixel 10a",
+    run: (flags, _positionals, ctx) => runPixelDeploy({
+      serial: flags.serial,
+      apkDir: flags["apk-dir"],
+      dryRun: flags["dry-run"],
+      execute: flags.execute,
+    }, ctx),
+  },
 };
 
 function isAlphaNextSubcommand(value: string): value is AlphaNextSubcommand {
@@ -126,8 +171,8 @@ function isAlphaNextSubcommand(value: string): value is AlphaNextSubcommand {
 /** Project CLI command group for Alpha NEXT generators and verification levers. */
 export const alphaNextCommand = defineCommand({
   name: "alpha-next",
-  summary: "Alpha NEXT Android token/font sync, manifest, validation, emulator, and walkthrough levers",
-  usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough> [options]",
+  summary: "Alpha NEXT Android token/font sync, manifest, validation, emulator, walkthrough, GCP AOSP, and Pixel deploy levers",
+  usage: "pnpm cli alpha-next <sync-tokens|sync-fonts|manifest|validate|emulator-e2e|walkthrough|gcp-aosp|pixel-deploy> [options]",
   flags: {
     check: {
       kind: "boolean",
@@ -147,7 +192,15 @@ export const alphaNextCommand = defineCommand({
     },
     "dry-run": {
       kind: "boolean",
-      description: "Inspect toolchain and plan without booting an AVD or writing media outputs",
+      description: "Inspect toolchain and plan without booting an AVD, provisioning cloud VMs, or mutating devices",
+    },
+    spot: {
+      kind: "boolean",
+      description: "Use a GCP Spot/preemptible VM for gcp-aosp builds",
+    },
+    execute: {
+      kind: "boolean",
+      description: "Explicit opt-in required before pixel-deploy performs any mutating device action",
     },
     target: {
       kind: "string",
@@ -157,7 +210,7 @@ export const alphaNextCommand = defineCommand({
     out: {
       kind: "string",
       short: "o",
-      description: "Override root output directory for generated resources or walkthrough artifacts",
+      description: "Override output path for generated resources, walkthrough artifacts, or GCP bootstrap script",
     },
     url: {
       kind: "string",
@@ -173,7 +226,7 @@ export const alphaNextCommand = defineCommand({
     },
     "apk-dir": {
       kind: "string",
-      description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e or walkthrough",
+      description: "Directory containing built AlphaCore and thin Alpha APKs for emulator-e2e, walkthrough, or pixel-deploy",
     },
     avd: {
       kind: "string",
@@ -181,11 +234,27 @@ export const alphaNextCommand = defineCommand({
     },
     serial: {
       kind: "string",
-      description: "Target ADB device serial for emulator-e2e or walkthrough",
+      description: "Target ADB device serial for emulator-e2e, walkthrough, or pixel-deploy",
     },
     timeout: {
       kind: "string",
       description: "Boot timeout in seconds for emulator-e2e or walkthrough (default: 180)",
+    },
+    project: {
+      kind: "string",
+      description: "GCP project ID for gcp-aosp VM provisioning",
+    },
+    zone: {
+      kind: "string",
+      description: "GCP compute zone for gcp-aosp (default: us-central1-a)",
+    },
+    machine: {
+      kind: "string",
+      description: "GCP machine type for gcp-aosp (default: c3-standard-44)",
+    },
+    bucket: {
+      kind: "string",
+      description: "GCS bucket URI (gs://...) for uploading built Pixel 10a AOSP artifacts",
     },
   },
   run: ({ flags, positionals }, ctx) => {
