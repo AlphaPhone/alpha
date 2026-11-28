@@ -1,6 +1,49 @@
 // spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "Story: Do something outside, once"
 import { type Route, feed, readJsonBody } from "./routes.ts";
 
+import type { HttpOptions } from "@capacitor/core";
+import deployments from "@repo/deployment/deployments.json" with { type: "json" };
+import type { Faked } from "./phone.ts";
+
+/** Android's browser and HTTP transport talking to the local Slack provider, with the phone's registered return address. */
+export function slackPhone(origin: string, options: { readonly beforeReturn?: () => void; readonly initialExpirySeconds?: number } = {}): Readonly<Record<string, Faked>> {
+  return {
+    AlphaSlackOAuth: () => ({
+      async authorize({ url }: { url: string }) {
+        const authorize = new URL(url);
+        if (authorize.origin !== "https://slack.com" || authorize.pathname !== "/oauth/v2/authorize") throw new Error("Unexpected consent address");
+        const consent = new URL(authorize.pathname + authorize.search, origin);
+        consent.searchParams.set("auto_approve", "1");
+        const answer = await fetch(consent, { redirect: "manual" });
+        const returned = new URL(answer.headers.get("location") ?? "");
+        if (returned.protocol !== "alphaphone:" || returned.host !== "slack" || returned.pathname !== "/oauth/callback") throw new Error("Unexpected phone callback");
+        options.beforeReturn?.();
+        return { state: returned.searchParams.get("state"), code: returned.searchParams.get("code"), error: "" };
+      },
+      async request(request: Omit<HttpOptions, "data"> & { data?: string }) {
+        const url = new URL(request.url);
+        if (url.pathname === "/.well-known/alpha-slack") {
+          if (url.origin !== deployments.production.cloud || request.headers?.authorization) throw new Error("Unexpected registration request");
+        } else if (url.pathname === "/api/slack/oauth" || url.pathname === "/api/slack/events/read") {
+          if (url.origin !== deployments.production.cloud || request.method !== "POST") throw new Error("Unexpected cloud mailbox request");
+        } else if (url.origin !== "https://slack.com") throw new Error("Unexpected Slack host");
+        if (["/api/oauth.v2.access", "/api/slack/oauth"].includes(url.pathname) && !request.headers?.["content-type"]?.startsWith("application/x-www-form-urlencoded"))
+          throw new Error("Slack only accepts form fields at its OAuth endpoint");
+        const answer = await fetch(new URL(url.pathname + url.search, origin), {
+          method: request.method, headers: request.headers, body: request.data,
+        });
+        let data = await answer.text();
+        if (options.initialExpirySeconds !== undefined && ["/api/oauth.v2.access", "/api/slack/oauth"].includes(url.pathname) && new URLSearchParams(request.data).has("code")) {
+          const grant: unknown = JSON.parse(data);
+          if (grant && typeof grant === "object" && "authed_user" in grant && grant.authed_user && typeof grant.authed_user === "object")
+            data = JSON.stringify({ ...grant, authed_user: { ...grant.authed_user, expires_in: options.initialExpirySeconds } });
+        }
+        return { status: answer.status, headers: Object.fromEntries(answer.headers), data };
+      },
+    }),
+  };
+}
+
 export interface SlackScene {
   teamId: string;
   teamName: string;
@@ -41,6 +84,7 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
     is_private: ch.is_private === true, is_archived: false, is_muted: ch.is_muted === true,
   });
   return [
+    (request, url) => request.method === "GET" && url.pathname === "/.well-known/alpha-slack" ? Response.json({ clientId: "123.456" }) : undefined,
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/oauth.v2.access") return;
       return Response.json({
@@ -51,10 +95,10 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
       });
     },
     (request, url) => {
-      if (!url.pathname.startsWith("/api/")) return;
+      if (!url.pathname.startsWith("/api/") && url.pathname !== "/alpha/slack/events") return;
       const denied = authed(request);
       if (denied !== undefined) return denied;
-      if (request.method === "GET" && url.pathname === "/api/events.stream") {
+      if (request.method === "GET" && url.pathname === "/alpha/slack/events") {
         return feed((send) => {
           scene.listeners.add(send);
           return () => { scene.listeners.delete(send); };
@@ -133,13 +177,6 @@ export function slackRoutes(scene: SlackScene, now: () => number): Route[] {
             if (idx >= 0) ch.messages.splice(idx, 1);
           }
           return Response.json({ ok: true, channel, ts });
-        }
-        if (url.pathname === "/api/conversations.setMute") {
-          const channel = typeof body.channel === "string" ? body.channel : "";
-          const muted = body.muted === true;
-          const ch = scene.channels.find((one) => one.id === channel);
-          if (ch) ch.is_muted = muted;
-          return Response.json({ ok: true, channel, is_muted: muted });
         }
         if (url.pathname === "/api/conversations.open") {
           const ch = scene.channels[0] ?? { id: "D-DM", name: "dm", is_im: true, messages: [] };

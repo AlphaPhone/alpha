@@ -568,7 +568,8 @@ function words(value: NonNullable<ReturnType<typeof operation>>): { title: strin
     case "calendar_update":
     case "calendar_delete":
     case "calendar_named":
-    case "read_calendar_range": return calendarOperationWords(value)
+    case "read_calendar_range":
+    case "calendar_availability": return calendarOperationWords(value)
     case "phone_keypad": return { title: "Open the keypad", detail: value.number ?? "Phone" }
     case "phone_dial": return { title: "Open the phone dialer", detail: value.target.kind === "number" ? value.target.number : phoneQuery(value) ?? "Phone" }
     case "phone_call": return { title: "Call", detail: value.target.kind === "number" ? value.target.number : phoneQuery(value) ?? "Phone" }

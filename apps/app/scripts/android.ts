@@ -2,7 +2,7 @@
 // spec/app/image/index.md, "Story: Stage Alpha into an image"; spec/agent/index.md, "Story: Build the pack only from the pinned eliza"; spec/agent/index.md, "The launch names the pack's pinned workflow worker, and the agent refuses any other with its configuration code"
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
 import { dirname, join, relative, resolve } from "node:path";
@@ -42,6 +42,14 @@ const JAVA_HOME_CANDIDATES = [
 const RELEASE_SIGNER_FILE = join(app, "aosp/signing/release-signer.json");
 const SIGN_IN_OWNED_PREFIXES = ["/api/public/", "/api/v1/api-keys/"];
 const UNSAFE_ZIP_ENTRY = /[*?[\]\\]|\0/;
+const publishedDelibes = {
+  filename: "delibes-8m-eses.gguf",
+  apk: "https://github.com/AlphaPhone/alpha/releases/download/app-stable-alphacompute/alpha-phone-114.apk",
+  apkBytes: 576_256_512,
+  offset: 485_778_460,
+  bytes: 31_275_328,
+  sha256: "3b635dc24a8952254066daad77ff64aa08368a8b5a689abf4be05bdf2b0afe51",
+};
 
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 const readJson = (file: string): unknown => JSON.parse(readFileSync(file, "utf8"));
@@ -158,7 +166,57 @@ function voiceRecord(directory: string) {
   return receipt.files.map(record);
 }
 
-function stageVoice(env: NodeJS.ProcessEnv) {
+/** Seed Eliza's cache with the verified, uncompressed Delibes model member in Alpha v114. */
+async function verifiedDelibesCache(module: string): Promise<string | undefined> {
+  const pin = record(record(readJson(join(module, "inputs.json"))).spanish);
+  const model = publishedDelibes;
+  if (pin.enabled !== true || pin.path !== `tts/paradee/${model.filename}` || pin.bytes !== model.bytes || pin.sha256 !== model.sha256) return undefined;
+
+  const cache = join(android, ".cache", "voice-models", model.sha256);
+  const target = join(cache, model.filename);
+  const cached = lstatSync(target, { throwIfNoEntry: false });
+  if (cached?.isFile() && cached.size === model.bytes && sha256(readFileSync(target)) === model.sha256) return cache;
+
+  const range = `${model.offset}-${model.offset + model.bytes - 1}`;
+  const response = await fetch(model.apk, {
+    headers: { Range: `bytes=${range}`, "Accept-Encoding": "identity" },
+    signal: AbortSignal.timeout(90_000),
+  });
+  const body = response.body;
+  if (response.status !== 206 || response.headers.get("content-range") !== `bytes ${range}/${model.apkBytes}` || body === null) {
+    await body?.cancel();
+    throw new Error("Alpha v114 did not return the exact Delibes model byte range");
+  }
+  const bytes = new Uint8Array(model.bytes);
+  let downloaded = 0;
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > bytes.byteLength - downloaded) throw new Error("The Delibes model exceeded its pinned size");
+      bytes.set(value, downloaded);
+      downloaded += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  if (downloaded !== model.bytes || sha256(bytes) !== model.sha256) throw new Error("The Delibes model does not match its pinned size and SHA-256");
+
+  mkdirSync(cache, { recursive: true });
+  const temporary = mkdtempSync(join(cache, ".partial-"));
+  try {
+    const pending = join(temporary, "model");
+    writeFileSync(pending, bytes);
+    renameSync(pending, target);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  return cache;
+}
+
+async function stageVoice(env: NodeJS.ProcessEnv) {
   const at = prepared();
   const module = join(at.root, "packages/os/android/local-inference");
   const engineLock = record(record(readJson(join(module, "engine.lock.json"))).engine);
@@ -175,8 +233,10 @@ function stageVoice(env: NodeJS.ProcessEnv) {
   }
   const directory = voiceDirectory();
   if (!existsSync(join(directory, "build-record.json"))) {
+    const modelCache = await verifiedDelibesCache(module);
     run(process.execPath, [
       join(module, "scripts/build-native.ts"), "--workspace", join(android, ".cache", "voice-work", expectedEngine), "--out", directory,
+      ...(modelCache === undefined ? [] : ["--model-cache", modelCache]),
     ], { env: { ...env, ELIZA_INFERENCE_ENGINE_DIR: engine } });
   }
   voiceRecord(directory);
@@ -404,7 +464,7 @@ export async function build(release: boolean) {
   const env = environment();
   refuseOn(inputProblems(env));
   run(process.execPath, [join(app, "scripts/licences.ts"), "--check"], { env });
-  const voice = stageVoice(env);
+  const voice = await stageVoice(env);
   buildPack();
   const runtime = await stageRuntime();
   buildWeb();

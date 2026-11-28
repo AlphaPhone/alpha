@@ -65,7 +65,7 @@ jobs:
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
       ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/28.2.13676358
       ANDROID_NDK_LATEST_HOME: /usr/local/lib/android/sdk/ndk/28.2.13676358
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
@@ -78,6 +78,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -116,6 +117,8 @@ jobs:
           pnpm --filter @repo/app android inputs
       - name: Build and verify the resident launcher candidate APKs
         env:
+          TELEGRAM_API_ID: ${{ vars.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           ELIZA_DEV_ALLOW_TEST_MOCKS: ""
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m"
         run: pnpm --filter @repo/app android build --release

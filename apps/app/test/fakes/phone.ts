@@ -185,7 +185,7 @@ function mailRoute(method: string, target: string): boolean {
  * headers a page may read and the body in base64; what it will not send it rejects with one of eliza's `CloudFailure`
  * codes, `mail-lease-upgrade-required` for a mail or calendar route on a phone signed in without a lease.
  */
-export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void, billing?: () => boolean): Faked {
+export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: MailLeaseScene, credential: () => string, opened?: (url: string) => void, billing?: () => boolean, googleSession?: () => boolean): Faked {
   return plugin<ElizaCloudPlugin>(() => ({
     async request({ method, target, headers, body, expectedCredentialId, expectedSessionCredentialId }: NativeCloudRequest) {
       if (!target.startsWith("/api/")) throw rejection("not-listed");
@@ -200,6 +200,7 @@ export function elizaCloud(cloud: Answering, signedIn: () => boolean, lease: Mai
         throw rejection("mail-lease-upgrade-required");
       }
       const connectingGoogle = method === "POST" && target === "/api/v1/eliza/google/connect/initiate";
+      if (connectingGoogle && googleSession !== undefined && !googleSession()) throw rejection("reauth-required");
       const bearer = connectingGoogle ? "signed-session" : mail ? "mail-lease" : expectedSessionCredentialId === undefined ? "device-key" : "billing-session";
       const response = await cloud(new Request(new URL(target, "http://cloud.phone"), { method, headers: { ...headers, authorization: `Bearer ${bearer}`, ...(body === undefined ? {} : { "content-type": "application/json" }) }, body })).catch(() => { throw rejection("network"); });
       const found = { etag: response.headers.get("etag"), contentType: response.headers.get("content-type"), retryAfter: response.headers.get("retry-after") };

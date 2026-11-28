@@ -189,6 +189,35 @@ pure def renderAccepted(problems: List[RenderProblem], namesElizaCloud: bool): b
 > operator reviewed, and to ask a phone to try again rather than serve
 > another.
 
+A phone built with Alpha’s own Telegram application registration verifies its numeric
+API ID at `GET /.well-known/alpha-telegram` before starting an MTProto sign-in.
+The Android build takes `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from its release
+configuration. The Cloud deployment takes only `TELEGRAM_API_ID` and returns 503
+until it is configured. The phone sends login codes and two-factor proofs directly to Telegram.
+The signed-in Alpha owner’s exported MTProto session stays in the phone’s secure store.
+
+With a verified profile, `GET /.well-known/alpha-slack` publishes the deployment's
+registered public Slack client ID. Its operator supplies `SLACK_CLIENT_ID`
+from the Alpha Slack app with PKCE enabled. The registered redirects are
+`alphaphone://slack/oauth/callback` for the launcher and
+`alphaphone://slack/oauth/standalone` for the standalone Slack app. An absent or malformed ID yields a retryable 503. For live workspace
+notices, the operator enables token rotation and the Slack Events API, subscribes
+on behalf of users to `message.channels`, `message.groups`, `message.im` and
+`message.mpim`, and registers the API host's `/api/slack/events` as the request
+URL. The operator supplies `SLACK_SIGNING_SECRET`, `SLACK_APP_ID` and an
+app-level `SLACK_APP_TOKEN` with `authorizations:read`. The API advertises
+`notifications: true` when those bindings are present. Alpha's PKCE exchange
+then passes through the Worker, which retains credential digests for the
+authorized human installation for the credential's lifetime, up to 30 days.
+The Worker validates Slack's signature and timestamp and acknowledges a callback
+once its message reference is saved. Background dispatch continues across
+pagination, rate limits and Worker restarts to resolve the individual
+installations entitled to the event. It
+queues up to 128 message references per recipient for an hour. A connected phone
+uses its own enrolled grant. The Worker rereads each message at Slack with that
+grant before returning it. A phone can connect directly to Slack when live
+notices have not been configured.
+
 ### The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry
 
 The profile is larger than a Worker variable may be, so the Worker's static

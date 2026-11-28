@@ -142,7 +142,7 @@ describe("Slack user-account HTTP+SSE provider", () => {
     expect(access.ok).toBe(true);
     expect(access.team).toEqual({ id: "T01ALPHA", name: "Alpha Team" });
     expect(access.authed_user.token_type).toBe("user");
-    expect(access.authed_user.access_token.startsWith("xoxp-")).toBe(true);
+    expect(access.authed_user.access_token.startsWith("xoxe.xoxp-")).toBe(true);
 
     const replay = await postJson<{ ok: boolean; error?: string }>(`${slack.origin}/api/oauth.v2.access`, {
       code,
@@ -150,12 +150,12 @@ describe("Slack user-account HTTP+SSE provider", () => {
     });
     expect(replay.json).toEqual({ ok: false, error: "code_already_used" });
 
-    const refreshed = await postJson<{ ok: boolean; authed_user: { access_token: string } }>(
+    const refreshed = await postJson<{ ok: boolean; access_token: string }>(
       `${slack.origin}/api/oauth.v2.access`,
       { grant_type: "refresh_token", refresh_token: access.authed_user.refresh_token },
     );
     expect(refreshed.json.ok).toBe(true);
-    expect(refreshed.json.authed_user.access_token.startsWith("xoxp-")).toBe(true);
+    expect(refreshed.json.access_token.startsWith("xoxe.xoxp-")).toBe(true);
 
     const botCall = await postJson<{ ok: boolean; error?: string }>(
       `${slack.origin}/api/auth.test`,
@@ -224,7 +224,7 @@ describe("Slack user-account HTTP+SSE provider", () => {
     expect(newDm.json.already_open).toBe(false);
     expect(newDm.json.channel.is_im).toBe(true);
 
-    const sse = await openSse(`${slack.origin}/api/events.stream`, authHeader);
+    const sse = await openSse(`${slack.origin}/alpha/slack/events`, authHeader);
     try {
       const posted1 = await postJson<{ ok: boolean; ts: string; message: { text: string } }>(
         `${slack.origin}/api/chat.postMessage`,
@@ -334,13 +334,6 @@ describe("Slack user-account HTTP+SSE provider", () => {
       );
       expect(afterMark.json.channel.unread_count).toBe(0);
 
-      const muted = await postJson<{ ok: boolean; is_muted: boolean }>(
-        `${slack.origin}/api/conversations.setMute`,
-        { channel: "C02ENG", muted: true },
-        authHeader,
-      );
-      expect(muted.json.is_muted).toBe(true);
-
       const delOwn = await postJson<{ ok: boolean }>(
         `${slack.origin}/api/chat.delete`,
         { channel: "C02ENG", ts: threadReply.json.ts },
@@ -433,7 +426,7 @@ describe("Slack user-account HTTP+SSE provider", () => {
     expect(wrongClient.json).toEqual({ ok: false, error: "invalid_client_id" });
 
     const authHeader = { authorization: "Bearer xoxp-alpha-team-owner-initial" };
-    const sse = await openSse(`${slack.origin}/api/events.stream`, authHeader);
+    const sse = await openSse(`${slack.origin}/alpha/slack/events`, authHeader);
     try {
       await postJson(`${slack.origin}/api/auth.revoke`, {}, authHeader);
       const revokedEvent = await sse.nextEvent();

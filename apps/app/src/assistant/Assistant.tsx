@@ -21,7 +21,7 @@ import { type Composer as Writing, type Event as ComposerEvent, Machine as Compo
 import { content, enabled as composerAllows, maxFiles, textLimit } from "../../gen/app__assistant__composer.ts";
 import { useMachine as useComposer } from "../../gen/app__assistant__composer.react.ts";
 import type { Machine as DockMachine } from "../../gen/app__assistant__dock.effect.vibe";
-import { browserFieldPull, composerLift, focused as dockFocused, isOpen as dockOpen, pill as dockPill, sent as dockSent } from "../../gen/app__assistant__dock.ts";
+import { browserFieldPull, composerLift, isOpen as dockOpen, pill as dockPill, sent as dockSent, touched as dockTouched } from "../../gen/app__assistant__dock.ts";
 import { useMachine as useDock } from "../../gen/app__assistant__dock.react.ts";
 import type { Machine as ReplyMachine } from "../../gen/app__assistant__reply.effect.vibe";
 import { live as replyLive, liveAddsToHistory } from "../../gen/app__assistant__reply.ts";
@@ -821,11 +821,16 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
   const textAsk = shell.state?.textAsk.tag === "TextAskVisit";
   const canvasMetrics = readCanvasMetrics(runtime);
   const lift = assistantDetent === "Typing" ? composerLift(true, canvasMetrics.lift, 0) : 0;
-  const raiseAll = (asks: ReturnType<typeof dockFocused>) => {
+  const raiseAll = (asks: ReturnType<typeof dockTouched>) => {
     for (const ask of asks) if (ask.tag === "Raise" && shell.can({ type: "raise", detent: ask.detent })) void shell.send({ type: "raise", detent: ask.detent });
   };
   const openSheet = () => raiseAll(dockSent(assistantDetent));
+  const touchedAsks = () => dockTouched(assistantDetent, heldDraft !== undefined);
   const revealComposer = () => {
+    if (heldDraft !== undefined) {
+      raiseAll(touchedAsks());
+      return;
+    }
     const typing = { type: "raise", detent: "Typing" } as const;
     if (!shell.can(typing)) return;
     if (dock.state?.tucked) void dock.send({ type: "putAway", now: untimed });
@@ -846,6 +851,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
       {(!onComms || open || leaving) && <AssistantConversation
         ref={sheetRef}
         data-alpha-dragging={live ? "true" : undefined}
+        data-alpha-typing={assistantDetent === "Typing" ? "" : undefined}
         voicePanel={voicePanel}
         detent={live && !onComms ? "sheet" : assistantDetent === "Full" ? "full" : assistantDetent === "Sheet" ? "sheet" : "bar"}
         underlay={underlay && !onComms ? currentView !== undefined && currentView !== "Browser" ? "pill" : "bar" : undefined}
@@ -928,7 +934,7 @@ export function Assistant({ runtime, messageActions, speech, canReadAloud = fals
             : !onComms && composer.can({ type: "attach", count: 1 }) ? () => {
               openLiveAttachments(runtime, attachments, board);
             } : undefined,
-          onFocusField: () => raiseAll(dockFocused(assistantDetent)),
+          onFocusField: () => raiseAll(touchedAsks()),
           onBlur: assistantDetent === "Typing" && !onComms ? (event) => {
             const next = event.relatedTarget;
             if (next instanceof Element && (event.currentTarget.contains(next) || next.closest("[role='menu'], [role='dialog'], [role='alertdialog']"))) return;

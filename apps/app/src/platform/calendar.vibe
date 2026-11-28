@@ -1,5 +1,6 @@
 // spec/app/calendar/index.md, "Story: Let Calendar read my phone's calendar"; spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/kit/permission.md, "Story: Ask for access"
 import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarList, AndroidCalendarSelection, CalendarClient, CalendarPick, CalendarRange } from "@elizaos/os-bridges"
+import type { AvailabilityReadRequest, ReadAnswer, SourcesAnswer } from "@elizaos/plugin-calendar-client"
 import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
 import { createShelf } from "../runtime/index.vibe"
 import { registered } from "./device.vibe"
@@ -7,6 +8,7 @@ import { registered } from "./device.vibe"
 module held {
   import { calendarClient } from "@elizaos/os-bridges"
   import type { AndroidCalendarEditorFields, AndroidCalendarHandoffEvent, AndroidCalendarInspection, AndroidCalendarPlugin, AndroidCalendarSelection, CalendarClient } from "@elizaos/os-bridges"
+  import type { AvailabilityReadRequest, ReadAnswer, SourcesAnswer } from "@elizaos/plugin-calendar-client"
   import type { WorkflowCalendarReadOperation } from "@elizaos/plugin-workflow-client"
   import { rendererDeletionClock } from "@elizaos/os-bridges"
   import { plugin as capacitorPlugin } from "./capacitor.ts"
@@ -20,7 +22,8 @@ module held {
    * The calls of eliza's `ElizaCalendar` plugin that its typed client does not name yet: a create under a creation
    * identity, which the plugin journals so that a lost answer is reconciled and never replayed, the same for an event
    * with an all-day span, a time zone or a repeat, its receipts, opening an event in Android Calendar, Android's own
-   * answer on access, the revisions of an event as the phone inspects it, and reviewed agent actions.
+   * answer on access, the revisions of an event as the phone inspects it, reviewed agent actions, and Alpha's own
+   * free or busy reads of the calendars the owner chose.
    */
   export interface Creations {
     checkPermissions(): Promise<{ calendar: string }>
@@ -29,6 +32,8 @@ module held {
     requestWorkflowReadAccess(): Promise<{ status: string }>
     workflowCalendars(): Promise<unknown>
     readWorkflowRange(input: Omit<WorkflowCalendarReadOperation, "type">): Promise<{ status: string; events?: unknown }>
+    availabilitySources(input: { timeZone: string }): Promise<SourcesAnswer>
+    readAvailability(input: AvailabilityReadRequest): Promise<ReadAnswer>
     open(input: { id: string; begin?: number; end?: number }): Promise<{ status: string }>
     save(input: AndroidCalendarEditorFields & { calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
     saveOptions(input: { event: OptionEvent; calendarId: string; creationId: string; separateCreation: boolean }): Promise<{ status: string; id?: string }>
@@ -159,6 +164,10 @@ export service PhoneCalendar {
   readAccess(): boolean!CalendarUnread
   /** The events of the calendars and dates a reviewed step names, no more than its limit, read while the phone is in front. */
   readRange(asked: RangeAsked): Ranged!CalendarUnread
+  /** The calendars the phone may read at free or busy level, for one availability check in its zone: names and accounts for the owner's sheet, and no event. */
+  availabilitySources(input: { readonly timeZone: string }): SourcesAnswer!CalendarUnread
+  /** The busy, free and tentative times of exactly the calendars `request` names, at the revisions the owner saw; none unless every one lives on this phone. */
+  readAvailability(request: AvailabilityReadRequest): ReadAnswer!CalendarUnread
 }
 
 const plugin = "ElizaCalendar"
@@ -281,6 +290,8 @@ export const phoneCalendar = Layer.effect(PhoneCalendar, effect {
       },
       catch: (cause) => new CalendarUnread({ cause }),
     }),
+    availabilitySources: (input: { readonly timeZone: string }) => !present ? fail(absent()) : tryPromise({ try: () => native().availabilitySources({ ...input }), catch: (cause) => new CalendarUnread({ cause }) }),
+    readAvailability: (request: AvailabilityReadRequest) => !present ? fail(absent()) : tryPromise({ try: () => native().readAvailability({ ...request }), catch: (cause) => new CalendarUnread({ cause }) }),
   }
 })
 
@@ -307,4 +318,6 @@ export const browserCalendar = Layer.succeed(PhoneCalendar, {
   cancelReview: () => Effect.void,
   readAccess: () => fail(absent()),
   readRange: () => fail(absent()),
+  availabilitySources: () => fail(absent()),
+  readAvailability: () => fail(absent()),
 })
