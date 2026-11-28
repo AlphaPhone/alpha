@@ -3,6 +3,7 @@
 import { ConversationRecord, TurnController, createRuntimeJsonClient, defineRoutes } from "@elizaos/agent"
 import { describe, expect, it } from "@effect/vitest"
 import { CleanupReceipt } from "@elizaos/plugin-notes-client"
+import { packagedWorkflowWorker } from "@repo/eliza-harness"
 import {
   calendarEdits, configurationExit, coreActions, entryCarried, gmailChanges, googleAdmitted, launchViews, loadList, packedPlugins, productPluginName, proposalsAdmitted, refusedActions,
   serviceAvailable, viewsAdmitted, walletKeysAllowed, workerAdmitted,
@@ -101,7 +102,7 @@ describe("Build the pack only from the pinned eliza", () => {
   // spec/agent/index.md, "A proposed device step goes through eliza's device-action module, and the phone says which steps it takes"
   // spec/agent/index.md, "The launch names Home and every Alpha app but Notes and Browser as a view the agent may show, by the id the phone opens it by"
   // spec/agent/index.md, "The agent changes the owner's mail and calendar through Google only where the launch consents, and the pack's host file consents to neither"
-  it("Build the pack only from the pinned eliza", async () => {
+  it("Build the pack only from the pinned eliza", () => {
     const built = manifest()
     const registered = built.actions.map(({ name }) => name)
     const { actions, plugins } = policy()
@@ -131,7 +132,7 @@ describe("Build the pack only from the pinned eliza", () => {
     expect(viewsAdmitted(host.views.map(({ id, label, path, aliases }) => ({ id, label, path, aliases: aliases ?? [] })))).toBe(true)
     expect(coreActions.every((name) => actions.allowed.includes(name))).toBe(true)
     expect(Object.values(actions.refused).every((reason) => reason.trim() !== "")).toBe(true)
-    expect(workerAdmitted((await pinnedWorker()).sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
+    expect(workerAdmitted(packagedWorkflowWorker().sha256, built.workflowWorkerSha256 ?? "")).toBe(true)
   })
 })
 

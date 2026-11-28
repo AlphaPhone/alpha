@@ -1621,7 +1621,7 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
   });
 
   // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"; spec/app/assistant/composer.md, "Story: Send what I wrote"
-  it("A restart before the message reached the agent puts it back in the field by itself, ahead of what was typed, for the owner to send once", async () => {
+  it("A restart without the send key in history holds the message until the owner puts it back in the field", async () => {
     const world = { ...scene(), phone: true };
     world.ask.holdPosts = "unheard";
     await diesMidSend(world, "Book the table");
@@ -1629,10 +1629,12 @@ describe('Keep what I am writing, settled without a word by the field (spec/app/
 
     delete world.ask.holdPosts;
     const { alpha, runtime } = await reopened(world);
-    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.editor.text && s.draft.sync === "Kept");
-    expect([composerText(), kept(world, dinner(world)), byTheField(), card(), world.ask.said]).toEqual(["Book the table", { revision: 3, text: "Book the table", sending: false }, [], [], []]);
+    await waitOut(alpha, 40000, () => inConversation("Put back in the field") !== undefined);
+    expect([composerText(), kept(world, dinner(world)).sending, card(), world.ask.said]).toEqual(["", true, ["This may already have been sent"], []]);
 
-    await sheet(alpha);
+    await drawn(() => (inConversation("Put back in the field") as HTMLButtonElement).click());
+    await until(alpha, runtime, Composer, (s) => !s.unsettled && s.draft.sync === "Kept");
+    expect([composerText(), kept(world, dinner(world)).sending, card()]).toEqual(["Book the table", false, []]);
     await press("Send");
     await drawn(() => vi.waitFor(() => expect(world.ask.said).toEqual(["Book the table"])));
   });

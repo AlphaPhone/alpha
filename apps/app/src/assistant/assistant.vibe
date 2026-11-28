@@ -1500,9 +1500,7 @@ effect function forgetSendKey(slot: DraftSlot): void!!KeyValueStore.KeyValueStor
 
 // spec/app/assistant/composer.md, "A message that may already have been sent is checked by itself, and what the read found settles it"
 /**
- * Settle the message under review by the send key kept beside its slot: arrived where the conversation holds the exact
- * message, or where the slot no longer holds the mark because the Alpha that marked it wrote over it; never recorded
- * where the whole conversation is read without it. Nothing settles where the key, the slot or the read cannot tell.
+ * Settle the message under review when history contains its exact send key or the slot has moved past its mark.
  */
 effect function keptCheck(): boolean!!(Agent | KeyValueStore.KeyValueStore | Talk | Composer.Machine) {
   const { board } = try Talk
@@ -1518,19 +1516,15 @@ effect function keptCheck(): boolean!!(Agent | KeyValueStore.KeyValueStore | Tal
       ? Option.getOrUndefined(Schema.decodeUnknownOption(sentUnder)(try (try KeyValueStore.KeyValueStore).get(sendKeyOf(slot))))
       : undefined
     if (!writtenOver && (kept === undefined || kept.revision !== held.revision || kept.length !== held.text.length)) return false
-    let recorded = true
     if (!writtenOver && kept !== undefined) {
       const record = board.known(before.binding.conversation)?.record
       if (record === undefined) return false
-      const { messages, hasMore } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(record.id)}/messages`), page())
-      if (findStoppedUserTurn(messages, kept.id as ClientMessageId) === undefined) {
-        if (hasMore !== false) return false
-        recorded = false
-      }
+      const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(record.id)}/messages`), page())
+      if (findStoppedUserTurn(messages, kept.id as ClientMessageId) === undefined) return false
     }
     const now = try machine.get()
-    if (!sameBinding(now.binding, before.binding) || now.draft.base !== before.draft.base || !Composer.canArrived(now, recorded)) return false
-    try Effect.uninterruptible(arrived(recorded))
+    if (!sameBinding(now.binding, before.binding) || now.draft.base !== before.draft.base || !Composer.canArrived(now, true)) return false
+    try Effect.uninterruptible(arrived(true))
     return !(try machine.get()).unsettled
   } catch () => false
 }
