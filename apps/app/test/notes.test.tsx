@@ -940,6 +940,7 @@ describe("Notes", () => {
       await control("Record voice note");
       await press("Record voice note");
       await until(at.alpha, at.runtime, Recorder, (state) => state.phase === "Recording" && state.capture > 0);
+      await rendered(() => expect(world.notes.tape.state).toBe("recording"));
     };
     const phase = (at: Opened) => at.runtime.runPromise(Effect.flatMap(Recorder, (machine) => machine.get())).then((state) => state.phase);
     const resumedBeforeThePhone = async (at: Opened) => {
@@ -1005,7 +1006,7 @@ describe("Notes", () => {
       .toEqual(["Voice noteDiscard0:00Paused Resume Stop recording", "Recovered recording", false]));
     await drawn(() => { world.notes.tape.state = "recording"; world.notes.tapeChanged(); });
     await until(fromNotification.alpha, fromNotification.runtime, Recorder, (state) => state.phase === "Recording" && state.capture > 0);
-    await control("Pause");
+    await rendered(() => expect(button(/^Pause$/)).toBeDefined());
     await later(fromNotification.alpha, 1000);
     await drawn(() => { world.notes.tape.state = "paused"; world.notes.tapeChanged(); });
     await until(fromNotification.alpha, fromNotification.runtime, Recorder, (state) => state.phase === "Paused");
