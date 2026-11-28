@@ -37,7 +37,7 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
  * its channel admits; `subscribeEvents` answers `{ id }`, then emits each event the agent publishes on the topic as
  * `agentEvent`, until `unsubscribeEvents`.
  */
-export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFails: () => boolean = () => false): Faked {
+export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFails: () => boolean = () => false, signedIn: () => boolean = () => true): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit, onUnplug) => {
     const calls = new Map<string, AbortController>();
     let state: "running" | "stopped" | "failed" = recovery === undefined ? "running" : "failed";
@@ -47,7 +47,9 @@ export function elizaAgent(agent: Answering, recovery?: RecoveryScene, abortFail
       for (const call of calls.values()) call.abort();
       calls.clear();
     });
-    const status = (): AgentStatus => state === "failed"
+    const status = (): AgentStatus => !signedIn()
+      ? { available: true, epoch, requestBodyLimit, state: "failed", failure: "credential" }
+      : state === "failed"
       ? { available: true, epoch, requestBodyLimit, state, failure: "storage" }
       : { available: true, epoch, requestBodyLimit, state };
     const set = (next: "running" | "stopped", bumpEpoch = false): Promise<AgentStatus> => {

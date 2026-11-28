@@ -25,7 +25,7 @@ import { alphaHostedDigests, workflowNoticesHost } from "./workflows.ts";
  */
 export function plugins(world: Scene, services: { readonly agent: Answering; readonly cloud: Answering }): Record<string, Faked> {
   return {
-    ElizaAgent: elizaAgent(services.agent, world.settings.recovery, () => world.platform.abortFails === true),
+    ElizaAgent: elizaAgent(services.agent, world.settings.recovery, () => world.platform.abortFails === true, () => world.signedIn),
     ElizaCloud: elizaCloud(services.cloud, () => world.signedIn, world.mailLease, () => world.voice.credentialId, (url) => {
       if (world.inbox.consent) world.inbox.consent.opened.push(url);
       else world.checkout?.opened.push(url);
